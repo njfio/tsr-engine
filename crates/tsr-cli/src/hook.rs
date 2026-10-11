@@ -141,8 +141,30 @@ fn args_digest(payload: &HookPayload) -> Hash {
     Hash::of(&refs)
 }
 
+thread_local! {
+    /// A pinned timestamp for the self-test harness. `recorded_at` is hashed into every event id
+    /// (`Event::new`), so a fixture can only be byte-reproducible if the clock is pinned. The
+    /// production path leaves this unset and uses the real wall clock.
+    static PINNED_CLOCK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` with the clock pinned to `stamp`, so every event it records gets a deterministic id.
+/// Used by the self-test harness; not used on the production path.
+pub fn with_pinned_clock<T>(stamp: &str, f: impl FnOnce() -> T) -> T {
+    PINNED_CLOCK.with(|c| *c.borrow_mut() = Some(stamp.to_string()));
+    let out = f();
+    PINNED_CLOCK.with(|c| *c.borrow_mut() = None);
+    out
+}
+
 /// The current wall-clock time as an RFC 3339 string (provenance only; ordering is seq).
+///
+/// If the clock is pinned (see [`with_pinned_clock`]) the pinned stamp is returned instead, which
+/// makes the self-test fixture reproducible.
 pub fn now_rfc3339() -> String {
+    if let Some(stamp) = PINNED_CLOCK.with(|c| c.borrow().clone()) {
+        return stamp;
+    }
     // No chrono dependency: seconds since the epoch, formatted as a fixed-width RFC 3339 UTC stamp.
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -476,6 +498,16 @@ pub fn record_forecast(
 /// sandboxed test run, a patch proposal, a forecast, a second run, a stop. It runs against a fresh
 /// store at `fixtures/m0/session.db` so it is reproducible and never touches the operator's store.
 pub fn selftest() -> anyhow::Result<std::path::PathBuf> {
+    // `recorded_at` is hashed into every event id, so the fixture is only reproducible if the
+    // clock is pinned. The production hook path is untouched and keeps real wall-clock time.
+    with_pinned_clock(SELFTEST_RECORDED_AT, selftest_inner)
+}
+
+/// The fixed provenance stamp the self-test fixture is recorded under. Any change to this value
+/// changes every event id in `fixtures/m0/session.events.jsonl`.
+pub const SELFTEST_RECORDED_AT: &str = "2026-01-01T00:00:00Z";
+
+fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     let fixture_dir = std::path::Path::new("fixtures/m0");
     std::fs::create_dir_all(fixture_dir)?;
     let db = fixture_dir.join("session.db");
