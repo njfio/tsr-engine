@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod note_cmd;
 pub mod reconcile_cmd;
 
 pub mod reconstruct {

@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 mod policy_cmd;
+use tsr_cli::note_cmd;
 use tsr_cli::reconcile_cmd;
 
 #[derive(Parser)]
@@ -57,6 +58,16 @@ enum Cmd {
     Policy {
         #[command(subcommand)]
         cmd: PolicyCmd,
+    },
+    /// Record the operator's experience note on a task (M2, B7).
+    Note {
+        task: String,
+        /// A short note on friction or trust; never reward truth.
+        #[arg(long)]
+        text: String,
+        /// The store holding the task's log.
+        #[arg(long, default_value = "tsr.db")]
+        store: String,
     },
     /// Label outcomes after close (M2, B5, B7).
     Review { task: String },
@@ -150,6 +161,7 @@ fn main() -> ExitCode {
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
+        Cmd::Note { task, text, store } => note_cmd::run(&task, &text, &store),
         Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
