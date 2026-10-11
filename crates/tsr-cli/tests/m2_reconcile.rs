@@ -617,7 +617,7 @@ fn d5_forecast_update_after_executed_is_refused_specifically() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
+fn d5_at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
     for crash in [
         CrashPoint::Intent,
         CrashPoint::Send,
@@ -657,10 +657,18 @@ fn at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
             ks[3] == "executed" || ks[3] == "unresolved",
             "settled at {crash:?}: {ks:?}"
         );
+        // D5: the log itself holds at most one Executed for the idempotent dispatch, at every
+        // crash point — the effect is never recorded twice.
+        let executed = ks.iter().filter(|k| *k == "executed").count();
+        assert!(
+            executed <= 1,
+            "at most one Executed per idempotent dispatch at {crash:?}: {ks:?}"
+        );
         if crash == CrashPoint::Intent {
             assert_eq!(res, Resolution::UnresolvedIdempotent);
         } else {
             assert_eq!(res, Resolution::Executed);
+            assert_eq!(executed, 1, "the effect is recorded once at {crash:?}");
         }
     }
 }
