@@ -355,6 +355,83 @@ a `tsr exec` PostToolUse, and the second run dispatching the candidate committed
 PreToolUse), and the frozen test goes green on the host. The fixture and the frozen test are
 byte-for-byte unchanged by this repair.
 
+## The real Claude Code session (operator, 2026-10-11)
+
+PRD §B11's M0 exit evidence is "one real session on a disposable copy of rts is fully reconstructed
+from the log; every command ran in the sandbox". Everything above it was the hook's own harness. This
+section is a real Claude Code session.
+
+**Setup.** `~/Developer/_orchestration/m0real-*.sh` on the operator's Mac.
+- **tsr:** built natively (release) from this branch.
+- **rts copy:** a fresh clone of rts at `d95314f`. Its `.claude/settings.json` holds only the four
+  `tsr hook` stages (SessionStart, PreToolUse, PostToolUse, Stop); the repository's own hooks were
+  replaced in the copy. A short TSR protocol section was prepended to its `CLAUDE.md`: forecast before
+  each Edit/Write and before the tests, and run tests only as `tsr exec -- …`.
+- **Store:** outside the copy (`TSR_DB=<base>/.tsr/tsr.db`, with `<copy>/.tsr` a symlink to it). The
+  sandbox mounts only the copy, so inside it the link dangles and the log is out of reach.
+- **Dependencies:** rts-core's test dependencies were prebuilt once, in the `tsr-rust:1.90` image at
+  the same bind path, so the in-session run works with `--offline` and `--network none`.
+- **Claude Code:** 2.1.225, headless (`claude -p`). Tools allowed: Read, Grep, Glob, Edit, Write,
+  `Bash(<base>/bin/tsr forecast:*)` and `Bash(<base>/bin/tsr exec:*)`.
+- **Model:** `claude-sonnet-5.5` through an Anthropic-compatible endpoint (cheaperinference), because
+  the Mac's own Claude Code login had expired.
+- **Task:** add a unit test for the edge cases of `detect_language_from_path` in rts-core, then run
+  the crate's library tests through the sandbox.
+
+**First attempt: the record failed the frozen test, honestly.** The session itself did everything
+right: inspect, forecast the edit, edit, forecast the test, run it through `tsr exec` (269 passed).
+The log still failed `every_gated_action_has_prior_forecast_at_same_state_version`:
+
+```
+13 proposed propose_patch · 14 forecast (state_version 15) · 15 unresolved "no exit code in the hook response"
+16 committed propose_patch                                   ← committed at 16, forecast for 15
+```
+
+`tsr forecast` is itself a Bash tool call. The hook recorded that call as a `Generate` turn, and its
+PostToolUse appended an `Unresolved` *between* the forecast and the commitment it names. The selftest
+never sent the hooks around its own forecast calls, which is why it passed. **Fix:** the hook records
+nothing before or after a `tsr forecast …` call, the same way it already records nothing after a
+`tsr exec -- …` call. The selftest now sends those two payloads exactly as Claude Code does (its
+frozen fixture is unchanged, because the hook now ignores them). Two unit tests cover it:
+`forecast_call_appends_nothing_before_or_after` and `forecast_call_hooks_keep_the_state_version`.
+
+**Second attempt, with the fixed tsr: the record.** Exported with
+`tsr task export 076c2b25-e42f-4b19-bd3c-a500e2a9ea3d` to `fixtures/m0/claude-session.events.jsonl`.
+The patch it made is `fixtures/m0/claude-session.rts.diff`. Claude Code reported 9 turns.
+
+```
+ 0 task_opened
+ 1-8 proposed inspect / committed          (Grep, Glob, Read lib.rs, Read AGENTS.md)
+ 9 proposed propose_patch · 10 forecast (state_version 11, p 0.93, generator) · 11 committed
+12 proposed run_approved_test · 13 forecast (state_version 14, p 0.9, generator) · 14 committed
+15 dispatched in_sandbox=true · 16 executed exit_code=0 duration_ms=51001     (tsr exec, real container)
+17 stop reason=done
+```
+
+```
+$ cargo test -p tsr-cli --test m0_real_session --test m0_reconstruct      # tsr-rust:1.90
+test the_real_session_exercises_the_whole_path ... ok
+test the_real_session_reconstructs_and_keeps_every_rule ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test m0_session_reconstructs_from_the_log_alone ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+`tests/m0_real_session.rs` runs the frozen test's six invariants over the real record. It also checks
+that the record covers the whole path: a forecast patch, a forecast test run dispatched into the
+sandbox and executed there, no host dispatch, and a stop. That second test exists because the frozen
+test alone passed on a one-event log: an attempt whose model call failed authentication recorded
+only `task_opened`.
+
+**What this record does not show.**
+- The edit was applied by Claude Code's Edit tool directly to the disposable copy. M0 gates it and
+  records it (`proposed` → `forecast` → `committed`), but does not apply it inside the sandbox; PRD
+  path A's "Edit and Write … applied inside the sandbox" is later work.
+- Claude Code's PostToolUse for a Bash call carries no exit code (stdout, stderr, interrupted), so a
+  Bash call outside `tsr exec` can only ever be recorded `Unresolved`. The selftest's Bash payloads
+  still carry an `exit_code` field that real Claude Code does not send.
+- One session is the milestone's bar. It is not a sample.
+
 ## Notes
 
 - `crates/tsr-domain` was not touched by this repair; the additive changes M0 needed
