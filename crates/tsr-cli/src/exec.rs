@@ -29,12 +29,32 @@ pub const EXIT_NO_RUNTIME: i32 = 3;
 /// The default container image, used when `TSR_EXEC_IMAGE` is unset.
 pub const DEFAULT_IMAGE: &str = "docker.io/library/debian:stable-slim";
 
-/// The container image to run in: `TSR_EXEC_IMAGE` if set and non-empty, else [`DEFAULT_IMAGE`].
+/// The container image to run in: `TSR_EXEC_IMAGE` if it names a plausible image, else
+/// [`DEFAULT_IMAGE`].
+///
+/// The value is placed in the runtime's argv immediately before the user argv, so it must never be
+/// something the runtime would parse as a *flag*: `TSR_EXEC_IMAGE=--privileged` would otherwise
+/// disable the container's isolation while the log still recorded `Dispatched { in_sandbox: true }`.
+/// A value that is not a plausible image reference (a leading `-`, whitespace, control characters,
+/// an empty string) is refused and the default is used instead.
 pub fn image() -> String {
     match std::env::var("TSR_EXEC_IMAGE") {
-        Ok(v) if !v.trim().is_empty() => v,
+        Ok(v) if is_plausible_image(&v) => v,
         _ => DEFAULT_IMAGE.to_string(),
     }
+}
+
+/// Whether `s` is a plausible container image reference: it starts with an alphanumeric and the
+/// rest is drawn from the characters an image reference may contain (`[A-Za-z0-9._/:@-]`). This
+/// rejects anything the runtime could read as an option (`-...`), as two arguments (whitespace), or
+/// as an empty image.
+pub fn is_plausible_image(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphanumeric() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | ':' | '@' | '-'))
 }
 
 /// A reachable container runtime.
@@ -338,6 +358,53 @@ mod tests {
     fn default_image_when_unset() {
         // The default is a constant, so this holds regardless of the ambient environment.
         assert_eq!(DEFAULT_IMAGE, "docker.io/library/debian:stable-slim");
+    }
+    #[test]
+    fn image_reference_validation_rejects_flags_and_junk() {
+        // A flag-looking value would be parsed by the runtime as an option, not an image, and would
+        // escape the seal while the log still recorded `in_sandbox: true`.
+        for bad in [
+            "--privileged",
+            "--volume=/:/host",
+            "--pid=host",
+            "img1 --privileged",
+            "",
+            " ",
+            "-",
+            "debian:stable-slim\n--privileged",
+        ] {
+            assert!(
+                !is_plausible_image(bad),
+                "{bad:?} must not be accepted as an image reference"
+            );
+        }
+        for good in [
+            "docker.io/library/debian:stable-slim",
+            "debian:stable-slim",
+            "debian",
+            "registry.example.com:5000/team/img@sha256:abc",
+        ] {
+            assert!(
+                is_plausible_image(good),
+                "{good:?} is a plausible image reference"
+            );
+        }
+    }
+
+    #[test]
+    fn container_argv_image_slot_is_never_flag_looking() {
+        // Whatever `image()` returns, the element it contributes to the argv must not start with
+        // `-` (which the runtime would read as an option) and must not contain whitespace.
+        let img = image();
+        assert!(
+            !img.starts_with('-'),
+            "image slot must not be a flag: {img:?}"
+        );
+        assert!(!img.contains(char::is_whitespace), "image slot: {img:?}");
+        let v = container_argv(Runtime::Docker, Path::new("/work"), &["echo".to_string()]);
+        let img_at = v.len() - 2;
+        assert_eq!(v[img_at], img);
+        assert!(!v[img_at].starts_with('-'));
     }
 
     #[test]
