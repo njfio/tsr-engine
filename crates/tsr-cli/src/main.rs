@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 mod policy_cmd;
+use tsr_cli::reconcile_cmd;
 
 #[derive(Parser)]
 #[command(
@@ -93,6 +94,13 @@ enum TaskCmd {
     Export {
         task: String,
     },
+    /// Reconcile dispatches with no recorded outcome (M2, B4/B6).
+    Reconcile {
+        task: String,
+        /// The store holding the task's log.
+        #[arg(long, default_value = "tsr.db")]
+        store: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -131,6 +139,7 @@ fn main() -> ExitCode {
             TaskCmd::Open => not_yet("task open", "B3/B5 (M0)"),
             TaskCmd::Status { .. } => not_yet("task status", "B11 M0"),
             TaskCmd::Export { .. } => not_yet("task export", "B11 M0 — the trace export"),
+            TaskCmd::Reconcile { task, store } => reconcile_cmd::run(&task, &store),
         },
         Cmd::Forecast { .. } => not_yet(
             "forecast",

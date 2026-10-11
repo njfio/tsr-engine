@@ -470,12 +470,25 @@ pub enum PreferenceStatus {
 }
 
 /// An event: contrast crossed as expanded wanting (the Filter's write rule).
+///
+/// The produced preference's content travels with the event so the ledger can rebuild the node
+/// from the log alone: `produced` must equal `Preference::new(text, scope, parents, origin).id`,
+/// and the ledger's write path refuses (exit 2) when it does not. The node itself is never stored
+/// as a separate record — the log is the only store.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Expansion {
     pub from_contrast: ContrastId,
     pub produced: PreferenceId,
     /// The preferences that made this contrast matter. Vortex detection reads this (B9.1).
     pub catalyzed_by: Vec<PreferenceId>,
+    /// The produced preference's text. `produced` is the content address of (text, scope, parents).
+    pub text: String,
+    /// The produced preference's scope.
+    pub scope: Scope,
+    /// The produced preference's expanded-from lineage.
+    pub parents: Vec<PreferenceId>,
+    /// The produced preference's origin: Operator enters directly, Generator waits for review.
+    pub origin: Source,
 }
 
 /// Where a selected preference strains against the present (the tensions step of Intuition).
