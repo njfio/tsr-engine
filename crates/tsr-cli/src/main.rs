@@ -195,7 +195,7 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             }
         }
         TaskCmd::Status { task: name } => {
-            let id = store_path::task_for_name(&name);
+            let id = store_path::resolve_task(&store, &name);
             match task::status(&store, &id) {
                 Ok((count, last)) => {
                     println!("task {id}: {count} events");
@@ -211,7 +211,7 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             }
         }
         TaskCmd::Export { task: name } => {
-            let id = store_path::task_for_name(&name);
+            let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {
                 Ok(json) => {
                     print!("{json}");

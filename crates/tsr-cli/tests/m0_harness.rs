@@ -111,3 +111,108 @@ fn a_real_pretooluse_payload_is_recorded_and_never_blocks() {
         db.display()
     );
 }
+
+/// Run `tsr <args>` with `TSR_DB` set, returning (stdout, success).
+fn tsr_with_db(db: &Path, args: &[&str]) -> (String, bool) {
+    let out = Command::new(tsr_bin())
+        .args(args)
+        .env("TSR_DB", db)
+        .output()
+        .expect("run tsr");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.status.success(),
+    )
+}
+
+/// Parse an events.jsonl trace into (seq, kind) pairs, asserting seq order.
+fn seq_kinds(jsonl: &str) -> Vec<(i64, String)> {
+    let mut rows: Vec<(i64, String)> = jsonl
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("each line is JSON");
+            (
+                v["seq"].as_i64().expect("seq"),
+                v["event"]["kind"]["kind"]
+                    .as_str()
+                    .expect("kind")
+                    .to_string(),
+            )
+        })
+        .collect();
+    let seqs: Vec<i64> = rows.iter().map(|(s, _)| *s).collect();
+    let mut sorted = seqs.clone();
+    sorted.sort_unstable();
+    assert_eq!(seqs, sorted, "export is in sequence order");
+    rows.shrink_to_fit();
+    rows
+}
+
+#[test]
+fn task_open_then_export_returns_the_events_in_seq_order() {
+    let dir = scratch("task-open");
+    let db = dir.join("tsr.db");
+
+    let (id, ok) = tsr_with_db(
+        &db,
+        &[
+            "task",
+            "open",
+            "--name",
+            "harness-task",
+            "--workspace",
+            "/workspace",
+            "--intent",
+            "prove export resolves the id task open printed",
+        ],
+    );
+    assert!(ok, "tsr task open succeeds");
+    let id = id.trim().to_string();
+    assert!(!id.is_empty(), "task open prints an id");
+
+    // Export by the name `task open` was given.
+    let (jsonl, ok) = tsr_with_db(&db, &["task", "export", "harness-task"]);
+    assert!(ok, "tsr task export succeeds");
+    let rows = seq_kinds(&jsonl);
+    assert!(
+        !rows.is_empty(),
+        "export returns the task's events, not an empty trace"
+    );
+
+    // Export by the raw id `task open` printed must reach the same task.
+    let (jsonl_by_id, ok) = tsr_with_db(&db, &["task", "export", &id]);
+    assert!(ok, "tsr task export <printed-id> succeeds");
+    assert_eq!(
+        seq_kinds(&jsonl_by_id),
+        rows,
+        "export by printed id and by name agree"
+    );
+}
+
+#[test]
+fn task_export_resolves_the_session_id_the_hook_uses() {
+    // The committed fixture's task is named from the session id, not from `task_for_name`.
+    let committed = std::fs::read(committed_fixture()).expect("committed fixture exists");
+    let committed = String::from_utf8(committed).expect("fixture is utf-8");
+    let expected = seq_kinds(&committed);
+    assert_eq!(expected.len(), 21, "the fixture has 21 events");
+
+    // Regenerate the store the fixture came from, in a scratch dir, then export by session id.
+    let dir = scratch("session-export");
+    let out = Command::new(tsr_bin())
+        .args(["hook", "--selftest"])
+        .current_dir(&dir)
+        .output()
+        .expect("run tsr hook --selftest");
+    assert!(out.status.success(), "selftest succeeds");
+
+    let db = dir.join("fixtures/m0/session.db");
+    let (jsonl, ok) = tsr_with_db(&db, &["task", "export", "m0-selftest-session"]);
+    assert!(ok, "tsr task export <session-id> succeeds");
+    assert_eq!(
+        seq_kinds(&jsonl),
+        expected,
+        "export by session id returns all 21 events in seq order"
+    );
+}
