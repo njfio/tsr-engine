@@ -235,7 +235,7 @@ fn run_forecast(event: &str, p: f64, source: &str, task: Option<&str>) -> ExitCo
         }
     };
     let task_id = match task {
-        Some(name) => store_path::task_for_name(name),
+        Some(name) => store_path::resolve_task(&store, name),
         None => store_path::task_for_session("default"),
     };
     match tsr_cli::hook::record_forecast(&store, &task_id, event, p, source) {
