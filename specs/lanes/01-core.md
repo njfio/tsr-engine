@@ -34,6 +34,9 @@ test run, a patch proposal, a forecast, a second run, a stop — and writes
 `docs/m0-evidence.md` with the commands you ran and their captured output, and document in README
 how to register `tsr hook` in Claude Code's hooks settings.
 
+Before any cargo command, run `export CARGO_HOME="$PWD/.cargo-home"` (the sandbox mounts only the
+workspace; the cache must live inside it).
+
 ## Definition of done (`--dod`)
 
 cargo build, cargo fmt --check, cargo clippy --workspace --all-targets -- -D warnings, and

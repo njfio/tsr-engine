@@ -37,6 +37,9 @@ exist. Do not implement execution and do not change the tsr-store schema. Keep c
 tsr-domain additive and in a `contract:` commit. Write docs/ratchet-profile.md and
 docs/m1-evidence.md with the commands you ran and their output.
 
+Before any cargo command, run `export CARGO_HOME="$PWD/.cargo-home"` (the sandbox mounts only the
+workspace; the cache must live inside it).
+
 ## Definition of done (`--dod`)
 
 cargo build, cargo fmt --check, cargo clippy --workspace --all-targets -- -D warnings and

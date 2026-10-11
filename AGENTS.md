@@ -36,6 +36,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 ```
 
+When commands run inside ds-swarm's Docker sandbox, only the workspace is mounted, so keep the
+cargo cache inside it or every command re-downloads the registry:
+
+```bash
+export CARGO_HOME="$PWD/.cargo-home"   # first line of every shell in the sandbox; it is gitignored
+```
+
 The skeleton ships **one red test**: `crates/tsr-cli/tests/m0_reconstruct.rs`. It is red because
 `fixtures/m0/session.events.jsonl` does not exist yet and `reconstruct::from_events` is a stub.
 The M0 lane is done when it is green **with its assertions unchanged**. Never mark it `#[ignore]`,
