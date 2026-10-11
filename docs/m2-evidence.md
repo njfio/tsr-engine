@@ -148,14 +148,34 @@ $ ls -la fixtures/m2/store/
 -rw-r--r-- 1 root root 569344 ... tsr.db
 ```
 
+`tsr reflect --family <f>` draws each forecaster's calibration curve over the family's episodes.
+The generator's curve is the one that differs across families — that is the calibration bias the
+corpus was built to carry:
+
 ```console
 $ tsr reflect --family alpha --store fixtures/m2/store/tsr.db
+Calibration curves — family alpha
+  generator: n 10 brier 0.1360 log_loss 0.4206
+  controller: n 10 brier 0.1083 log_loss 0.3969
+  operator: n 10 brier 0.1055 log_loss 0.3868
+
+$ tsr reflect --family beta --store fixtures/m2/store/tsr.db
+Calibration curves — family beta
+  generator: n 10 brier 0.1033 log_loss 0.3838
+  controller: n 10 brier 0.1083 log_loss 0.3969
+  operator: n 10 brier 0.1055 log_loss 0.3868
+
+$ tsr reflect --family gamma --store fixtures/m2/store/tsr.db
+Calibration curves — family gamma
+  generator: n 10 brier 0.1155 log_loss 0.3975
+  controller: n 10 brier 0.1083 log_loss 0.3969
+  operator: n 10 brier 0.1055 log_loss 0.3868
 ```
 
-> **Pending.** `tsr reflect` (task #5) had not landed when this page was written; the command above
-> exits 2 with `not yet: reflect — B7 the Mirror view (M2)`. The capture is to be pasted here once
-> the command exists. The corpus and the store it reads are complete and verified by the tests
-> above.
+The generator's Brier is 0.1360 / 0.1033 / 0.1155 across alpha / beta / gamma — three distinct
+values, alpha worst — while the controller and operator curves are the same in every family (their
+forecasts do not carry the family bias). The full per-bin reliability table is printed by the same
+command; the summary lines above are quoted to keep this page readable.
 
 ## Reproducing the corpus
 
