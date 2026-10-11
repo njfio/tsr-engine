@@ -264,6 +264,10 @@ fn run_forecast(
         Some(name) => store_path::resolve_task(&store, name),
         None => store_path::task_for_session("default"),
     };
+    if !matches!(source, "generator" | "controller" | "operator") {
+        eprintln!("tsr: unknown --source `{source}` (generator|controller|operator)");
+        return ExitCode::from(1);
+    }
     let result = match (kind, args, event) {
         (Some(kind), Some(args), None) => {
             let kind = match hook::parse_action_kind(kind) {
