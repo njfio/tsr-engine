@@ -197,6 +197,21 @@ pub fn is_tsr_exec_command(cmd: &str) -> bool {
     base == "tsr" && tokens.next() == Some("exec")
 }
 
+/// Whether a `Bash` command is a `tsr forecast …` invocation (the first token's basename is `tsr`,
+/// the second is `forecast`). `tsr forecast` records its own `Proposed` and `Forecast`, so the hook
+/// records nothing for the call — before or after it. Recording the call as a `Generate` turn put a
+/// PostToolUse `Unresolved` *between* the forecast and the commitment it names, so the forecast's
+/// state version never matched (found by the first real Claude Code session, 2026-10-11).
+pub fn is_tsr_forecast_command(cmd: &str) -> bool {
+    let mut tokens = cmd.split_whitespace();
+    let first = match tokens.next() {
+        Some(t) => t,
+        None => return false,
+    };
+    let base = first.rsplit('/').next().unwrap_or(first);
+    base == "tsr" && tokens.next() == Some("forecast")
+}
+
 /// The inner command of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
 ///
 /// The inner command is the argv `tsr exec` is handed, joined by single spaces — the same string
@@ -337,6 +352,14 @@ pub fn record_stop(store: &Store, payload: &HookPayload) -> anyhow::Result<Event
 /// `tsr exec -- …` invocation records nothing further (exec records its own dispatch); any other
 /// `Bash` test run records `Dispatched { in_sandbox: false }` — a host run was observed.
 pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<EventId>> {
+    // A `tsr forecast …` call is the forecast itself: it records its own events.
+    if payload
+        .bash_command()
+        .as_deref()
+        .is_some_and(is_tsr_forecast_command)
+    {
+        return Ok(Vec::new());
+    }
     let task = payload.task();
     let kind = action_for(
         payload.tool_name.as_deref(),
@@ -492,10 +515,11 @@ fn exec_outcome(payload: &HookPayload) -> (Option<i32>, Option<Hash>) {
 pub fn record_post_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<EventId>> {
     let task = payload.task();
 
-    // Only a `Bash` call has an execution to reconcile, and a `tsr exec -- …` call recorded its own
-    // dispatch and execution inside `tsr exec`. Everything else records nothing here.
+    // Only a `Bash` call has an execution to reconcile; a `tsr exec -- …` call recorded its own
+    // dispatch and execution inside `tsr exec`, and a `tsr forecast …` call is the forecast itself.
+    // Everything else records nothing here.
     let cmd = match payload.bash_command() {
-        Some(cmd) if !is_tsr_exec_command(&cmd) => cmd,
+        Some(cmd) if !is_tsr_exec_command(&cmd) && !is_tsr_forecast_command(&cmd) => cmd,
         _ => return Ok(Vec::new()),
     };
 
@@ -718,6 +742,43 @@ const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "pars
 /// The full command string the forecast and the hook payload name for the first run.
 const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
 
+/// Send the hook what Claude Code sends around a `tsr forecast …` Bash call: the PreToolUse before
+/// it, or the PostToolUse after it with a Bash tool response as Claude Code shapes it (stdout,
+/// stderr, interrupted — no exit code).
+fn forecast_call_hooks(
+    store: &Store,
+    session: &str,
+    stage: &str,
+    kind: ActionKind,
+    args: &str,
+    p: f64,
+) -> anyhow::Result<()> {
+    let kind_flag = match kind {
+        ActionKind::RunApprovedTest => "run_approved_test",
+        ActionKind::ProposePatch => "propose_patch",
+        _ => "request_approval",
+    };
+    let command =
+        format!("tsr forecast --kind {kind_flag} --args \"{args}\" --p {p} --source generator");
+    let payload = HookPayload {
+        session_id: Some(session.to_string()),
+        hook_event_name: Some(stage.to_string()),
+        tool_name: Some("Bash".to_string()),
+        tool_input: Some(serde_json::json!({ "command": command })),
+        tool_response: (stage == "PostToolUse").then(
+            || serde_json::json!({ "stdout": "forecast recorded", "stderr": "", "interrupted": false }),
+        ),
+        ..Default::default()
+    };
+    let appended = if stage == "PreToolUse" {
+        record_tool(store, &payload)?
+    } else {
+        record_post_tool(store, &payload)?
+    };
+    anyhow::ensure!(appended.is_empty(), "the hook recorded a tsr forecast call");
+    Ok(())
+}
+
 fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     // Refuse before writing anything when no runtime is reachable: the fixture must never be
     // fabricated, and a half-written fixture is worse than none.
@@ -764,7 +825,17 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         record_tool(&store, &p)?;
     }
 
-    // 3. A forecast before the first gated action, naming the action and its arguments.
+    // 3. A forecast before the first gated action, naming the action and its arguments. In a real
+    //    session the forecast is itself a `Bash` tool call, so its PreToolUse and PostToolUse reach the
+    //    hook around it; the selftest sends both, as Claude Code does.
+    forecast_call_hooks(
+        &store,
+        session,
+        "PreToolUse",
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.7,
+    )?;
     record_forecast_for_action(
         &store,
         &task,
@@ -772,6 +843,14 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         SELFTEST_TEST_CMD,
         0.7,
         "generator",
+    )?;
+    forecast_call_hooks(
+        &store,
+        session,
+        "PostToolUse",
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.7,
     )?;
 
     // 4. The first run: the agent's Bash call is `tsr exec -- cargo test …`. The hook records the
@@ -800,6 +879,14 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     record_post_tool(&store, &post)?;
 
     // 5. A forecast before the patch proposal, then the proposal itself (gated).
+    forecast_call_hooks(
+        &store,
+        session,
+        "PreToolUse",
+        ActionKind::ProposePatch,
+        "crates/tsr-cli/src/lib.rs",
+        0.6,
+    )?;
     record_forecast_for_action(
         &store,
         &task,
@@ -807,6 +894,14 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         "crates/tsr-cli/src/lib.rs",
         0.6,
         "generator",
+    )?;
+    forecast_call_hooks(
+        &store,
+        session,
+        "PostToolUse",
+        ActionKind::ProposePatch,
+        "crates/tsr-cli/src/lib.rs",
+        0.6,
     )?;
     let edit = HookPayload {
         session_id: Some(session.to_string()),
@@ -818,6 +913,14 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     record_tool(&store, &edit)?;
 
     // 6. A forecast before the second gated action, then the second run the same way.
+    forecast_call_hooks(
+        &store,
+        session,
+        "PreToolUse",
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.6,
+    )?;
     record_forecast_for_action(
         &store,
         &task,
@@ -825,6 +928,14 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         SELFTEST_TEST_CMD,
         0.6,
         "generator",
+    )?;
+    forecast_call_hooks(
+        &store,
+        session,
+        "PostToolUse",
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.6,
     )?;
     let pre2 = HookPayload {
         session_id: Some(session.to_string()),
@@ -927,6 +1038,74 @@ mod tests {
             "a tsr exec PostToolUse appends nothing"
         );
         assert_eq!(tags(&store, &task), before, "the log is unchanged");
+    }
+
+    /// A `tsr forecast …` call is the forecast itself: the hook appends nothing before or after it,
+    /// with a bare or a path-prefixed `tsr`, so nothing lands between a forecast and the commitment.
+    #[test]
+    fn forecast_call_appends_nothing_before_or_after() {
+        let (store, _dir) = fresh_store("forecast-call");
+        let session = "forecast-call";
+        let task = store_path::task_for_session(session);
+        for cmd in [
+            "tsr forecast --kind propose_patch --args \"src/lib.rs\" --p 0.9 --source generator",
+            "/opt/x/bin/tsr forecast --kind run_approved_test --args \"cargo test\" --p 0.8 --source generator",
+        ] {
+            assert!(is_tsr_forecast_command(cmd));
+            let pre = record_tool(&store, &bash_payload(session, "PreToolUse", cmd, None)).expect("pre");
+            let post = record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, None))
+                .expect("post");
+            assert!(pre.is_empty() && post.is_empty(), "{cmd}: the hook recorded the forecast call");
+        }
+        assert!(tags(&store, &task).is_empty(), "the log is unchanged");
+        assert!(!is_tsr_forecast_command("tsr exec -- tsr forecast"));
+        assert!(!is_tsr_forecast_command("echo tsr forecast"));
+    }
+
+    /// The real-session shape: Pre(forecast call) → forecast → Post(forecast call) → Pre(Edit). The
+    /// commitment lands at the forecast's state version.
+    #[test]
+    fn forecast_call_hooks_keep_the_state_version() {
+        let (store, dir) = fresh_store("forecast-sv");
+        let session = "forecast-sv";
+        let task = store_path::task_for_session(session);
+        let start = HookPayload {
+            session_id: Some(session.to_string()),
+            hook_event_name: Some("SessionStart".to_string()),
+            ..Default::default()
+        };
+        record_session_start(&store, &start).expect("start");
+        let path = "/w/crates/rts-core/src/lib.rs";
+        let cmd = format!(
+            "tsr forecast --kind propose_patch --args \"{path}\" --p 0.95 --source generator"
+        );
+        record_tool(&store, &bash_payload(session, "PreToolUse", &cmd, None)).expect("pre");
+        record_forecast_for_action(
+            &store,
+            &task,
+            ActionKind::ProposePatch,
+            path,
+            0.95,
+            "generator",
+        )
+        .expect("forecast");
+        record_post_tool(&store, &bash_payload(session, "PostToolUse", &cmd, None)).expect("post");
+        let edit = HookPayload {
+            session_id: Some(session.to_string()),
+            hook_event_name: Some("PreToolUse".to_string()),
+            tool_name: Some("Edit".to_string()),
+            tool_input: Some(serde_json::json!({ "file_path": path })),
+            ..Default::default()
+        };
+        record_tool(&store, &edit).expect("edit");
+        let out = dir.join("events.jsonl");
+        std::fs::write(&out, crate::task::export(&store, &task).expect("export")).expect("write");
+        let session = crate::reconstruct::from_events(&out).expect("reconstruct");
+        assert!(
+            session.every_gated_action_has_prior_forecast_at_same_state_version(),
+            "the commitment must land at the forecast's state version: {:?}",
+            tags(&store, &task)
+        );
     }
 
     /// A path-prefixed `tsr exec` is recognised the same way.

@@ -1,0 +1,26 @@
+diff --git a/crates/rts-core/src/lib.rs b/crates/rts-core/src/lib.rs
+index 06ddbe1..7471fbc 100644
+--- a/crates/rts-core/src/lib.rs
++++ b/crates/rts-core/src/lib.rs
+@@ -285,6 +285,21 @@ mod tests {
+         assert_eq!(detect_language_from_path("unknown.txt"), None);
+     }
+ 
++    #[test]
++    fn detect_language_from_path_edge_cases() {
++        assert_eq!(
++            detect_language_from_path("SRC/MAIN.RS"),
++            Some(Language::Rust)
++        );
++        assert_eq!(
++            detect_language_from_path("types.d.ts"),
++            Some(Language::TypeScript)
++        );
++        assert_eq!(detect_language_from_path(".bashrc"), None);
++        assert_eq!(detect_language_from_path("Makefile"), None);
++        assert_eq!(detect_language_from_path("archive.tar.gz"), None);
++    }
++
+     #[test]
+     fn test_supported_languages() {
+         let languages = supported_languages();
