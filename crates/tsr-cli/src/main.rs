@@ -12,6 +12,7 @@ use std::process::ExitCode;
 mod policy_cmd;
 use tsr_cli::note_cmd;
 use tsr_cli::reconcile_cmd;
+use tsr_cli::reflect_cmd;
 use tsr_cli::review_cmd;
 
 #[derive(Parser)]
@@ -98,7 +99,19 @@ enum Cmd {
         store: String,
     },
     /// The Mirror view: one closed episode, in the book's order (M2, B7).
-    Reflect { task: String },
+    Reflect {
+        /// The task to render; omit with --family to print calibration curves.
+        task: Option<String>,
+        /// Print each forecaster's calibration curve for this task family.
+        #[arg(long)]
+        family: Option<String>,
+        /// Emit the same content as a JSON document.
+        #[arg(long)]
+        json: bool,
+        /// The store holding the task's log.
+        #[arg(long, default_value = "tsr.db")]
+        store: String,
+    },
     /// Corpus tooling: mine, mutants (M3, B9).
     Corpus {
         #[command(subcommand)]
@@ -209,7 +222,17 @@ fn main() -> ExitCode {
             stats,
             store,
         }),
-        Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
+        Cmd::Reflect {
+            task,
+            family,
+            json,
+            store,
+        } => reflect_cmd::run(&reflect_cmd::ReflectArgs {
+            task,
+            family,
+            json,
+            store,
+        }),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),

@@ -8,6 +8,7 @@
 
 pub mod note_cmd;
 pub mod reconcile_cmd;
+pub mod reflect_cmd;
 pub mod review_cmd;
 
 pub mod reconstruct {
