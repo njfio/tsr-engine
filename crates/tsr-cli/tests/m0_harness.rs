@@ -429,3 +429,107 @@ fn forecast_cli_and_hook_agree_on_the_candidate_id() {
         "the shared digest function mints the same candidate id from both paths"
     );
 }
+
+/// A `tsr exec -- …` Bash call commits to the *inner* command, so a forecast naming the bare
+/// command matches it: the hook records `Committed` only and B5 holds.
+///
+/// Regression: the hook used to digest the full `tsr exec -- cargo test …` string, minting a
+/// candidate the forecast had never named — a second `Proposed` + `Committed` with no prior
+/// forecast at its state version.
+#[test]
+fn forecast_of_the_bare_command_matches_a_tsr_exec_bash_call() {
+    let (store, _dir) = fresh_store("exec-forecast");
+    let session = "honest-exec-forecast";
+    let task = store_path::task_for_session(session);
+    let cmd = "cargo test --offline -p parser";
+
+    hook::record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        cmd,
+        0.7,
+        "generator",
+    )
+    .expect("record forecast");
+
+    let payload = pretooluse(
+        session,
+        "Bash",
+        serde_json::json!({ "command": format!("tsr exec -- {cmd}") }),
+    );
+    hook::run(&store, "PreToolUse", &payload).expect("record tool call");
+
+    let ks = kinds(&store, &task);
+    let tags: Vec<&str> = ks.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(
+        tags,
+        vec!["proposed", "forecast", "committed"],
+        "the forecast names the inner command, so the exec call commits without a second proposal"
+    );
+    assert_eq!(
+        count_of(&store, &task, "proposed"),
+        1,
+        "the hook mints no second Proposed for a `tsr exec -- …` call"
+    );
+    assert_eq!(
+        first_forecast_state_version(&store, &task),
+        index_of(&store, &task, "committed") as u64,
+        "the forecast's state_version equals the index of the Committed event"
+    );
+    assert!(
+        reconstruct_task(&store, &task)
+            .every_gated_action_has_prior_forecast_at_same_state_version(),
+        "a forecast naming the inner command satisfies B5 for a `tsr exec -- …` call"
+    );
+}
+
+/// A second run of the same command is proposed again, so it is pending again: the hook records
+/// `Committed` only, at the state version the second forecast named.
+#[test]
+fn a_second_run_of_the_same_command_commits_without_a_second_proposal() {
+    let (store, _dir) = fresh_store("second-run");
+    let session = "honest-second-run";
+    let task = store_path::task_for_session(session);
+    let cmd = "cargo test --offline -p parser";
+
+    for _ in 0..2 {
+        hook::record_forecast_for_action(
+            &store,
+            &task,
+            ActionKind::RunApprovedTest,
+            cmd,
+            0.6,
+            "generator",
+        )
+        .expect("record forecast");
+        let payload = pretooluse(
+            session,
+            "Bash",
+            serde_json::json!({ "command": format!("tsr exec -- {cmd}") }),
+        );
+        hook::run(&store, "PreToolUse", &payload).expect("record tool call");
+    }
+
+    let ks = kinds(&store, &task);
+    let tags: Vec<&str> = ks.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(
+        tags,
+        vec![
+            "proposed",
+            "forecast",
+            "committed",
+            "proposed",
+            "forecast",
+            "committed"
+        ],
+        "each run is proposed once and committed once"
+    );
+    assert_eq!(count_of(&store, &task, "proposed"), 2);
+    assert_eq!(count_of(&store, &task, "committed"), 2);
+    assert!(
+        reconstruct_task(&store, &task)
+            .every_gated_action_has_prior_forecast_at_same_state_version(),
+        "both commitments have a prior forecast at their state version"
+    );
+}
