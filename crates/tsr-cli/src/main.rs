@@ -262,7 +262,7 @@ fn run_forecast(
     };
     let task_id = match task {
         Some(name) => store_path::resolve_task(&store, name),
-        None => store_path::task_for_session("default"),
+        None => store_path::latest_task(&store),
     };
     if !matches!(source, "generator" | "controller" | "operator") {
         eprintln!("tsr: unknown --source `{source}` (generator|controller|operator)");

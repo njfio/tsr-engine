@@ -50,6 +50,29 @@ pub fn task_for_name(name: &str) -> TaskId {
     TaskId(Hash::of(&[b"task:", name.as_bytes()]))
 }
 
+/// The task a `tsr forecast` without `--task` should write into: the store's most recently opened
+/// task, i.e. the session the hook just opened.
+///
+/// The hook names its task from the Claude Code `session_id` in the payload, so a `tsr forecast`
+/// that guessed a fixed name would record the forecast into a *different* task than the tool call
+/// it forecasts — the M0 failure the honest-record repair exists to prevent. The most recent
+/// `task_opened` event is the session the agent is in; when the store has no task at all we fall
+/// back to `hash("default")` so a bare `tsr forecast` still records somewhere.
+pub fn latest_task(store: &Store) -> TaskId {
+    let row: Option<String> = store
+        .connection()
+        .query_row(
+            "SELECT task_id FROM events WHERE kind = 'task_opened' ORDER BY seq DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    match row.and_then(|s| Hash::from_hex(&s).ok()) {
+        Some(h) => TaskId(h),
+        None => task_for_session("default"),
+    }
+}
+
 /// Resolve a user-supplied task argument to a task id, accepting every id the CLI itself prints.
 ///
 /// `tsr task open`/`status` print a name-hash id, the hook names its task from the Claude Code
