@@ -160,7 +160,8 @@ impl<'a> Ledger<'a> {
         let Some(entry) = view.get(&preference) else {
             return Err(LedgerError::UnknownPreference(preference));
         };
-        let Some(other) = duplicate_in_scope(&view, &entry.preference.text, &entry.preference.scope)
+        let Some(other) =
+            duplicate_in_scope(&view, &entry.preference.text, &entry.preference.scope)
         else {
             return Ok(None);
         };

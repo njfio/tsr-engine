@@ -1,8 +1,8 @@
 //! The ledger's required behaviours (PRD §B11 M2 item 1), each as a test over a real store.
 
 use tsr_domain::{
-    ContrastId, Event, EventKind, Hash, Observation, Preference, PreferenceId,
-    PreferenceStatus, Scope, Source, TaskId,
+    ContrastId, Event, EventKind, Hash, Observation, Preference, PreferenceId, PreferenceStatus,
+    Scope, Source, TaskId,
 };
 use tsr_ledger::{fold, normalize_text, Ledger, LedgerError};
 use tsr_store::Store;
@@ -48,7 +48,10 @@ fn generator_preference_waits_for_operator_open() {
 
     let collective = ledger.collective().expect("fold");
     let entry = collective.get(&id).expect("in the structure");
-    assert!(entry.status.is_none(), "generator origin is not open on arrival");
+    assert!(
+        entry.status.is_none(),
+        "generator origin is not open on arrival"
+    );
     assert!(!entry.is_active());
     assert!(!ledger.active().expect("active").contains(&id));
 
@@ -143,7 +146,12 @@ fn operator_only_statuses_are_refused_for_non_operator() {
             "2026-01-01T00:03:00Z",
         )
         .expect("operator may withdraw");
-    assert!(!ledger.active().expect("active").get(&id).expect("entry").is_open());
+    assert!(!ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
 }
 
 /// A merge finds a duplicate by normalized text within the same scope and yields `Overlapping(id)`.
@@ -181,7 +189,9 @@ fn duplicate_normalized_text_in_same_scope_overlaps() {
 
     assert_eq!(normalize_text("The  Retry   Budget"), "the retry budget");
     assert_eq!(
-        ledger.overlapping_with("the retry budget", &scope()).expect("lookup"),
+        ledger
+            .overlapping_with("the retry budget", &scope())
+            .expect("lookup"),
         Some(first)
     );
 
@@ -199,7 +209,12 @@ fn duplicate_normalized_text_in_same_scope_overlaps() {
 
     // A different scope is not a duplicate.
     let other = Scope::Family("f-1".to_string());
-    assert_eq!(ledger.overlapping_with("the retry budget", &other).expect("lookup"), None);
+    assert_eq!(
+        ledger
+            .overlapping_with("the retry budget", &other)
+            .expect("lookup"),
+        None
+    );
 }
 
 /// A later return meeting the criterion closes the preference: `Fulfilled`.
@@ -221,7 +236,12 @@ fn a_later_return_meeting_the_criterion_fulfils() {
             "2026-01-01T00:00:00Z",
         )
         .expect("expand");
-    assert!(ledger.active().expect("active").get(&id).expect("entry").is_open());
+    assert!(ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
 
     // The later return arrives as an event; the criterion closes and the status is mechanical.
     let ret = Event::new(
