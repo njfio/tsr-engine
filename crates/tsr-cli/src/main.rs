@@ -7,8 +7,10 @@
 #![forbid(unsafe_code)]
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod corpus_cmd;
 mod policy_cmd;
 
 #[derive(Parser)]
@@ -102,8 +104,22 @@ enum PolicyCmd {
 
 #[derive(Subcommand)]
 enum CorpusCmd {
-    Mine { repo: String },
-    Mutants { repo: String },
+    /// Mine a repository's first-parent history for red→green flip tasks (B9).
+    Mine {
+        repo: String,
+        /// Output directory: `tasks.jsonl` and the CAS are written here.
+        #[arg(long)]
+        out: PathBuf,
+        /// Only walk commits reachable from this revision (default: HEAD).
+        #[arg(long)]
+        since: Option<String>,
+        /// The suite command (default: `cargo test`).
+        #[arg(long)]
+        suite: Option<String>,
+    },
+    Mutants {
+        repo: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -143,7 +159,15 @@ fn main() -> ExitCode {
         },
         Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
-        Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
+        Cmd::Corpus { cmd } => match cmd {
+            CorpusCmd::Mine {
+                repo,
+                out,
+                since,
+                suite,
+            } => corpus_cmd::mine_cmd(repo, out, since, suite),
+            CorpusCmd::Mutants { .. } => not_yet("corpus mutants", "B9 (M3)"),
+        },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
         Cmd::Eval => not_yet("eval", "B9 (M4–M5)"),
