@@ -43,10 +43,11 @@ impl ScoredForecast {
         })
     }
 
-    /// The residual: outcome minus raw probability, in `[-1, 1]`. This is the Surprise's
-    /// magnitude, and the Expansion Dilation proxy's ordinate.
+    /// The residual: forecast minus observed, in `[-1, 1]` (PRD B7: "the residual — forecast
+    /// minus return"). This is the Surprise's magnitude, and the Expansion Dilation proxy's
+    /// ordinate. A forecast of 0.8 that came true has residual -0.2.
     pub fn residual(&self) -> f64 {
-        self.outcome - self.p
+        self.p - self.outcome
     }
 
     /// The Brier contribution of this forecast: `(p - outcome)^2`.
@@ -302,9 +303,11 @@ impl ResidualSeries {
 }
 
 /// The residual of a resolved forecast, as a labeled proxy, or `None` when it is not scored.
+/// The residual is forecast minus observed (PRD B7), so a confident forecast that came true has
+/// a negative residual.
 pub fn residual_proxy(r: &ResolvedForecast) -> Option<Proxy<f64>> {
     let outcome = r.resolution.outcome()?;
-    Some(Proxy::new("residual", outcome - r.forecast.raw.get()))
+    Some(Proxy::new("residual", r.forecast.raw.get() - outcome))
 }
 
 /// Whether a forecast is calibrated. In M2 nothing is: `calibrated` stays `None` and prints

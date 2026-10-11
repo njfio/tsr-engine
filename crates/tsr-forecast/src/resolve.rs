@@ -74,12 +74,23 @@ pub struct TaskFacts {
     pub operator_experience: bool,
     /// True when a `Proposed` event carries an Intuition candidate.
     pub intuition_proposed: bool,
+    /// The ids of the Intuition candidates a `Proposed` event named, so a later `Committed` can
+    /// be recognised as selecting one.
+    pub intuition_candidates: Vec<tsr_domain::CandidateId>,
     /// True when a `Committed` decision names an Intuition candidate.
     pub intuition_committed: bool,
     /// True when an `Executed` event exists for an Intuition candidate.
     pub intuition_executed: bool,
     /// True when a `Forecast` event exists for the common decision event.
     pub common_event_forecast: bool,
+    /// True when a `Stop { reason: "operator" }` event exists: an operator stop for external
+    /// reasons, which censors the common decision event (B7).
+    pub operator_stop: bool,
+    /// True when a `Stop { reason: "budget" }` or `TaskClosed { reason: "budget" }` event exists:
+    /// a budget ceiling was breached, so the common decision event resolves false (B7).
+    pub budget_breached: bool,
+    /// True when the task closed with reason `done`: its criteria were met (B7).
+    pub criteria_met: bool,
     /// The ids of the events that carried each fact, for evidence.
     pub evidence: Vec<tsr_domain::EventId>,
 }
@@ -101,6 +112,24 @@ impl TaskFacts {
                 EventKind::TaskClosed { reason, .. } => {
                     f.closed = true;
                     f.close_reason = Some(reason.clone());
+                    if reason == "done" {
+                        f.criteria_met = true;
+                    }
+                    if reason == "budget" {
+                        f.budget_breached = true;
+                    }
+                    f.evidence.push(ev.id);
+                }
+                EventKind::Stop { reason } => {
+                    // The Stop stage of the hook (B4/B5): `operator` is an external stop that
+                    // censors the common event; `budget` is a breached ceiling that resolves it
+                    // false. The hook records it and never blocks.
+                    if reason == "operator" {
+                        f.operator_stop = true;
+                    }
+                    if reason == "budget" {
+                        f.budget_breached = true;
+                    }
                     f.evidence.push(ev.id);
                 }
                 EventKind::Unresolved { reason, .. } => {
@@ -116,7 +145,7 @@ impl TaskFacts {
                     // the review command does.
                     let label = match record.status {
                         tsr_domain::LabelStatus::Observed => "accepted",
-                        tsr_domain::LabelStatus::Invalid => "rejected",
+                        tsr_domain::LabelStatus::Rejected => "rejected",
                         tsr_domain::LabelStatus::Disputed => "disputed",
                         _ => record.status.name(),
                     };
@@ -136,13 +165,17 @@ impl TaskFacts {
                 EventKind::Proposed { candidate } => {
                     if candidate.source == Source::Intuition {
                         f.intuition_proposed = true;
+                        f.intuition_candidates.push(candidate.id);
                         f.evidence.push(ev.id);
                     }
                 }
                 EventKind::Committed { candidate, .. } => {
-                    // A commit of an Intuition candidate is recorded by the caller that knows
-                    // the candidate's source; here we only note that a commit happened.
-                    let _ = candidate;
+                    // A commit of an Intuition candidate is the `intuition_selected` stage: the
+                    // candidate's source is known from the `Proposed` event that named it.
+                    if f.intuition_candidates.contains(candidate) {
+                        f.intuition_committed = true;
+                        f.evidence.push(ev.id);
+                    }
                 }
                 EventKind::Forecast { forecast, .. } => {
                     if forecast.event == crate::outcomes::common_decision_event_id() {
@@ -247,7 +280,7 @@ fn resolve_test_pass(
             }
         }
     }
-    .pipe_evidence(def)
+    .pipe_evidence(def, facts.closed)
 }
 
 fn resolve_diff_accepted(
@@ -265,22 +298,29 @@ fn resolve_diff_accepted(
             }
         }
     }
-    .pipe_evidence(def)
+    .pipe_evidence(def, facts.closed)
 }
 
 fn resolve_common(def: &NamedEvent, facts: &TaskFacts) -> (Resolution, Vec<tsr_domain::EventId>) {
-    if facts.close_reason.as_deref() == Some("operator") && !facts.closed {
-        return (Resolution::Censored, facts.evidence.clone()).pipe_evidence(def);
+    // §B7: censored on an operator stop for external reasons, whether or not the task has closed.
+    if facts.operator_stop {
+        return (Resolution::Censored, facts.evidence.clone()).pipe_evidence(def, facts.closed);
     }
     if !facts.closed {
-        return (Resolution::Unresolved, Vec::new()).pipe_evidence(def);
+        return (Resolution::Unresolved, Vec::new()).pipe_evidence(def, facts.closed);
     }
     match facts.label() {
-        Some("accepted") => (Resolution::True, facts.evidence.clone()),
+        // True only when the criteria were met, the diff accepted and no budget ceiling breached.
+        Some("accepted") if facts.criteria_met && !facts.budget_breached => {
+            (Resolution::True, facts.evidence.clone())
+        }
+        // Accepted but the criteria were unmet or a ceiling was breached: the event did not happen.
+        Some("accepted") => (Resolution::False, facts.evidence.clone()),
         Some("rejected") | Some("disputed") => (Resolution::False, facts.evidence.clone()),
+        // Closed with no label: never reviewed, so censored.
         _ => (Resolution::Censored, facts.evidence.clone()),
     }
-    .pipe_evidence(def)
+    .pipe_evidence(def, facts.closed)
 }
 
 fn resolve_stage(
@@ -295,24 +335,38 @@ fn resolve_stage(
     } else {
         (Resolution::Unresolved, Vec::new())
     }
-    .pipe_evidence(def)
+    .pipe_evidence(def, facts.closed)
 }
 
 /// A tiny helper so each arm can attach the definition's censoring rule without repeating it.
 trait PipeEvidence {
-    fn pipe_evidence(self, def: &NamedEvent) -> (Resolution, Vec<tsr_domain::EventId>);
+    fn pipe_evidence(
+        self,
+        def: &NamedEvent,
+        closed: bool,
+    ) -> (Resolution, Vec<tsr_domain::EventId>);
 }
 
 impl PipeEvidence for (Resolution, Vec<tsr_domain::EventId>) {
-    fn pipe_evidence(self, def: &NamedEvent) -> (Resolution, Vec<tsr_domain::EventId>) {
+    fn pipe_evidence(
+        self,
+        def: &NamedEvent,
+        closed: bool,
+    ) -> (Resolution, Vec<tsr_domain::EventId>) {
         let (mut r, ev) = self;
-        // A censoring rule that says "never reviewed" turns an unresolved-at-close into a
-        // censored record; the rule is data, so the mapping is explicit here.
-        if r == Resolution::Unresolved
-            && def.censoring == CensoringRule::NeverReviewed
-            && ev.is_empty()
-        {
-            r = Resolution::Unresolved;
+        // A censoring rule turns an unresolved record into a censored one, but only once the task
+        // has closed: while it is still open the event is unresolved, not censored (B7). The rule
+        // is data, so the mapping is explicit here. `NeverReviewed` and `OperatorStopExternal`
+        // both censor; `TimeoutOrCancellation` censors a dispatch that never resolved;
+        // `OfferNotSelected` does not censor (an offer passed over is recorded with what was
+        // selected instead).
+        if r == Resolution::Unresolved && closed {
+            match def.censoring {
+                CensoringRule::NeverReviewed
+                | CensoringRule::OperatorStopExternal
+                | CensoringRule::TimeoutOrCancellation => r = Resolution::Censored,
+                CensoringRule::OfferNotSelected => {}
+            }
         }
         (r, ev)
     }

@@ -135,11 +135,18 @@ mod tests {
     #[test]
     fn common_event_needs_close_and_acceptance() {
         let f = forecast(common_decision_event_id(), Forecaster::Controller, 0.6);
-        let facts = TaskFacts::from_events(&[closed("operator")]);
+        // Closed with no label: never reviewed, so censored (B7).
+        let facts = TaskFacts::from_events(&[closed("done")]);
         assert_eq!(resolve(&f, &facts).resolution, Resolution::Censored);
-        let facts = TaskFacts::from_events(&[closed("operator")])
+        // Closed done (criteria met) and accepted: the event happened.
+        let facts = TaskFacts::from_events(&[closed("done")])
             .with_label("accepted", tsr_domain::EventId(Hash::of(&[b"l"])));
         assert_eq!(resolve(&f, &facts).resolution, Resolution::True);
+        // Accepted but closed without the criteria met (reason `operator`): false, not true.
+        let facts = TaskFacts::from_events(&[closed("operator")])
+            .with_label("accepted", tsr_domain::EventId(Hash::of(&[b"l"])));
+        assert_eq!(resolve(&f, &facts).resolution, Resolution::False);
+        // Still open: unresolved.
         let facts = TaskFacts::from_events(&[]);
         assert_eq!(resolve(&f, &facts).resolution, Resolution::Unresolved);
     }
