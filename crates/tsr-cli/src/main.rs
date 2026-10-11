@@ -10,6 +10,8 @@ use std::io::Read;
 use std::process::ExitCode;
 use tsr_cli::{exec, hook, store_path, task};
 
+mod policy_cmd;
+
 #[derive(Parser)]
 #[command(
     name = "tsr",
@@ -151,7 +153,9 @@ fn main() -> ExitCode {
         } => run_forecast(&event, p, &source, task.as_deref()),
         Cmd::Hook { stage, selftest } => run_hook(&stage, selftest),
         Cmd::Exec { argv } => run_exec(&argv),
-        Cmd::Policy { .. } => not_yet("policy check", "B5 (M1, the RATCHET profile)"),
+        Cmd::Policy { cmd } => match cmd {
+            PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
+        },
         Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
