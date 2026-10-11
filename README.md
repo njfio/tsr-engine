@@ -27,10 +27,24 @@ cargo test --workspace --no-fail-fast     # 10 pass, 1 red (M0)
 crates/tsr-domain   the contract: facts, views, traits (PRD B6)
 crates/tsr-store    SQLite index over the content-addressed, append-only log
 crates/tsr-cli      the `tsr` binary (operator CLI + hook) and reconstruct
+crates/tsr-corpus   corpus: mine, mutants, split (PRD B9) — see its README
+crates/tsr-batch    batch runner: systems 1 and 2, drivers (PRD B9) — see its README
+crates/tsr-eval     baseline numbers with intervals (PRD B9)
 fixtures/           recorded sessions (produced by the tool under test, never by hand)
 specs/lanes/        swarm briefs: goal, definition of done, acceptance commands
 docs/               the PRD and evidence pages
 ```
+
+## Corpus and batch (M3)
+
+`crates/tsr-corpus` turns a repository's history and its mutants into tasks and splits the corpus
+without leaking the holdout; `crates/tsr-batch` runs those tasks through one system (`record` or
+`rules`) and one driver (`scripted` or `claude-code`). Every command that would run a repository's
+code goes through the `Runner` trait — `ScriptedRunner` in tests, `ExecRunner` (`tsr exec -- <argv>`)
+in production — so nothing runs a repository's tests on the host. See
+[`crates/tsr-corpus/README.md`](crates/tsr-corpus/README.md),
+[`crates/tsr-batch/README.md`](crates/tsr-batch/README.md) and
+[`docs/m3-evidence.md`](docs/m3-evidence.md).
 
 ## License
 
