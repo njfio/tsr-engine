@@ -286,6 +286,75 @@ byte-for-byte and **may be red until the operator regenerates it**. Its assertio
 this repair. The reproducibility test in `tests/m0_harness.rs` skips with a printed reason when
 `exec::Runtime::detect()` is `None`, so the suite is green in a sandbox with no runtime.
 
+## The real record
+
+The operator ran `tsr hook --selftest` on a host with Docker (the only place it can run) at
+`e180a9f`. It produced a **real** record — every command ran in the sealed container — and that
+record is now committed as `fixtures/m0/session.events.jsonl` (listed in
+`specs/lanes/01c-real-session.md`). The frozen test `m0_session_reconstructs_from_the_log_alone`
+**fails** on it at the B5 assertion: a gated action without a forecast at the same state version.
+The record, by sequence (kind; candidate kind; detail):
+
+```
+ 1 task_opened
+ 2 proposed inspect · 3 committed                         (Read)
+ 4 proposed inspect · 5 committed                         (Read)
+ 6 proposed run_approved_test · 7 forecast p=0.7 · 8 committed      (tsr forecast, then PreToolUse Bash "tsr exec -- cargo test --offline -p parser")
+ 9 dispatched in_sandbox=true · 10 executed exit=127 duration=12521  (exec::run, real container)
+11 proposed run_approved_test · 12 committed              ← PostToolUse for the tsr exec call: NO forecast, nothing should be recorded here
+13 proposed propose_patch · 14 forecast p=0.6 · 15 committed        (tsr forecast, then PreToolUse Edit)
+16 proposed run_approved_test · 17 forecast p=0.6 · 18 committed    (tsr forecast, then PreToolUse Bash, second run)
+19 proposed run_approved_test · 20 committed              ← exec::run minted a NEW candidate: it did not find the commitment at 18
+21 dispatched in_sandbox=true · 22 executed exit=127 duration=13258
+23 proposed run_approved_test · 24 committed              ← PostToolUse again
+25 stop done
+```
+
+Two defects, both invisible in the sandbox because `exec::run` refuses there and the frozen test was
+only ever run against the old fabricated fixture:
+
+1. **`record_post_tool` proposed and committed.** For a Bash call whose command is a `tsr exec -- …`
+   invocation, PostToolUse must record nothing (`tsr exec` recorded the dispatch and the execution).
+   For a host-run Bash it records `Executed`/`Unresolved` against the candidate the PreToolUse
+   committed — it never proposes or commits. Events 11–12 and 23–24 were the hook inventing gated
+   actions after the fact, the exact fault 01b was meant to remove. Repaired in
+   `crates/tsr-cli/src/hook.rs::record_post_tool` (commit `46440b9`): the function now returns
+   without appending for a `tsr exec -- …` call, reconciles the most recent unreconciled `Committed`
+   for any other Bash call, and records `Unresolved { reason: "post-tool with no prior commitment" }`
+   when there is none — no path appends `Proposed` or `Committed`.
+2. **`exec::run` did not find the second commitment.** The candidate id is content-addressed
+   `(kind, args, parents)`, so the second run of the same command has the same id as the first. The
+   old lookup treated "this id has a `Dispatched`" as "dispatched" and minted a new candidate
+   (19–20) with no forecast. The lookup must be per occurrence, in event order: the most recent
+   `Committed` for a matching digest that has no `Dispatched` after it. Repaired in
+   `crates/tsr-cli/src/exec.rs::pending_commitment` (commit `eb1e81c`), which walks the task's events
+   in sequence order and returns the candidate of the most recent `Committed` with a matching
+   `(kind, args_digest)` that has no `Dispatched` after it; `exec::run` mints a new candidate only
+   when it returns `None`.
+
+A third finding, a design decision rather than a defect: two consecutive selftests on the host differ
+only in `Executed.duration_ms` (12521 vs 13258; `log_digest` and `exit_code` are identical). A
+byte-for-byte reproducibility test therefore cannot pass on a real host, and it must not pass by
+fabricating the duration. Reproducibility means the sequence of
+`(seq, kind, candidate id, forecast state_version, in_sandbox, exit_code, log_digest)` is identical
+across two selftests; `duration_ms` is a measured quantity and is excluded by name.
+
+**The frozen fixture is now a real record.** `fixtures/m0/session.events.jsonl` is no longer the
+fabricated trace of 01b: it is the operator's real `tsr hook --selftest` output, and it is the input
+the frozen test `crates/tsr-cli/tests/m0_reconstruct.rs` asserts on. It cannot be regenerated in this
+sandbox (no `podman`/`docker` binary exists here; the self-test refuses rather than fabricate), so the
+frozen test stays red here. **The operator regenerates the fixture on a host with Docker after this
+repair**:
+
+```bash
+./target/debug/tsr hook --selftest
+```
+
+With the two defects repaired, the regenerated record has 19 events (no `Proposed`/`Committed` after
+a `tsr exec` PostToolUse, and the second run dispatching the candidate committed at its own
+PreToolUse), and the frozen test goes green on the host. The fixture and the frozen test are
+byte-for-byte unchanged by this repair.
+
 ## Notes
 
 - `crates/tsr-domain` was not touched by this repair; the additive changes M0 needed

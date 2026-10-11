@@ -64,6 +64,11 @@ Three rules follow:
    typed events to the store. In M0 it records and never blocks: it always exits 0 and never emits a
    `deny`/`block` decision.
 
+`PostToolUse` records only what already happened: for a `tsr exec -- …` call it records nothing
+(`tsr exec` recorded the dispatch and the execution), for any other `Bash` call it records `Executed`
+(or `Unresolved`) against the candidate the matching `PreToolUse` committed, and for `Read`/`Edit`/
+`Write` it records nothing new — it never proposes or commits a gated action.
+
 ### What the frozen test rejects
 
 `crates/tsr-cli/tests/m0_reconstruct.rs` reconstructs a session from the log alone and rejects:
