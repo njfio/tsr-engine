@@ -475,57 +475,88 @@ fn exec_outcome(payload: &HookPayload) -> (Option<i32>, Option<Hash>) {
     (exit_code, log_digest)
 }
 
-/// Record a `PostToolUse`: reconcile the pending dispatch of the task, if any.
+/// Record a `PostToolUse`: reconcile the commitment the matching `PreToolUse` made, if any.
 ///
-/// A `PostToolUse` for a `Bash` test run carries the exit code of the run the `PreToolUse` already
-/// dispatched. It records `Executed` (or `Unresolved`) for that same candidate — it does not mint a
-/// second candidate, so one run is one dispatch and one reconciliation.
+/// A `PostToolUse` **never** proposes or commits a candidate: the gated action was already recorded
+/// by the `PreToolUse` (and, for a `tsr exec -- …` call, dispatched by `tsr exec` itself). This
+/// function only reconciles what already happened:
+///
+/// - a `Bash` call whose command is a `tsr exec -- …` invocation records **nothing** — `tsr exec`
+///   recorded the dispatch and the execution;
+/// - any other `Bash` call records `Executed` (or `Unresolved`) for the candidate the matching
+///   `PreToolUse` committed: the most recent `Committed` with that candidate id that has no
+///   `Executed`/`Unresolved` after it;
+/// - if there is no such commitment, it records `Unresolved { reason: "post-tool with no prior
+///   commitment" }` — never `Proposed` or `Committed`;
+/// - a `PostToolUse` for any other tool (`Read`/`Edit`/`Write`/…) records nothing new.
 pub fn record_post_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<EventId>> {
     let task = payload.task();
-    let pending = pending_dispatch(store, &task)?;
-    let cid = match pending {
-        Some(cid) => cid,
-        // No pending dispatch: fall back to recording the call as a fresh tool event.
-        None => return record_tool(store, payload),
+
+    // Only a `Bash` call has an execution to reconcile, and a `tsr exec -- …` call recorded its own
+    // dispatch and execution inside `tsr exec`. Everything else records nothing here.
+    let cmd = match payload.bash_command() {
+        Some(cmd) if !is_tsr_exec_command(&cmd) => cmd,
+        _ => return Ok(Vec::new()),
     };
+
+    let kind = action_for(payload.tool_name.as_deref(), Some(&cmd));
+    let cid = mint_candidate(kind, &action_args(payload))?.id;
+
     let parents = last_event(store, &task)?
         .map(|e| vec![e.id])
         .unwrap_or_default();
     let (exit_code, log_digest) = exec_outcome(payload);
-    let kind = match exit_code {
-        Some(code) => EventKind::Executed {
-            candidate: cid,
-            exit_code: Some(code),
-            log_digest,
-            duration_ms: 0,
+    let event_kind = match committed_without_outcome(store, &task, cid)? {
+        Some(cid) => match exit_code {
+            Some(code) => EventKind::Executed {
+                candidate: cid,
+                exit_code: Some(code),
+                log_digest,
+                duration_ms: 0,
+            },
+            None => EventKind::Unresolved {
+                candidate: cid,
+                reason: "no exit code in the hook response".to_string(),
+            },
         },
+        // No commitment to reconcile: record the truth — an unresolved post-tool observation — and
+        // never invent a gated action.
         None => EventKind::Unresolved {
             candidate: cid,
-            reason: "no exit code in the hook response".to_string(),
+            reason: "post-tool with no prior commitment".to_string(),
         },
     };
-    let ev = Event::new(task, parents, Source::Rules, kind, now_rfc3339());
+    let ev = Event::new(task, parents, Source::Rules, event_kind, now_rfc3339());
     let id = ev.id;
     store.append(&ev)?;
     Ok(vec![id])
 }
 
-/// The candidate of the newest `Dispatched` event that has no `Executed`/`Unresolved` yet.
-fn pending_dispatch(store: &Store, task: &TaskId) -> anyhow::Result<Option<CandidateId>> {
-    use std::collections::HashSet;
+/// The candidate of the most recent `Committed` for `cid` that has no `Executed`/`Unresolved` after
+/// it, or `None` when there is no such commitment.
+///
+/// Ordering, not a set: a candidate may be committed, executed, and committed again (a second run of
+/// the same command). The second commitment is unreconciled even though an earlier `Executed` exists
+/// for the same id, so the second `PostToolUse` reconciles the second commitment.
+fn committed_without_outcome(
+    store: &Store,
+    task: &TaskId,
+    cid: CandidateId,
+) -> anyhow::Result<Option<CandidateId>> {
     let events = store.by_task(task)?;
-    let mut settled: HashSet<CandidateId> = HashSet::new();
     let mut pending: Option<CandidateId> = None;
     for (_, e) in &events {
         match &e.kind {
-            EventKind::Dispatched { candidate, .. } => pending = Some(*candidate),
-            EventKind::Executed { candidate, .. } | EventKind::Unresolved { candidate, .. } => {
-                settled.insert(*candidate);
+            EventKind::Committed { candidate, .. } if *candidate == cid => pending = Some(cid),
+            EventKind::Executed { candidate, .. } | EventKind::Unresolved { candidate, .. }
+                if *candidate == cid =>
+            {
+                pending = None;
             }
             _ => {}
         }
     }
-    Ok(pending.filter(|c| !settled.contains(c)))
+    Ok(pending)
 }
 
 /// The `tsr hook` entry point. Reads one payload from `input`, records it, and returns the events
@@ -835,4 +866,182 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         &crate::store_path::session_dir(),
     ));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh store in a scratch directory under `target/` (never `/tmp`, which this host prunes).
+    fn fresh_store(name: &str) -> (Store, std::path::PathBuf) {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/hook-unit")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let store = crate::store_path::open_store_at(&dir.join("tsr.db")).expect("open store");
+        (store, dir)
+    }
+
+    /// The kind tags of a task's events, in sequence order.
+    fn tags(store: &Store, task: &TaskId) -> Vec<String> {
+        store
+            .by_task(task)
+            .expect("by_task")
+            .into_iter()
+            .map(|(_, ev)| {
+                serde_json::to_value(&ev.kind).expect("serialize")["kind"]
+                    .as_str()
+                    .expect("kind tag")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn bash_payload(session: &str, stage: &str, cmd: &str, exit: Option<i32>) -> HookPayload {
+        HookPayload {
+            session_id: Some(session.to_string()),
+            hook_event_name: Some(stage.to_string()),
+            tool_name: Some("Bash".to_string()),
+            tool_input: Some(serde_json::json!({ "command": cmd })),
+            tool_response: exit.map(|c| serde_json::json!({ "exit_code": c, "stdout": "ok" })),
+            ..Default::default()
+        }
+    }
+
+    /// A `tsr exec -- …` PostToolUse appends nothing: `tsr exec` recorded the dispatch and the run.
+    #[test]
+    fn post_tool_for_tsr_exec_appends_nothing() {
+        let (store, _dir) = fresh_store("post-exec");
+        let session = "post-exec";
+        let task = store_path::task_for_session(session);
+        let cmd = "tsr exec -- cargo test --offline -p parser";
+
+        record_tool(&store, &bash_payload(session, "PreToolUse", cmd, None)).expect("pre");
+        let before = tags(&store, &task);
+        let appended =
+            record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, Some(0)))
+                .expect("post");
+        assert!(
+            appended.is_empty(),
+            "a tsr exec PostToolUse appends nothing"
+        );
+        assert_eq!(tags(&store, &task), before, "the log is unchanged");
+    }
+
+    /// A path-prefixed `tsr exec` is recognised the same way.
+    #[test]
+    fn post_tool_for_path_prefixed_tsr_exec_appends_nothing() {
+        let (store, _dir) = fresh_store("post-exec-prefix");
+        let session = "post-exec-prefix";
+        let task = store_path::task_for_session(session);
+        let cmd = "./target/debug/tsr exec -- cargo test --offline -p parser";
+
+        record_tool(&store, &bash_payload(session, "PreToolUse", cmd, None)).expect("pre");
+        let before = tags(&store, &task);
+        let appended =
+            record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, Some(0)))
+                .expect("post");
+        assert!(appended.is_empty());
+        assert_eq!(tags(&store, &task), before);
+    }
+
+    /// A host `Bash` PostToolUse reconciles the commitment the PreToolUse made: `Executed`, no new
+    /// `Proposed`/`Committed`.
+    #[test]
+    fn post_tool_for_host_bash_records_executed_without_proposing() {
+        let (store, _dir) = fresh_store("post-host");
+        let session = "post-host";
+        let task = store_path::task_for_session(session);
+        let cmd = "cargo test --offline -p parser";
+
+        record_tool(&store, &bash_payload(session, "PreToolUse", cmd, None)).expect("pre");
+        assert_eq!(
+            tags(&store, &task),
+            vec!["proposed", "committed", "dispatched"]
+        );
+
+        let appended =
+            record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, Some(0)))
+                .expect("post");
+        assert_eq!(appended.len(), 1);
+        assert_eq!(
+            tags(&store, &task),
+            vec!["proposed", "committed", "dispatched", "executed"],
+            "the PostToolUse reconciles the commitment and invents nothing"
+        );
+    }
+
+    /// A PostToolUse with no prior commitment records `Unresolved`, never `Proposed`/`Committed`.
+    #[test]
+    fn post_tool_with_no_prior_commitment_records_unresolved() {
+        let (store, _dir) = fresh_store("post-no-commit");
+        let session = "post-no-commit";
+        let task = store_path::task_for_session(session);
+        let cmd = "cargo test --offline -p parser";
+
+        record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, Some(0)))
+            .expect("post");
+        assert_eq!(tags(&store, &task), vec!["unresolved"]);
+        let reason = store
+            .by_task(&task)
+            .expect("by_task")
+            .into_iter()
+            .find_map(|(_, ev)| match ev.kind {
+                EventKind::Unresolved { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .expect("an Unresolved event");
+        assert_eq!(reason, "post-tool with no prior commitment");
+    }
+
+    /// A PostToolUse for a non-Bash tool records nothing new.
+    #[test]
+    fn post_tool_for_read_edit_write_records_nothing() {
+        let (store, _dir) = fresh_store("post-read");
+        let session = "post-read";
+        let task = store_path::task_for_session(session);
+
+        for tool in ["Read", "Edit", "Write"] {
+            let payload = HookPayload {
+                session_id: Some(session.to_string()),
+                hook_event_name: Some("PostToolUse".to_string()),
+                tool_name: Some(tool.to_string()),
+                tool_input: Some(serde_json::json!({ "file_path": "crates/tsr-cli/src/lib.rs" })),
+                ..Default::default()
+            };
+            let appended = record_post_tool(&store, &payload).expect("post");
+            assert!(appended.is_empty(), "{tool} PostToolUse appends nothing");
+        }
+        assert!(tags(&store, &task).is_empty(), "the log stays empty");
+    }
+
+    /// A second run of the same command reconciles the *second* commitment, not the first.
+    #[test]
+    fn post_tool_reconciles_the_most_recent_unreconciled_commitment() {
+        let (store, _dir) = fresh_store("post-second-run");
+        let session = "post-second-run";
+        let task = store_path::task_for_session(session);
+        let cmd = "cargo test --offline -p parser";
+
+        for _ in 0..2 {
+            record_tool(&store, &bash_payload(session, "PreToolUse", cmd, None)).expect("pre");
+            record_post_tool(&store, &bash_payload(session, "PostToolUse", cmd, Some(0)))
+                .expect("post");
+        }
+        assert_eq!(
+            tags(&store, &task),
+            vec![
+                "proposed",
+                "committed",
+                "dispatched",
+                "executed",
+                "proposed",
+                "committed",
+                "dispatched",
+                "executed"
+            ],
+            "each run proposes and commits once, and each PostToolUse reconciles its own commitment"
+        );
+    }
 }
