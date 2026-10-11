@@ -1,0 +1,44 @@
+# RATCHET protection profile — the default profile for the TSR Decision Engine.
+#
+# This is `tsr-policy`'s configuration (PRD §B5, §B4). It is authority, not evidence: it names the
+# read scope, the exact allowlisted test command ids, the per-task budgets and the boundary actions
+# that require an operator approval. It carries no scores, no reflections, no repository text and
+# no provider output.
+#
+# Load it with `Profile::load(Path::new("profiles/default.toml"))`.
+
+version = 1
+name = "default"
+
+# What the task may read. A candidate path must start with one of these prefixes; an `rts` query
+# must name one of these tools. Anything else is denied.
+[read_scope]
+paths = ["src/", "tests/", "docs/", "Cargo.toml", "crates/"]
+rts_tools = ["search", "callers", "definition", "references"]
+
+# The exact allowlisted test commands, by id. The model names an id; it never supplies argv.
+[[tests]]
+id = "cargo-test-parser"
+argv = ["cargo", "test", "--offline", "-p", "parser"]
+
+[[tests]]
+id = "cargo-test-workspace"
+argv = ["cargo", "test", "--offline", "--workspace", "--no-fail-fast"]
+
+[[tests]]
+id = "cargo-clippy"
+argv = ["cargo", "clippy", "--offline", "--workspace", "--all-targets", "--", "-D", "warnings"]
+
+# Per-task budgets, reserved before dispatch. On exhaustion the task stops with Stop(budget).
+[budgets]
+generator_tokens = 200000
+tool_minutes = 30
+wall_clock_secs = 3600
+generator_calls = 40
+patch_bytes = 262144
+
+# Boundary actions that require an operator approval. `true` = an approval is required.
+[approvals]
+promote_diff = true
+non_allowlisted_command = true
+network = true
