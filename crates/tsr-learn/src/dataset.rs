@@ -76,6 +76,9 @@ pub struct Row {
     pub generator_raw: Option<f64>,
     /// The operator's raw probability on the common event, if the operator forecast this row.
     pub operator_raw: Option<f64>,
+    /// A controller forecast already logged on the common event, if any (scored separately).
+    #[serde(default)]
+    pub controller_logged: Option<f64>,
 }
 
 /// The split manifest: the assignment of every task to a side, plus the rule and seed.
@@ -344,6 +347,7 @@ pub fn build_dataset(
             .collect();
         let generator_raw = dr.generator_raw();
         let operator_raw = dr.operator_raw();
+        let controller_logged = dr.controller_logged();
         let fv = extract(
             &spec,
             &before,
@@ -376,6 +380,7 @@ pub fn build_dataset(
             evidence,
             generator_raw,
             operator_raw,
+            controller_logged,
         });
     }
 

@@ -83,8 +83,12 @@ pub struct Report {
     pub generator: Scores,
     /// The operator's scores where recorded.
     pub operator: Option<Scores>,
+    /// The logged controller forecasts' scores, where recorded (labeled as logged).
+    pub controller_logged: Option<Scores>,
     /// Per family: `(controller, generator, operator)`.
     pub families: BTreeMap<String, FamilyScores>,
+    /// Per family on the calibrate slice: coverage and controller Brier at floors 0,5,10,20,30,50.
+    pub floor_sweep: BTreeMap<String, Vec<FloorPoint>>,
     /// The paired difference, overall.
     pub paired: Paired,
     /// The paired difference, per family.
@@ -101,6 +105,17 @@ pub struct FamilyScores {
     pub generator: Scores,
     pub operator: Option<Scores>,
 }
+
+/// One point of the floor sweep: a floor, the coverage it leaves and the controller's Brier.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FloorPoint {
+    pub floor: u32,
+    pub coverage: u32,
+    pub brier: f64,
+}
+
+/// The floors the report sweeps (brief item 6).
+pub const FLOOR_SWEEP: [u32; 6] = [0, 5, 10, 20, 30, 50];
 
 /// The controller's calibrated `p` for a row, or `None` when the row is uncalibrated.
 pub fn calibrated_p(bundle: &Bundle, row: &Row) -> Option<f64> {
@@ -178,6 +193,21 @@ fn scored_rows(ds: &Dataset) -> Vec<&Row> {
         .collect()
 }
 
+/// Build the report, logging every held_out row read to `<dir>/holdout-access.jsonl` (B9).
+///
+/// The split digest covers assignments only, so this logging never changes it.
+pub fn report_logged(
+    bundle: &Bundle,
+    dataset: &Dataset,
+    seed: u64,
+    dir: &std::path::Path,
+) -> Result<Report, crate::LearnError> {
+    for r in dataset.rows.iter().filter(|r| r.side == Side::HeldOut) {
+        crate::probes::log_holdout_access(dir, r, "report")?;
+    }
+    Ok(report(bundle, dataset, seed))
+}
+
 /// Build the report: score the controller against the generator on held_out rows.
 pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
     let rows = scored_rows(dataset);
@@ -191,6 +221,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
     let mut ctrl_pairs: Vec<(f64, f64)> = Vec::new();
     let mut gen_pairs: Vec<(f64, f64)> = Vec::new();
     let mut op_pairs: Vec<(f64, f64)> = Vec::new();
+    let mut logged_pairs: Vec<(f64, f64)> = Vec::new();
     let mut uncalibrated = 0u32;
 
     // Per family.
@@ -220,6 +251,9 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
             op_pairs.push((o, y));
             fam_op.entry(r.family.clone()).or_default().push((o, y));
         }
+        if let Some(l) = r.controller_logged {
+            logged_pairs.push((l, y));
+        }
         // The pair: only rows with both a calibrated controller p and a generator p.
         if let (Some(c), Some(g)) = (ctrl, gen) {
             let key = r.task.0.to_hex();
@@ -237,6 +271,11 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         None
     } else {
         Some(score(&op_pairs))
+    };
+    let controller_logged = if logged_pairs.is_empty() {
+        None
+    } else {
+        Some(score(&logged_pairs))
     };
 
     let mut families: BTreeMap<String, FamilyScores> = BTreeMap::new();
@@ -285,6 +324,41 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         paired_by_family.insert(f.clone(), paired_difference(&fam_diffs, seed));
     }
 
+    // The floor sweep: per family on the calibrate slice, coverage and controller Brier at each
+    // floor. Support is compared with the floor and reported; it never weights or scales anything.
+    let mut floor_sweep: BTreeMap<String, Vec<FloorPoint>> = BTreeMap::new();
+    let calibrate_rows: Vec<&Row> = dataset
+        .rows
+        .iter()
+        .filter(|r| r.side == Side::Calibrate && r.label.is_some())
+        .collect();
+    let mut sweep_fams: Vec<String> = calibrate_rows.iter().map(|r| r.family.clone()).collect();
+    sweep_fams.sort();
+    sweep_fams.dedup();
+    for f in sweep_fams {
+        let fam_rows: Vec<&&Row> = calibrate_rows.iter().filter(|r| r.family == f).collect();
+        let mut points = Vec::new();
+        for floor in FLOOR_SWEEP {
+            let mut pairs = Vec::new();
+            for r in &fam_rows {
+                let sup = row_support(bundle, r).episodes;
+                if sup >= floor {
+                    if let Some(c) = calibrated_p(bundle, r) {
+                        let y = if r.label == Some(true) { 1.0 } else { 0.0 };
+                        pairs.push((c, y));
+                    }
+                }
+            }
+            let s = score(&pairs);
+            points.push(FloorPoint {
+                floor,
+                coverage: s.n,
+                brier: s.brier,
+            });
+        }
+        floor_sweep.insert(f, points);
+    }
+
     Report {
         bundle_id: bundle.id.to_hex(),
         calibrator: bundle.manifest.calibrator.clone(),
@@ -295,7 +369,9 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         controller,
         generator,
         operator,
+        controller_logged,
         families,
+        floor_sweep,
         paired,
         paired_by_family,
         support_floor: bundle.manifest.support_floor,
@@ -393,6 +469,9 @@ pub fn render_report(r: &Report, json: bool) -> String {
     if let Some(o) = &r.operator {
         out.push_str(&render_scores("operator", o));
     }
+    if let Some(l) = &r.controller_logged {
+        out.push_str(&render_scores("controller_logged", l));
+    }
 
     out.push_str("\nfamilies\n");
     for (name, f) in &r.families {
@@ -413,6 +492,19 @@ pub fn render_report(r: &Report, json: bool) -> String {
     out.push_str("\npopulation\n");
     for (name, n) in &r.population {
         out.push_str(&format!("family {name} {}\n", proxy("support", *n as f64)));
+    }
+
+    out.push_str("\nfloor sweep (calibrate slice)\n");
+    for (name, points) in &r.floor_sweep {
+        out.push_str(&format!("family {name}\n"));
+        for p in points {
+            out.push_str(&format!(
+                "  floor={} {} {}\n",
+                p.floor,
+                proxy("coverage", p.coverage as f64),
+                proxy("brier", p.brier)
+            ));
+        }
     }
     out
 }
@@ -452,4 +544,319 @@ fn render_paired(label: &str, p: &Paired) -> String {
         p.clusters,
         proxy("brier", p.mean)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::{Bundle, Manifest};
+    use crate::dataset::{SplitBy, SplitManifest};
+    use crate::features::{spec_for_families, FeatureVector};
+    use crate::head::Head;
+    use crate::isotonic::Isotonic;
+    use crate::support::SupportEntry;
+    use std::collections::BTreeMap;
+    use tsr_domain::{ActionKind, EventId, Hash, TaskId};
+
+    fn bundle_for(families: &[&str], population: &[&str]) -> Bundle {
+        let fams: Vec<String> = families.iter().map(|s| s.to_string()).collect();
+        let spec = spec_for_families(&fams);
+        let dim = spec.names.len();
+        // A head that reads the last feature (a planted signal) and ignores the rest.
+        let mut weights = vec![0.0; dim];
+        weights[dim - 1] = 4.0;
+        let head = Head {
+            weights,
+            bias: 0.0,
+            mean: vec![0.0; dim],
+            std: vec![1.0; dim],
+            l2: 0.0,
+            iters: 1,
+        };
+        // A step calibrator: raw below 0.75 -> 0.1, at or above -> 0.9. The head separates the
+        // labels (raw 0.5 vs 0.982), so the calibrated p is close to the truth.
+        let iso = Isotonic {
+            breakpoints: vec![(0.75, 0.1), (1.0, 0.9)],
+        };
+        let mut pop = BTreeMap::new();
+        for f in population {
+            pop.insert(f.to_string(), 100);
+        }
+        Bundle {
+            id: Hash::of(&[b"bundle"]),
+            dir: std::path::PathBuf::from("/tmp/none"),
+            manifest: Manifest {
+                data_manifest: "d".into(),
+                training_root: "t".into(),
+                feature_schema: spec.version.clone(),
+                code_commit: "unknown".into(),
+                seed: 1,
+                calibrator: format!(
+                    "{} {}",
+                    &Hash::of(&[b"bundle"]).to_hex()[..12],
+                    spec.version
+                ),
+                support_floor: 30,
+                split_digest: "s".into(),
+                source_root: "r".into(),
+                state: "draft".into(),
+                id: Hash::of(&[b"bundle"]).to_hex(),
+                content_digests: BTreeMap::new(),
+            },
+            head,
+            isotonic: iso,
+            spec,
+            split: SplitManifest {
+                by: SplitBy::Time,
+                seed: 1,
+                assignments: BTreeMap::new(),
+                digest: Hash::of(&[b"split"]),
+            },
+            support_index: Vec::<SupportEntry>::new(),
+            population: pop,
+        }
+    }
+
+    fn row(
+        b: &Bundle,
+        family: &str,
+        lineage: &str,
+        signal: f64,
+        label: bool,
+        gen: f64,
+        i: u64,
+    ) -> Row {
+        let dim = b.spec.names.len();
+        let mut values = vec![0.0; dim];
+        values[dim - 1] = signal;
+        Row {
+            id: Hash::of(&[format!("row{i}").as_bytes()]),
+            task: TaskId(Hash::of(&[format!("t{i}").as_bytes()])),
+            commitment: EventId(Hash::of(&[format!("c{i}").as_bytes()])),
+            index: i,
+            action: ActionKind::ProposePatch,
+            family: family.to_string(),
+            lineage: lineage.to_string(),
+            side: Side::HeldOut,
+            features: FeatureVector { values },
+            label: Some(label),
+            evidence: Vec::new(),
+            generator_raw: Some(gen),
+            operator_raw: None,
+            controller_logged: None,
+        }
+    }
+
+    fn dataset(b: &Bundle, rows: Vec<Row>) -> Dataset {
+        Dataset {
+            rows,
+            split: b.split.clone(),
+            spec: b.spec.clone(),
+            data_root: Hash::of(&[b"data"]),
+            training_root: Hash::of(&[b"train"]),
+            source_root: Hash::of(&[b"source"]),
+        }
+    }
+
+    #[test]
+    fn same_seed_gives_the_same_output() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..40u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 4),
+                signal,
+                label,
+                0.5,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let a = render_report(&report(&b, &ds, 7), false);
+        let c = render_report(&report(&b, &ds, 7), false);
+        assert_eq!(a, c, "same seed gives the same report");
+    }
+
+    #[test]
+    fn controller_beats_generator_with_interval_below_zero() {
+        let b = bundle_for(&["overconfident"], &["overconfident"]);
+        let mut rows = Vec::new();
+        for i in 0..80u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            // The generator is overconfident: it says 0.9 where the family succeeds ~0.5.
+            rows.push(row(
+                &b,
+                "overconfident",
+                &format!("l{}", i % 8),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 11);
+        assert!(
+            r.controller.brier < r.generator.brier,
+            "controller {} < generator {}",
+            r.controller.brier,
+            r.generator.brier
+        );
+        let p = &r.paired;
+        assert!(p.interval.is_some(), "two or more clusters");
+        let (lo, hi) = p.interval.unwrap();
+        assert!(hi < 0.0, "interval [{lo}, {hi}] wholly below zero");
+        assert!(!p.inconclusive);
+        // The overconfident family's pair is also below zero.
+        let fam = &r.paired_by_family["overconfident"];
+        assert!(fam.interval.unwrap().1 < 0.0);
+    }
+
+    #[test]
+    fn straddling_input_prints_inconclusive() {
+        // Controller and generator are identical, so the difference is exactly zero and the
+        // interval straddles zero.
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..40u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            // The generator equals the controller's calibrated p (identity isotonic, same head).
+            let gen =
+                crate::report::calibrated_p(&b, &row(&b, "calibrated", "l", signal, label, 0.0, i))
+                    .unwrap();
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 4),
+                signal,
+                label,
+                gen,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 3);
+        assert!(r.paired.inconclusive, "a zero difference straddles zero");
+        let text = render_report(&r, false);
+        assert!(text.contains("INCONCLUSIVE"), "{text}");
+    }
+
+    #[test]
+    fn fewer_than_two_clusters_prints_interval_na() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "calibrated", "only", signal, label, 0.9, i));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 5);
+        assert!(r.paired.interval.is_none());
+        let text = render_report(&r, false);
+        assert!(text.contains("interval n/a"), "{text}");
+    }
+
+    #[test]
+    fn uncalibrated_rows_are_excluded_and_counted() {
+        // The bundle's population holds only "calibrated"; an "underconfident" row is uncalibrated.
+        let b = bundle_for(&["calibrated", "underconfident"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
+        }
+        for i in 20..30u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "underconfident",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 9);
+        assert_eq!(
+            r.uncalibrated, 10,
+            "the ten underconfident rows are uncalibrated"
+        );
+        let text = render_report(&r, false);
+        assert!(text.contains("uncalibrated 10"), "{text}");
+    }
+
+    #[test]
+    fn no_forbidden_strings_and_calibrator_version_printed() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..40u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 4),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let text = render_report(&report(&b, &ds, 2), false);
+        assert!(!text.contains("percent certain"), "{text}");
+        // The calibrator version is the bundle id's first 12 hex and features@v1.
+        let prefix = &b.id.to_hex()[..12];
+        assert!(
+            text.contains(prefix),
+            "calibrator prefix {prefix} in {text}"
+        );
+        assert!(text.contains(&b.spec.version), "feature version in {text}");
+        // Every number is a Proxy with its engineering name.
+        assert!(text.contains("brier="), "{text}");
+        assert!(text.contains("log_loss="), "{text}");
+    }
+
+    #[test]
+    fn families_and_forecasters_are_in_name_order() {
+        let b = bundle_for(
+            &["calibrated", "overconfident"],
+            &["calibrated", "overconfident"],
+        );
+        let mut rows = Vec::new();
+        for i in 0..40u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            let fam = if i % 2 == 0 {
+                "overconfident"
+            } else {
+                "calibrated"
+            };
+            rows.push(row(&b, fam, &format!("l{}", i % 4), signal, label, 0.9, i));
+        }
+        let ds = dataset(&b, rows);
+        let text = render_report(&report(&b, &ds, 4), false);
+        let cal = text.find("family calibrated").unwrap();
+        let over = text.find("family overconfident").unwrap();
+        assert!(cal < over, "families in name order: {text}");
+    }
 }

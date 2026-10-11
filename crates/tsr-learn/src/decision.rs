@@ -56,6 +56,14 @@ impl DecisionRow {
             .find(|f| f.source == Forecaster::Operator)
             .map(|f| f.raw.get())
     }
+
+    /// A controller forecast already logged on the common event, if any (scored separately).
+    pub fn controller_logged(&self) -> Option<f64> {
+        self.forecasts
+            .iter()
+            .find(|f| f.source == Forecaster::Controller)
+            .map(|f| f.raw.get())
+    }
 }
 
 /// Build the common decision event as a pure view over `events` (in sequence order).
