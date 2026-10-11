@@ -134,6 +134,13 @@ fn source_for(kind: ActionKind) -> Source {
 /// hook and `tsr forecast` digest, so the two paths mint the same candidate for the same call.
 pub fn action_args(payload: &HookPayload) -> String {
     if let Some(cmd) = payload.bash_command() {
+        // A `tsr exec -- …` call commits to the *inner* command, not the wrapper: the forecast names
+        // the command that will run, and `tsr exec` mints its candidate from the argv it is handed.
+        // Without this the hook's candidate for `tsr exec -- cargo test …` would differ from the
+        // forecast's for `cargo test …`, and the commitment would orphan the forecast.
+        if let Some(inner) = tsr_exec_inner(&cmd) {
+            return inner;
+        }
         return cmd;
     }
     if let Some(v) = &payload.tool_input {
@@ -188,6 +195,29 @@ pub fn is_tsr_exec_command(cmd: &str) -> bool {
     };
     let base = first.rsplit('/').next().unwrap_or(first);
     base == "tsr" && tokens.next() == Some("exec")
+}
+
+/// The inner command of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
+///
+/// The inner command is the argv `tsr exec` is handed, joined by single spaces — the same string
+/// `exec::mint_candidate` digests — so the hook's candidate for the wrapper call equals the one the
+/// forecast names and the one `tsr exec` dispatches.
+pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
+    if !is_tsr_exec_command(cmd) {
+        return None;
+    }
+    let mut tokens = cmd.split_whitespace();
+    tokens.next()?; // the `tsr` token
+    tokens.next()?; // `exec`
+    let rest: Vec<&str> = tokens.collect();
+    let rest = match rest.first() {
+        Some(&"--") => &rest[1..],
+        _ => &rest[..],
+    };
+    if rest.is_empty() {
+        return None;
+    }
+    Some(rest.join(" "))
 }
 
 thread_local! {
