@@ -79,6 +79,9 @@ pub enum DriverError {
     Fixture(String),
     #[error("the driver is not available in this sandbox: {0}")]
     Unavailable(String),
+    /// The Tier 0 controller refused a step (D6): read-before-test, or the budget is exhausted.
+    #[error("tier 0: {0}")]
+    Tier0(#[from] Tier0Error),
 }
 
 /// What a driver did, for the per-task result record.
@@ -94,6 +97,10 @@ pub struct DriverReport {
     pub denials: Vec<Denial>,
     /// Whether the driver reached a `Stop`.
     pub stopped: bool,
+    /// Whether the attempt ended on a gate denial (D6): a denial ends the attempt, it does not
+    /// continue to the next step.
+    #[serde(default)]
+    pub ended_on_denial: bool,
 }
 
 /// One recorded denial.
@@ -248,15 +255,207 @@ impl Mode {
 }
 
 /// Replays a fixture session. Used by every test.
+/// A Tier 0 policy violation (D6): the controller refused a step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Tier0Error {
+    /// The failing test was about to run before the failing assertion and its call site were read.
+    ReadBeforeTest {
+        /// The test id the step would have run.
+        test_id: String,
+        /// The paths that are still unread.
+        unread: Vec<String>,
+    },
+    /// The tool-minute budget is exhausted: the attempt stops with `Stop(budget)`.
+    BudgetExhausted {
+        /// Tool minutes spent so far.
+        spent: u32,
+        /// The budget.
+        budget: u32,
+    },
+}
+
+impl std::fmt::Display for Tier0Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Tier0Error::ReadBeforeTest { test_id, unread } => write!(
+                f,
+                "read-before-test: {test_id} ran before reading {}",
+                unread.join(", ")
+            ),
+            Tier0Error::BudgetExhausted { spent, budget } => {
+                write!(f, "budget exhausted: {spent}/{budget} tool-minutes")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Tier0Error {}
+
+/// A scripted repository for the Tier 0 controller: the failing assertion, its call site, and the
+/// allowlisted test id that runs the failing test. The controller reads no files: it is told which
+/// paths the session inspected, and decides from that.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScriptedRepo {
+    /// The path of the failing assertion.
+    pub assertion: String,
+    /// The path of the failing assertion's call site.
+    pub call_site: String,
+    /// The allowlisted test id that runs the failing test.
+    pub failing_test_id: String,
+}
+
+impl ScriptedRepo {
+    /// A scripted repository.
+    pub fn new(
+        assertion: impl Into<String>,
+        call_site: impl Into<String>,
+        failing_test_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            assertion: assertion.into(),
+            call_site: call_site.into(),
+            failing_test_id: failing_test_id.into(),
+        }
+    }
+}
+
+/// The Tier 0 controller (PRD §B9): inspect until the failing assertion and its call site are
+/// read, then run the test, then propose; stop on budget; a denial ends the attempt.
+///
+/// The controller is a plain value: the driver owns it and calls [`Tier0Controller::check`] for
+/// each step before the step is proposed. It enforces the two rules that are decidable from the
+/// step stream alone — read-before-test and the budget stop. The third rule, stop on denial, is
+/// enforced by the driver, which ends the attempt when the gate denies a step.
+#[derive(Clone, Debug)]
+pub struct Tier0Controller {
+    repo: ScriptedRepo,
+    budget: u32,
+    spent: u32,
+    read_assertion: bool,
+    read_call_site: bool,
+    ran_test: bool,
+    stopped_on_budget: bool,
+}
+
+impl Tier0Controller {
+    /// A controller for a scripted repository and a tool-minute budget.
+    pub fn new(repo: ScriptedRepo, budget: u32) -> Self {
+        Self {
+            repo,
+            budget,
+            spent: 0,
+            read_assertion: false,
+            read_call_site: false,
+            ran_test: false,
+            stopped_on_budget: false,
+        }
+    }
+
+    /// Whether the failing assertion has been read.
+    pub fn read_assertion(&self) -> bool {
+        self.read_assertion
+    }
+
+    /// Whether the failing assertion's call site has been read.
+    pub fn read_call_site(&self) -> bool {
+        self.read_call_site
+    }
+
+    /// Whether the failing test has run.
+    pub fn ran_test(&self) -> bool {
+        self.ran_test
+    }
+
+    /// Whether the controller stopped on budget.
+    pub fn stopped_on_budget(&self) -> bool {
+        self.stopped_on_budget
+    }
+
+    /// Tool minutes spent so far.
+    pub fn spent(&self) -> u32 {
+        self.spent
+    }
+
+    /// The budget.
+    pub fn budget(&self) -> u32 {
+        self.budget
+    }
+
+    /// Check a step against the Tier 0 policy. Returns `Ok(())` when the step may proceed, or a
+    /// [`Tier0Error`] when the policy refuses it.
+    pub fn check(&mut self, step: &ScriptedStep) -> Result<(), Tier0Error> {
+        // Rule 2: stop on budget. A step that would spend past the budget stops the attempt.
+        if self.spent >= self.budget {
+            self.stopped_on_budget = true;
+            return Err(Tier0Error::BudgetExhausted {
+                spent: self.spent,
+                budget: self.budget,
+            });
+        }
+
+        match &step.args {
+            StepArgs::InspectPath { path } => {
+                if *path == self.repo.assertion {
+                    self.read_assertion = true;
+                }
+                if *path == self.repo.call_site {
+                    self.read_call_site = true;
+                }
+            }
+            StepArgs::TestId { id } => {
+                // Rule 1: read-before-test. The failing test may not run until the failing
+                // assertion and its call site have both been read.
+                if *id == self.repo.failing_test_id && !self.ran_test {
+                    let mut unread = Vec::new();
+                    if !self.read_assertion {
+                        unread.push(self.repo.assertion.clone());
+                    }
+                    if !self.read_call_site {
+                        unread.push(self.repo.call_site.clone());
+                    }
+                    if !unread.is_empty() {
+                        return Err(Tier0Error::ReadBeforeTest {
+                            test_id: id.clone(),
+                            unread,
+                        });
+                    }
+                    self.ran_test = true;
+                }
+            }
+            _ => {}
+        }
+
+        self.spent = self.spent.saturating_add(step.tool_minutes);
+        Ok(())
+    }
+}
+
 pub struct ScriptedDriver {
     mode: Mode,
     session: ScriptedSession,
+    tier0: Option<Tier0Controller>,
 }
 
 impl ScriptedDriver {
     /// A scripted driver for a mode and a session.
     pub fn new(mode: Mode, session: ScriptedSession) -> Self {
-        Self { mode, session }
+        Self {
+            mode,
+            session,
+            tier0: None,
+        }
+    }
+
+    /// Attach the Tier 0 controller (D6) for the rules system. In `Mode::Rules` the driver runs
+    /// the controller for each step; in `Mode::Record` it is ignored (system 1 gates nothing).
+    pub fn with_tier0(mut self, repo: ScriptedRepo, budget: u32) -> Self {
+        self.tier0 = Some(Tier0Controller::new(repo, budget));
+        self
+    }
+
+    /// The Tier 0 controller, if one is attached.
+    pub fn tier0(&self) -> Option<&Tier0Controller> {
+        self.tier0.as_ref()
     }
 
     /// The session this driver replays.
@@ -300,7 +499,15 @@ impl Driver for ScriptedDriver {
 
     fn drive(&self, ctx: &mut SessionCtx, _task: &CorpusTask) -> Result<DriverReport, DriverError> {
         let mut report = DriverReport::default();
+        // The Tier 0 controller (D6) is consulted for each step in rules mode, before the step is
+        // proposed. A refusal ends the attempt: the driver returns the error and does not continue.
+        let mut tier0 = self.tier0.clone();
         for step in &self.session.steps {
+            if self.mode == Mode::Rules {
+                if let Some(controller) = tier0.as_mut() {
+                    controller.check(step)?;
+                }
+            }
             let candidate = self.candidate_for(ctx, step)?;
             ctx.propose(candidate.clone())?;
 
@@ -332,7 +539,9 @@ impl Driver for ScriptedDriver {
                             if step.kind == ActionKind::Stop {
                                 report.stopped = true;
                             }
-                            continue;
+                            // D6: a denial ends the attempt; it does not continue to the next step.
+                            report.ended_on_denial = true;
+                            break;
                         }
                         Err(e) => return Err(e.into()),
                     }

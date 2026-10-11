@@ -30,8 +30,8 @@ pub mod session;
 pub mod task;
 
 pub use driver::{
-    ClaudeCodeDriver, Driver, DriverError, DriverReport, Mode, ScriptedDriver, ScriptedSession,
-    ScriptedStep, StepArgs, DRIVER_UNAVAILABLE_EXIT,
+    ClaudeCodeDriver, Driver, DriverError, DriverReport, Mode, ScriptedDriver, ScriptedRepo,
+    ScriptedSession, ScriptedStep, StepArgs, Tier0Controller, Tier0Error, DRIVER_UNAVAILABLE_EXIT,
 };
 pub use invariants::{check_session_invariants, InvariantViolation};
 pub use results::{read_results, write_results, OracleVerdict, Outcome, TaskResult};
