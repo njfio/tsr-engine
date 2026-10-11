@@ -364,6 +364,33 @@ pub struct Forecast {
     pub state_version: u64,
 }
 
+impl Forecast {
+    /// Record a forecast for a named event at a state version. `raw` is always recorded;
+    /// `calibrated` stays `None` until a validated calibrator exists (A2 §5) — never fabricated.
+    /// The id commits to the event, the horizon, the forecaster, the raw probability and the
+    /// state version, so a forecast cannot be silently re-pointed at another version.
+    pub fn new(
+        event: OutcomeDefId,
+        horizon: Horizon,
+        source: Forecaster,
+        raw: Probability,
+        state_version: u64,
+    ) -> Self {
+        let payload = serde_json::to_vec(&(&event, &horizon, &source, &raw, state_version))
+            .expect("serializable");
+        Self {
+            id: ForecastId(Hash::of(&[&payload])),
+            event,
+            horizon,
+            source,
+            raw,
+            calibrated: None,
+            support: Support { episodes: 0 },
+            state_version,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The two records from one return (B2.1): Surprise stays physical; only Contrast expands.
 // ---------------------------------------------------------------------------------------------
@@ -691,6 +718,10 @@ pub enum EventKind {
     Proposed {
         candidate: Candidate,
     },
+    /// The model's own turn (PRD B4 line 218: "the model's own turn is Generate").
+    Generate {
+        candidate: CandidateId,
+    },
     Forecast {
         forecast: Forecast,
         candidate: CandidateId,
@@ -739,6 +770,12 @@ pub enum EventKind {
         task: TaskId,
         reason: String,
     },
+    /// The Stop stage of the hook (PRD B4 line 218: "the Stop hook is Stop"). The reason is the
+    /// typed `Stop` reason of B5 (`done`, `budget`, `blocked`, `unsafe`, `operator`); the hook
+    /// records it and never blocks.
+    Stop {
+        reason: String,
+    },
 }
 
 /// An event in the append-only log. `id` = blake3(payload, parents).
@@ -781,6 +818,12 @@ impl Event {
             source,
             kind,
         }
+    }
+
+    /// The state version this event is recorded against: the number of events in the task
+    /// before it (B5: "a forecast for the current state version").
+    pub fn state_version(&self, seq: i64) -> u64 {
+        (seq - 1).max(0) as u64
     }
 }
 
@@ -1105,6 +1148,85 @@ mod tests {
         let json = serde_json::to_string(&e2).unwrap();
         let back: Event = serde_json::from_str(&json).unwrap();
         assert_eq!(back, e2);
+    }
+
+    #[test]
+    fn generate_kind_round_trips_and_state_version_counts_prior_events() {
+        let cid = CandidateId(h("candidate-1"));
+        let kind = EventKind::Generate { candidate: cid };
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(
+            json,
+            format!(
+                "{{\"kind\":\"generate\",\"candidate\":\"{}\"}}",
+                cid.0.to_hex()
+            )
+        );
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
+
+        let e = Event::new(
+            tid(),
+            vec![],
+            Source::Generator,
+            EventKind::Generate { candidate: cid },
+            "2026-10-11T00:00:00Z",
+        );
+        assert_eq!(e.state_version(1), 0, "the first event is state version 0");
+        assert_eq!(e.state_version(5), 4, "four events precede the fifth");
+    }
+
+    #[test]
+    fn stop_kind_round_trips() {
+        let kind = EventKind::Stop {
+            reason: "done".into(),
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, "{\"kind\":\"stop\",\"reason\":\"done\"}");
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
+
+        let e = Event::new(
+            tid(),
+            vec![],
+            Source::Rules,
+            EventKind::Stop {
+                reason: "done".into(),
+            },
+            "2026-10-11T00:00:00Z",
+        );
+        let json = serde_json::to_string(&e).unwrap();
+        let back: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn forecast_new_pins_the_state_version_and_round_trips() {
+        let f = Forecast::new(
+            OutcomeDefId(h("task_accepted_in_budget@v1")),
+            Horizon::TaskClose,
+            Forecaster::Generator,
+            Probability::new(0.7).unwrap(),
+            4,
+        );
+        assert_eq!(f.state_version, 4);
+        assert_eq!(f.raw.get(), 0.7);
+        assert!(f.calibrated.is_none(), "no calibrator, no Calibrated");
+        assert_eq!(f.support.episodes, 0);
+
+        let json = serde_json::to_string(&f).unwrap();
+        let back: Forecast = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
+
+        // The id commits to the state version: the same forecast at another version is another id.
+        let g = Forecast::new(
+            OutcomeDefId(h("task_accepted_in_budget@v1")),
+            Horizon::TaskClose,
+            Forecaster::Generator,
+            Probability::new(0.7).unwrap(),
+            5,
+        );
+        assert_ne!(f.id, g.id);
     }
 
     #[test]
