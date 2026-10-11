@@ -646,15 +646,51 @@ fn generation_is_deterministic() {
     }
 }
 
+/// Render one episode to the exact bytes `write_corpus` would write for it.
+fn render_episode(ep: &Episode) -> String {
+    let outcome = match ep.outcome {
+        EpisodeOutcome::Accepted => "accepted",
+        EpisodeOutcome::Rejected => "rejected",
+        EpisodeOutcome::Disputed => "disputed",
+    };
+    let file = EpisodeFile {
+        task: ep.task,
+        family: ep.family.to_string(),
+        index: ep.index,
+        outcome: outcome.to_string(),
+        events: ep.events.clone(),
+    };
+    serde_json::to_string_pretty(&file).expect("serialize episode")
+}
+
+/// The committed fixtures must be byte-identical to what the generator produces.
+///
+/// This reads the committed files **before** writing anything, so it can actually fail on a stale
+/// corpus: a test that regenerates first and then compares against its own output proves nothing.
 #[test]
 fn fixtures_are_committed_and_match_the_generator() {
     let dir = fixtures_dir();
-    let paths = write_corpus(&dir, SEED);
-    assert_eq!(paths.len(), 30, "thirty files written");
-    // Every file is on disk and parses back to the same event ids.
     let corpus = generate_corpus(SEED);
-    for (ep, path) in corpus.iter().zip(paths.iter()) {
-        let text = std::fs::read_to_string(path).expect("read episode");
+    assert_eq!(corpus.len(), 30, "thirty episodes");
+
+    // 1. Read the committed bytes first, and compare them to the generator's output.
+    for ep in &corpus {
+        let path = dir.join(format!("{}-{:02}.json", ep.family, ep.index));
+        let committed = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("committed fixture {} is missing: {e}", path.display()));
+        let expected = render_episode(ep);
+        assert_eq!(
+            committed,
+            expected,
+            "committed fixture {} differs from the generator (stale corpus?)",
+            path.display()
+        );
+    }
+
+    // 2. Every committed file parses back to the same event ids.
+    for ep in &corpus {
+        let path = dir.join(format!("{}-{:02}.json", ep.family, ep.index));
+        let text = std::fs::read_to_string(&path).expect("read episode");
         let file: EpisodeFile = serde_json::from_str(&text).expect("parse episode");
         assert_eq!(file.family, ep.family);
         assert_eq!(file.events.len(), ep.events.len());
@@ -662,6 +698,16 @@ fn fixtures_are_committed_and_match_the_generator() {
             assert_eq!(a.id, b.id, "committed fixture matches the generator");
         }
     }
+
+    // 3. There are exactly thirty committed episode files, and no strays.
+    let mut committed: Vec<String> = std::fs::read_dir(&dir)
+        .expect("read fixtures dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".json"))
+        .collect();
+    committed.sort();
+    assert_eq!(committed.len(), 30, "thirty committed episode files");
 }
 
 #[test]

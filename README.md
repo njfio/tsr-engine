@@ -21,6 +21,37 @@ cargo build --workspace
 cargo test --workspace --no-fail-fast     # 10 pass, 1 red (M0)
 ```
 
+## Review and reflect
+
+M2 closes the loop: a task's returns are labelled, and one closed episode is rendered in the book's
+order. The commands are `tsr review` and `tsr reflect`.
+
+```bash
+# Label a task's returns: accepted | rejected --reason <text> | disputed.
+tsr review <task> --store tsr.db
+tsr review <task> rejected --reason "the diff touched the schema" --store tsr.db
+
+# Sample greens for review at a rate, with the inverse-probability weight recorded on the record.
+tsr review <task> --sample 0.25 --seed 7 --store tsr.db
+# The false-accept rate (green but rejected), weighted and unweighted, per family.
+tsr review <task> --family alpha --stats --store tsr.db
+
+# One closed episode on one screen: Desire, Imagination, Belief, Return, and the residual
+# (Surprise per forecaster and Contrast per criterion, side by side, never added).
+tsr reflect <task> --store tsr.db
+# Each forecaster's calibration curve (reliability bins and Brier), including the operator's.
+tsr reflect --family alpha --store tsr.db
+# The same content as a document, for tests.
+tsr reflect <task> --json --store tsr.db
+```
+
+The thirty episodes under `fixtures/m2/episodes/` are **synthetic**: a seeded generator
+(`crates/tsr-cli/tests/m2_episodes.rs`) drives the store API through
+open -> propose -> forecast -> commit -> dispatch -> execute -> close -> review across three families
+with different generator calibration. The real thirty come from operator sessions after M3's batch
+runner. `fixtures/m2/store/tsr.db` is the same corpus as a store the CLI can fold. See
+[`docs/m2-evidence.md`](docs/m2-evidence.md) for every command and its captured output.
+
 ## Layout
 
 ```
