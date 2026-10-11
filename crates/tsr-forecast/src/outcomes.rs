@@ -22,12 +22,16 @@ pub const INTUITION_STAGES: [&str; 4] = [
     "intuition_observed",
 ];
 
-/// Mint a versioned [`OutcomeDefId`] from a name and version: `blake3(name, version)`.
+/// Mint a versioned [`OutcomeDefId`] from a name and version: `blake3("name@vN")`.
 ///
 /// The id commits to the name and the version, so `test_pass@v1` and `test_pass@v2` are
 /// different ids and a forecast made against one is never silently resolved against the other.
+///
+/// The hashed bytes are the literal `name@vN` string — the same bytes `tsr hook` hashes for the
+/// common decision event (`hook.rs`, `DECISION_EVENT = "task_accepted_in_budget@v1"`). A
+/// forecast the hook records is therefore scored against the id this function mints (D2).
 pub fn outcome_def_id(name: &str, version: u32) -> OutcomeDefId {
-    OutcomeDefId(Hash::of(&[name.as_bytes(), &version.to_le_bytes()]))
+    OutcomeDefId(Hash::of(&[format!("{name}@v{version}").as_bytes()]))
 }
 
 /// The canonical id of the common decision event, `task_accepted_in_budget@v1`.
