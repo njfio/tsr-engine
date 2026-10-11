@@ -69,33 +69,37 @@ fn cost_section(text: &str) -> String {
 }
 
 /// D2: a hand-computed example where the ratio-of-sums and the mean-of-ratios
-/// differ. The current code prints the ratio-of-sums point estimate but
+/// differ IN SIGN. The current code prints the ratio-of-sums point estimate but
 /// bootstraps the mean-of-ratios, so the printed diff and the interval describe
-/// different statistics.
+/// different statistics — and here they point in opposite directions, so the
+/// verdict flips depending on which statistic is used.
 ///
-/// Two lineages, paired by task id:
-///   lineage A: task "a" — record cost 1.0, rules cost 10.0
-///   lineage B: tasks "b1","b2","b3" — record all accepted at cost 10.0;
-///              rules: "b1" accepted at cost 1.0, "b2"/"b3" rejected.
-/// Ratio of sums (the metric): record = (1 + 30)/4 = 7.75;
-///   rules = (10 + 1)/2 = 5.5; diff = 5.5 - 7.75 = -2.25.
+/// Two lineages, paired by task id (cost = generator_tokens / 1000):
+///   lineage A: task "a" — record accepted cost 10.0, rules accepted cost 1.0
+///   lineage B: tasks "b1","b2","b3" — record all accepted at cost 1.0;
+///              rules: "b1" accepted at cost 10.0, "b2"/"b3" rejected.
+/// Ratio of sums (the metric):
+///   record accepted = a(10) + b1(1) + b2(1) + b3(1) = 13 over 4 = 3.25
+///   rules  accepted = a(1) + b1(10) = 11 over 2 = 5.5
+///   diff = 5.5 - 3.25 = +2.25  (POSITIVE)
 /// Mean of per-task "cost if accepted else 0" differences (what the current
-/// bootstrap averages): record per-task = [1, 10, 10, 10]; rules per-task =
-/// [10, 1, 0, 0]; diffs = [9, -9, -10, -10]; mean = -20/4 = -5.0.
-/// The two differ, so the interval built from the mean-of-ratios is centred on
-/// -5.0, not on the printed -2.25.
+/// bootstrap averages): per-task diffs (rules - record, 0 if either rejected) =
+///   a: 1-10 = -9 ; b1: 10-1 = +9 ; b2: 0-1 = -1 ; b3: 0-1 = -1
+///   mean = (-9 + 9 - 1 - 1)/4 = -0.5  (NEGATIVE)
+/// The two statistics differ IN SIGN, so the interval built from the
+/// mean-of-ratios is centred on -0.5, not on the printed +2.25.
 #[test]
 fn d2_ratio_of_sums_differs_from_mean_of_ratios() {
     let rows = vec![
-        // lineage A: one paired task, record cost 1.0, rules cost 10.0
-        row("a", "record", "A", true, 1000, 0), // cost 1.0
-        row("a", "rules", "A", true, 10000, 0), // cost 10.0
-        // lineage B: record has 3 accepted tasks at cost 10.0
-        row("b1", "record", "B", true, 10000, 0),
-        row("b2", "record", "B", true, 10000, 0),
-        row("b3", "record", "B", true, 10000, 0),
-        // lineage B: rules has 1 accepted task at cost 1.0 and 2 rejected
-        row("b1", "rules", "B", true, 1000, 0),
+        // lineage A: one paired task, record cost 10.0, rules cost 1.0
+        row("a", "record", "A", true, 10000, 0), // cost 10.0
+        row("a", "rules", "A", true, 1000, 0),   // cost 1.0
+        // lineage B: record has 3 accepted tasks at cost 1.0
+        row("b1", "record", "B", true, 1000, 0),
+        row("b2", "record", "B", true, 1000, 0),
+        row("b3", "record", "B", true, 1000, 0),
+        // lineage B: rules has 1 accepted task at cost 10.0 and 2 rejected
+        row("b1", "rules", "B", true, 10000, 0),
         row("b2", "rules", "B", false, 0, 0),
         row("b3", "rules", "B", false, 0, 0),
     ];
@@ -107,32 +111,39 @@ fn d2_ratio_of_sums_differs_from_mean_of_ratios() {
     let record = m.record.expect("record ratio defined");
     let rules = m.rules.expect("rules ratio defined");
     assert!(
-        (record - 7.75).abs() < 1e-9,
-        "record ratio-of-sums should be 7.75, got {record}"
+        (record - 3.25).abs() < 1e-9,
+        "record ratio-of-sums should be 3.25, got {record}"
     );
     assert!(
         (rules - 5.5).abs() < 1e-9,
         "rules ratio-of-sums should be 5.5, got {rules}"
     );
-    // The paired difference is the difference of the two ratios.
+    // The paired difference is the difference of the two ratios, and it is
+    // POSITIVE here.
     let diff = m.diff.as_ref().expect("diff defined");
     assert!(
-        (diff.point - (5.5 - 7.75)).abs() < 1e-9,
-        "paired diff should be the difference of the ratios (-2.25), got {}",
+        diff.point > 0.0,
+        "ratio-of-sums diff must be positive (+2.25), got {}",
         diff.point
     );
-    // The interval must contain the point estimate and must not be the
-    // degenerate mean-of-ratios value.
+    assert!(
+        (diff.point - 2.25).abs() < 1e-9,
+        "paired diff should be the difference of the ratios (+2.25), got {}",
+        diff.point
+    );
+    // The mean-of-ratios statistic is NEGATIVE (-0.5): the two statistics
+    // differ IN SIGN, so the point estimate must not be that value.
+    assert!(
+        (diff.point - (-0.5)).abs() > 1e-9,
+        "the point estimate must not be the mean-of-ratios value -0.5"
+    );
+    // The interval must contain the point estimate.
     assert!(
         diff.lo <= diff.point && diff.point <= diff.hi,
         "interval [{}, {}] must contain the point estimate {}",
         diff.lo,
         diff.hi,
         diff.point
-    );
-    assert!(
-        (diff.point - (-5.0)).abs() > 1e-9,
-        "the point estimate must not be the mean-of-ratios value -5.0"
     );
 }
 
