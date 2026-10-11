@@ -107,7 +107,7 @@ fn rejection_appends_record_and_operator_preference() {
     match &record.kind {
         EventKind::OutcomeRecorded { record } => {
             assert_eq!(record.subject, subject);
-            assert_eq!(record.status, LabelStatus::Invalid);
+            assert_eq!(record.status, LabelStatus::Rejected);
             assert_eq!(record.reviewer, Source::Operator);
             assert_eq!(record.reason.as_deref(), Some("touched the schema"));
             assert!(record.evidence.is_none(), "the reason is not the evidence");
@@ -318,18 +318,21 @@ fn stats_prints_weighted_and_unweighted_false_accept_rates() {
             label: Label::Accepted,
             weight: None,
             family: Some("refactor".to_string()),
+            green: true,
         },
         LabelRow {
             subject: tsr_domain::EventId(Hash::of(&[b"r2"])),
             label: Label::Accepted,
             weight: None,
             family: Some("refactor".to_string()),
+            green: true,
         },
         LabelRow {
             subject: tsr_domain::EventId(Hash::of(&[b"r3"])),
             label: Label::Rejected,
             weight: Some(2.0),
             family: Some("refactor".to_string()),
+            green: true,
         },
     ];
     let rate = false_accept_rate(&rows);

@@ -75,6 +75,13 @@ impl PartialEq for ReviewError {
     }
 }
 
+impl ReviewError {
+    /// The process exit code for this refusal: every argument refusal is exit 2.
+    pub fn exit_code(&self) -> u8 {
+        2
+    }
+}
+
 /// The label an operator gives a return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Label {
@@ -98,7 +105,7 @@ impl Label {
     pub fn status(self) -> LabelStatus {
         match self {
             Label::Accepted => LabelStatus::Observed,
-            Label::Rejected => LabelStatus::Invalid,
+            Label::Rejected => LabelStatus::Rejected,
             Label::Disputed => LabelStatus::Disputed,
         }
     }
@@ -353,6 +360,11 @@ pub fn sample_greens(
     let weight = 1.0 / rate;
     let mut out = Vec::new();
     for r in returns {
+        // Sampling draws only over greens: a return whose own outcome passed. A failure is listed
+        // unconditionally and is never sampled (PRD §B7).
+        if r.exit_code.map(|c| c != 0).unwrap_or(true) {
+            continue;
+        }
         let mut buf = seed.to_le_bytes().to_vec();
         buf.extend_from_slice(&r.event.0 .0);
         let h = Hash::of(&[&buf]);
@@ -375,6 +387,8 @@ pub struct LabelRow {
     pub weight: Option<f64>,
     /// The family the return belongs to, when the caller knows it.
     pub family: Option<String>,
+    /// Whether the return's own outcome passed (exit 0). Only a green can be a false accept.
+    pub green: bool,
 }
 
 /// The false-accept rate: greens that were rejected, weighted and unweighted, with the number of
@@ -430,14 +444,19 @@ pub fn false_accept_rate(rows: &[LabelRow]) -> FalseAcceptRate {
         labels: rows.len(),
     };
     for row in rows {
+        // Only a green (the return's own outcome passed) can be a false accept. A failed return
+        // that was rejected is not a green and never enters the denominator.
+        if !row.green {
+            continue;
+        }
         match row.label {
             Label::Accepted => {
                 r.greens += 1;
                 r.weighted_greens += row.weight.unwrap_or(1.0);
             }
             Label::Rejected => {
-                // A rejected return was a green the system produced: it is a false accept, and it
-                // is still a green, so it belongs in the denominator too.
+                // A rejected green is a false accept, and it is still a green, so it belongs in
+                // the denominator too.
                 r.greens += 1;
                 r.false_accepts += 1;
                 let w = row.weight.unwrap_or(1.0);
@@ -480,13 +499,6 @@ pub struct ReviewArgs {
 /// | 0 | the label was appended, or the listing printed |
 /// | 2 | the task id, the store, the label or the arguments are malformed |
 pub fn run(args: &ReviewArgs) -> ExitCode {
-    let task = match Hash::from_hex(&args.task) {
-        Ok(h) => TaskId(h),
-        Err(e) => {
-            eprintln!("tsr: invalid task id {:?}: {e}", args.task);
-            return ExitCode::from(2);
-        }
-    };
     let store = match Store::open(Path::new(&args.store)) {
         Ok(s) => s,
         Err(e) => {
@@ -494,11 +506,28 @@ pub fn run(args: &ReviewArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let recorded_at = now_iso8601();
-
+    // `--stats` does not require a task: it computes over every task of the family (D4).
     if args.stats {
+        if args.task.trim().is_empty() {
+            return print_stats_all(&store, args.family.as_deref());
+        }
+        let task = match Hash::from_hex(&args.task) {
+            Ok(h) => TaskId(h),
+            Err(e) => {
+                eprintln!("tsr: invalid task id {:?}: {e}", args.task);
+                return ExitCode::from(2);
+            }
+        };
         return print_stats(&store, &task, args.family.as_deref());
     }
+    let task = match Hash::from_hex(&args.task) {
+        Ok(h) => TaskId(h),
+        Err(e) => {
+            eprintln!("tsr: invalid task id {:?}: {e}", args.task);
+            return ExitCode::from(2);
+        }
+    };
+    let recorded_at = now_iso8601();
 
     let label = match &args.label {
         None => {
@@ -534,7 +563,25 @@ pub fn run(args: &ReviewArgs) -> ExitCode {
     // record rather than rewriting the standing one.
     let subject = match &args.return_id {
         Some(hex) => match Hash::from_hex(hex) {
-            Ok(h) => EventId(h),
+            Ok(h) => {
+                let id = EventId(h);
+                // The named return must be a return on this task (D8): an unknown id is refused.
+                // A correction names an already-labelled return, so check every `Executed` event,
+                // not only the pending ones.
+                let is_return = store
+                    .by_task(&task)
+                    .map(|evs| {
+                        evs.iter().any(|(_, e)| {
+                            e.id == id && matches!(e.kind, EventKind::Executed { .. })
+                        })
+                    })
+                    .unwrap_or(false);
+                if !is_return {
+                    eprintln!("tsr: {hex:?} is not a return on this task");
+                    return ExitCode::from(2);
+                }
+                id
+            }
             Err(e) => {
                 eprintln!("tsr: invalid return id {hex:?}: {e}");
                 return ExitCode::from(2);
@@ -705,6 +752,58 @@ fn print_stats(store: &Store, task: &TaskId, family: Option<&str>) -> ExitCode {
     ExitCode::from(0)
 }
 
+/// Print the false-accept rate over every task of the family (D4: `--stats` needs no task).
+fn print_stats_all(store: &Store, family: Option<&str>) -> ExitCode {
+    let events = match store.all() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("tsr: cannot read the log: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    // Distinct tasks, in first-seen order.
+    let mut tasks: Vec<TaskId> = Vec::new();
+    for (_, e) in &events {
+        if !tasks.contains(&e.task) {
+            tasks.push(e.task);
+        }
+    }
+    let mut rows: Vec<LabelRow> = Vec::new();
+    for task in &tasks {
+        match label_rows(store, task) {
+            Ok(mut r) => rows.append(&mut r),
+            Err(e) => {
+                eprintln!("tsr: cannot read the log: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let rows: Vec<LabelRow> = match family {
+        Some(f) => rows
+            .into_iter()
+            .filter(|r| r.family.as_deref() == Some(f))
+            .collect(),
+        None => rows,
+    };
+    let rate = false_accept_rate(&rows);
+    let unweighted = rate
+        .unweighted()
+        .map(|v| format!("{v:.4}"))
+        .unwrap_or_else(|| "n/a".to_string());
+    let weighted = rate
+        .weighted()
+        .map(|v| format!("{v:.4}"))
+        .unwrap_or_else(|| "n/a".to_string());
+    let fam = family.unwrap_or("all");
+    println!("family={fam} labels={}", rate.labels);
+    println!("false_accept_rate unweighted={unweighted} weighted={weighted}");
+    println!(
+        "greens={} false_accepts={} weighted_greens={:.4} weighted_false_accepts={:.4}",
+        rate.greens, rate.false_accepts, rate.weighted_greens, rate.weighted_false_accepts
+    );
+    ExitCode::from(0)
+}
+
 /// The task's family, when the log names one.
 ///
 /// The domain carries no per-task family field: a family is a `Scope::Family` a preference was
@@ -728,6 +827,13 @@ pub fn task_family(store: &Store, task: &TaskId) -> Result<Option<String>, Revie
 pub fn label_rows(store: &Store, task: &TaskId) -> Result<Vec<LabelRow>, ReviewError> {
     let family = task_family(store, task)?;
     let events = store.by_task(task)?;
+    // The return's own outcome: an `Executed` event's exit code. A green is exit 0.
+    let mut green_of: BTreeMap<EventId, bool> = BTreeMap::new();
+    for (_, e) in &events {
+        if let EventKind::Executed { exit_code, .. } = &e.kind {
+            green_of.insert(e.id, exit_code.map(|c| c == 0).unwrap_or(false));
+        }
+    }
     let mut superseded: Vec<EventId> = Vec::new();
     let mut latest: BTreeMap<EventId, (EventId, Label, Option<f64>)> = BTreeMap::new();
     for (_, e) in &events {
@@ -737,7 +843,7 @@ pub fn label_rows(store: &Store, task: &TaskId) -> Result<Vec<LabelRow>, ReviewE
             }
             let label = match record.status {
                 LabelStatus::Observed => Some(Label::Accepted),
-                LabelStatus::Invalid => Some(Label::Rejected),
+                LabelStatus::Rejected => Some(Label::Rejected),
                 LabelStatus::Disputed => Some(Label::Disputed),
                 _ => None,
             };
@@ -754,6 +860,7 @@ pub fn label_rows(store: &Store, task: &TaskId) -> Result<Vec<LabelRow>, ReviewE
                 label,
                 weight,
                 family: family.clone(),
+                green: green_of.get(&subject).copied().unwrap_or(false),
             });
         }
     }

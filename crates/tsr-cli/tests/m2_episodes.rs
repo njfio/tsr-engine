@@ -131,6 +131,32 @@ fn contrast_id(seed: u64, index: usize, criterion: &str) -> ContrastId {
     ]))
 }
 
+/// Record a Contrast the log holds, so a later `expand` may name it (the Filter's write rule
+/// refuses an expansion from a contrast the log does not carry).
+fn record_contrast(
+    store: &Store,
+    task: &TaskId,
+    parents: Vec<EventId>,
+    id: ContrastId,
+    criterion: tsr_domain::CriterionId,
+    recorded_at: &str,
+) {
+    let c = tsr_domain::Contrast {
+        id,
+        from_return: EventId(Hash::of(&[b"m2-return", &id.0 .0])),
+        unmet: vec![(
+            criterion,
+            tsr_domain::UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: vec![],
+    };
+    Ledger::new(store)
+        .record_contrast(task, parents, c, recorded_at)
+        .expect("record the contrast");
+}
+
 /// A criterion id from a fixed seed, index and name.
 fn criterion_id(seed: u64, index: usize, name: &str) -> tsr_domain::CriterionId {
     tsr_domain::CriterionId(Hash::of(&[
@@ -217,11 +243,20 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
     // 2. The family-scoped preference tags the episode's family (the fold reads the first
     //    `Scope::Family` in log order as the task's family). It is an Operator statement, so it is
     //    open on arrival.
+    let family_contrast = contrast_id(seed, index, "family");
+    record_contrast(
+        store,
+        &task,
+        parents.clone(),
+        family_contrast,
+        criterion_id(seed, index, "family"),
+        &stamp(index, 1),
+    );
     let family_pref = ledger
         .expand(
             &task,
             parents.clone(),
-            contrast_id(seed, index, "family"),
+            family_contrast,
             format!("work in the {} family stays within its budget", family.name),
             Scope::Family(family.name.to_string()),
             Vec::new(),
@@ -236,11 +271,20 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
 
     // 3. A task-scoped criterion preference: the desired condition the contrast is scored against.
     let criterion_text = "the approved test passes without touching the schema";
+    let criterion_contrast = contrast_id(seed, index, "criterion");
+    record_contrast(
+        store,
+        &task,
+        parents.clone(),
+        criterion_contrast,
+        criterion_id(seed, index, "criterion"),
+        &stamp(index, 2),
+    );
     let criterion_pref = ledger
         .expand(
             &task,
             parents.clone(),
-            contrast_id(seed, index, "criterion"),
+            criterion_contrast,
             criterion_text,
             Scope::Task(task),
             Vec::new(),
@@ -763,7 +807,7 @@ fn generator_curve_differs_across_families() {
                 // record stores a `LabelStatus`; map it the way the review command does.
                 let label = match record.status {
                     LabelStatus::Observed => "accepted",
-                    LabelStatus::Invalid => "rejected",
+                    LabelStatus::Rejected => "rejected",
                     LabelStatus::Disputed => "disputed",
                     _ => record.status.name(),
                 };
