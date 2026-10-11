@@ -21,8 +21,12 @@
 pub mod dataset;
 pub mod decision;
 pub mod features;
+pub mod head;
+pub mod isotonic;
 pub mod probes;
 pub mod rng;
+pub mod support;
+pub mod synth;
 
 pub use decision::{
     decision_rows, resolve_labels, DecisionRow, DiffLabel, Label, LabelRecord, TaskLabel,
