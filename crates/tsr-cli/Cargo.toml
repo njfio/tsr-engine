@@ -1,0 +1,29 @@
+[package]
+name = "tsr-cli"
+description = "TSR Decision Engine — the `tsr` CLI and hook. M0 skeleton: subcommands exist, reconstruct is the first thing to make real."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "tsr"
+path = "src/main.rs"
+
+[lib]
+name = "tsr_cli"
+path = "src/lib.rs"
+
+[dependencies]
+tsr-domain = { path = "../tsr-domain" }
+tsr-store = { path = "../tsr-store" }
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

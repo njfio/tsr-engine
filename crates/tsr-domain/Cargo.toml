@@ -1,0 +1,18 @@
+[package]
+name = "tsr-domain"
+description = "TSR Decision Engine — the typed contract (PRD v0.3.1, B6): facts, views, traits. No I/O, no model calls, no stored weights."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
