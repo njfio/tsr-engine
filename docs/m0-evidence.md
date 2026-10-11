@@ -39,14 +39,16 @@ $ cargo clippy --workspace --all-targets -- -D warnings
 
 ```
 $ cargo test --workspace --no-fail-fast
-running 1 test
-test m0_session_reconstructs_from_the_log_alone ... ok
+     Running tests/m0_harness.rs
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests/m0_reconstruct.rs
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-running 9 tests
+     Running unittests src/lib.rs (tsr_domain)
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-running 8 tests
+     Running unittests src/lib.rs (tsr_store)
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
@@ -136,17 +138,33 @@ Each gated commitment (seq 9, 14, 18) has a forecast whose `state_version` equal
 ### `tsr task` and `tsr forecast`
 
 ```
-$ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr task open --name demo --workspace /w --intent "test the cli"
+$ export TSR_DB="$PWD/.tsr-verify/tsr.db"; rm -rf .tsr-verify
+$ ID=$(./target/debug/tsr task open --name demo --workspace /w --intent "test the cli"); echo "$ID"
 e7a3404c4b49c4ed80bb0dae5703fe45d450bb2a01292103d4934315bbce6212
 
-$ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr task status demo
+$ ./target/debug/tsr task status "$ID"
 task e7a3404c4b49c4ed80bb0dae5703fe45d450bb2a01292103d4934315bbce6212: 2 events
 
-$ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr forecast --event task_accepted_in_budget@v1 --p 0.7 --source generator --task demo
-fd2bd9af443009aa58a5ea15ecc1aae77309c3d642a23f6c1b0d382e9a645375
+$ ./target/debug/tsr forecast --event task_accepted_in_budget@v1 --p 0.7 --source generator --task "$ID"
+4dae43ed3b4bd2938f1c98302b873f2451da57b5c145a3bae71880fbca2da4e1
 
-$ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr task export demo | head -1
-{"event":{"id":"fb45f4eb…","kind":{"kind":"task_opened",…},"seq":1}
+$ ./target/debug/tsr task export "$ID" | head -1
+{"event":{"id":"a70c9c31…","kind":{"kind":"task_opened",…},"seq":1}
+
+$ ./target/debug/tsr task export "$ID" | wc -l
+2
+
+$ ./target/debug/tsr task export demo | wc -l
+2
+```
+
+`status`, `export` and `forecast --task` accept the 64-hex id that `open` prints, the task name, and
+the session id the hook uses (`store_path::resolve_task` tries a raw 64-hex id, then the
+session-hash id, then the name-hash id). The session trace exports in seq order:
+
+```
+$ TSR_DB="$PWD/fixtures/m0/session.db" ./target/debug/tsr task export m0-selftest-session | wc -l
+21
 ```
 
 ## Notes
@@ -160,6 +178,10 @@ $ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr task export demo | head -1
 
 ```
 $ git log --oneline -10
+80a8140 cli: resolve task export/status by session id, name, or raw id
+db6aa10 harness: pin the selftest clock so the M0 fixture is reproducible
+de68ce0 store: latest_seq and append_all helpers (additive)
+c3662fc docs: add no-runtime and git-log evidence to m0-evidence
 c5e3361 docs: M0 evidence page and README hook registration
 ad9d810 cli: tsr hook/exec/task/forecast + reconstruct::from_events (M0)
 608cf64 contract: EventKind::Stop, Forecast::new, Event::state_version (additive, M0 hook needs)
