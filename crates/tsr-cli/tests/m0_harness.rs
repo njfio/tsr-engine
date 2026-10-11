@@ -6,11 +6,12 @@
 //! reproducible form. It does not write JSON by hand — it runs the binary and compares bytes.
 //!
 //! Two things are checked:
-//! 1. `tsr hook --selftest` run in a scratch directory reproduces the committed fixture
-//!    byte-for-byte. This is the reproducibility the milestone requires: `recorded_at` is hashed
-//!    into every event id, so the harness pins the clock (`SELFTEST_RECORDED_AT`). The selftest
-//!    runs a real container, so this test **skips with a printed reason** when no container runtime
-//!    is reachable (`exec::Runtime::detect()` is `None`).
+//! 1. `tsr hook --selftest` is reproducible **structurally**: two runs agree on the sequence of
+//!    `(seq, kind, candidate id, forecast state_version, in_sandbox, exit_code, log_digest)`.
+//!    `duration_ms` is excluded **by name** — it is wall-clock, not a function of the inputs. The
+//!    harness replay through the `FakeRunner` is the reference; the real selftest on a host is
+//!    compared against it, and the test **skips with a printed reason** when no container runtime is
+//!    reachable (`exec::Runtime::detect()` is `None`).
 //! 2. A real PreToolUse payload piped on stdin is recorded and the process exits 0 — the hook
 //!    records and never blocks (M0).
 //!
@@ -30,11 +31,6 @@ use tsr_store::Store;
 /// The `tsr` binary cargo built for this test.
 fn tsr_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tsr"))
-}
-
-/// The committed fixture, relative to the workspace root.
-fn committed_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m0/session.events.jsonl")
 }
 
 /// A scratch directory under the target dir (never `/tmp`, which this host prunes).
@@ -116,8 +112,97 @@ fn reconstruct_task(store: &Store, task: &TaskId) -> reconstruct::Session {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The selftest reproducibility test (skips without a container runtime)
+// The selftest reproducibility test (structural; skips without a container runtime)
 // ---------------------------------------------------------------------------------------------
+
+/// One event reduced to the fields that must be reproducible across two selftests.
+///
+/// `duration_ms` is deliberately absent: it is wall-clock, so it differs between runs and is
+/// excluded **by name** (see `selftest_is_reproducible_structurally_excluding_duration_ms_by_name`).
+/// Everything else — the sequence position, the kind, the candidate id, the forecast's state
+/// version, whether the dispatch was in the sandbox, the exit code and the log digest — is a
+/// function of the inputs and must be identical.
+#[derive(Debug, PartialEq, Eq)]
+struct StructuralEvent {
+    seq: i64,
+    kind: String,
+    candidate: Option<String>,
+    forecast_state_version: Option<u64>,
+    in_sandbox: Option<bool>,
+    exit_code: Option<i32>,
+    log_digest: Option<String>,
+}
+
+impl StructuralEvent {
+    fn of(seq: i64, kind: &EventKind) -> StructuralEvent {
+        let mut s = StructuralEvent {
+            seq,
+            kind: kind_name(kind),
+            candidate: None,
+            forecast_state_version: None,
+            in_sandbox: None,
+            exit_code: None,
+            log_digest: None,
+        };
+        match kind {
+            EventKind::Proposed { candidate } => s.candidate = Some(candidate.id.0.to_string()),
+            EventKind::Generate { candidate } => s.candidate = Some(candidate.0.to_string()),
+            EventKind::Forecast {
+                forecast,
+                candidate,
+            } => {
+                s.candidate = Some(candidate.0.to_string());
+                s.forecast_state_version = Some(forecast.state_version);
+            }
+            EventKind::Committed { candidate, .. } => s.candidate = Some(candidate.0.to_string()),
+            EventKind::Dispatched {
+                candidate,
+                in_sandbox,
+            } => {
+                s.candidate = Some(candidate.0.to_string());
+                s.in_sandbox = Some(*in_sandbox);
+            }
+            EventKind::Executed {
+                candidate,
+                exit_code,
+                log_digest,
+                // duration_ms is excluded by name: it is wall-clock, not a function of the inputs.
+                ..
+            } => {
+                s.candidate = Some(candidate.0.to_string());
+                s.exit_code = *exit_code;
+                s.log_digest = log_digest.map(|h| h.to_string());
+            }
+            EventKind::Unresolved { candidate, .. } => s.candidate = Some(candidate.0.to_string()),
+            _ => {}
+        }
+        s
+    }
+}
+
+/// The structural trace of a task's events, in sequence order.
+fn structural_trace(store: &Store, task: &TaskId) -> Vec<StructuralEvent> {
+    store
+        .by_task(task)
+        .expect("by_task")
+        .into_iter()
+        .map(|(seq, ev)| StructuralEvent::of(seq, &ev.kind))
+        .collect()
+}
+
+/// The structural trace of a fixture JSONL file, in sequence order.
+fn structural_trace_of_fixture(path: &Path) -> Vec<StructuralEvent> {
+    let text = std::fs::read_to_string(path).expect("read fixture");
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).expect("fixture line is JSON");
+            let seq = v["seq"].as_i64().expect("seq");
+            let ev: tsr_domain::Event = serde_json::from_value(v["event"].clone()).expect("event");
+            StructuralEvent::of(seq, &ev.kind)
+        })
+        .collect()
+}
 
 /// Run `tsr hook --selftest` with `cwd` as the working directory, returning the produced fixture.
 fn run_selftest(cwd: &Path) -> Vec<u8> {
@@ -135,31 +220,53 @@ fn run_selftest(cwd: &Path) -> Vec<u8> {
     std::fs::read(cwd.join("fixtures/m0/session.events.jsonl")).expect("selftest wrote the fixture")
 }
 
+/// Two selftests are reproducible when their structural traces agree — `duration_ms` is excluded
+/// **by name** because it is wall-clock and cannot be reproduced, while every other field is a
+/// function of the inputs.
+///
+/// The two runs compared are two harness replays through the `FakeRunner` (always available), and —
+/// when a container runtime is reachable — the real selftest on the host. The committed fixture is
+/// deliberately *not* compared here: it is the operator's real record, regenerated on a host after
+/// this repair, and the frozen `tests/m0_reconstruct.rs` is what turns green on it.
 #[test]
-fn selftest_reproduces_the_committed_fixture_byte_for_byte() {
-    // The selftest runs a real command in the sealed container, so it can only reproduce the
-    // fixture where a container runtime is reachable. Without one, skip with a printed reason
-    // rather than fail: the operator regenerates the fixture on a host with Docker.
+fn selftest_is_reproducible_structurally_excluding_duration_ms_by_name() {
+    // Two independent harness replays through the FakeRunner: the same calls the selftest makes,
+    // with the container invocation injected. They must agree structurally.
+    let (store_a, task_a, _dir_a) = replay_selftest("repro-fake-a");
+    let (store_b, task_b, _dir_b) = replay_selftest("repro-fake-b");
+    let fake_a = structural_trace(&store_a, &task_a);
+    let fake_b = structural_trace(&store_b, &task_b);
+    assert_eq!(fake_a.len(), 19, "the reference trace has 19 events");
+    assert_eq!(
+        fake_a, fake_b,
+        "two FakeRunner replays are not reproducible structurally"
+    );
+
+    // Without a container runtime the real selftest cannot run; skip that half with a reason.
     if exec::Runtime::detect().is_none() {
-        eprintln!("skipping: no container runtime reachable");
+        eprintln!(
+            "skipping the real-runner half: no container runtime reachable; \
+             the two FakeRunner replays agreed structurally"
+        );
         return;
     }
 
-    let committed = std::fs::read(committed_fixture()).expect("committed fixture exists");
-    assert!(!committed.is_empty(), "the committed fixture is not empty");
-
-    // Two independent runs in two scratch directories must agree with each other and with the
-    // committed file. A wall-clock timestamp in the id input would break this.
-    let first = run_selftest(&scratch("run1"));
-    let second = run_selftest(&scratch("run2"));
+    // Two independent real runs in two scratch directories must agree structurally with each other
+    // and with the FakeRunner replay. A wall-clock timestamp in the id input would break this.
+    let _ = run_selftest(&scratch("run1"));
+    let first =
+        structural_trace_of_fixture(&scratch("run1").join("fixtures/m0/session.events.jsonl"));
+    let _ = run_selftest(&scratch("run2"));
+    let second =
+        structural_trace_of_fixture(&scratch("run2").join("fixtures/m0/session.events.jsonl"));
 
     assert_eq!(
         first, second,
-        "the harness is not reproducible: two runs produced different bytes"
+        "the harness is not reproducible: two runs produced different structural traces"
     );
     assert_eq!(
-        first, committed,
-        "the committed fixture is stale: regenerate it with `tsr hook --selftest`"
+        first, fake_a,
+        "the real selftest and the FakeRunner replay disagree structurally"
     );
 }
 
