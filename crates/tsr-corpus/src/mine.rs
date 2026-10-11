@@ -350,7 +350,7 @@ pub fn family_of(touched: &[String], rules: &[FamilyRule]) -> String {
 }
 
 /// Write a CAS object, addressed by its digest. Idempotent: the same digest is the same bytes.
-fn write_cas(cas: &Path, digest_hex: &str, bytes: &[u8]) -> Result<(), MineError> {
+pub(crate) fn write_cas(cas: &Path, digest_hex: &str, bytes: &[u8]) -> Result<(), MineError> {
     let path = cas.join(digest_hex);
     if path.exists() {
         return Ok(());

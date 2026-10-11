@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 pub mod mine;
+pub mod mutants;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

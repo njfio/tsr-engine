@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use tsr_corpus::mine::{mine, MineOptions};
+use tsr_corpus::mutants::{mutants, MutantsOptions};
 use tsr_corpus::ExecRunner;
 
 /// `tsr corpus mine <repo> --out <dir> [--since <rev>] [--suite <cmd>]`.
@@ -39,6 +40,38 @@ pub fn mine_cmd(
         }
         Err(e) => {
             eprintln!("tsr: corpus mine failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `tsr corpus mutants <repo> --out <dir>`.
+///
+/// Drives `cargo mutants --list --json` and the kill run through the [`ExecRunner`], which invokes
+/// `tsr exec -- <argv>` in the sealed sibling sandbox; nothing here runs a repository's tests on
+/// the host.
+pub fn mutants_cmd(repo: String, out: PathBuf) -> ExitCode {
+    let runner = ExecRunner::new();
+    match mutants(
+        std::path::Path::new(&repo),
+        &out,
+        &MutantsOptions::default(),
+        &runner,
+    ) {
+        Ok(report) => {
+            println!(
+                "mutants {}: {} listed, {} run, {} tasks, {} not caught",
+                report.repo,
+                report.mutants_listed,
+                report.mutants_run,
+                report.tasks,
+                report.skipped_not_caught
+            );
+            println!("wrote {}", out.join("tasks.jsonl").display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus mutants failed: {e}");
             ExitCode::from(1)
         }
     }

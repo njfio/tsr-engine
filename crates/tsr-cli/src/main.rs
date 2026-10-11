@@ -119,6 +119,9 @@ enum CorpusCmd {
     },
     Mutants {
         repo: String,
+        /// Output directory: `tasks.jsonl` and the CAS are written here.
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -166,7 +169,7 @@ fn main() -> ExitCode {
                 since,
                 suite,
             } => corpus_cmd::mine_cmd(repo, out, since, suite),
-            CorpusCmd::Mutants { .. } => not_yet("corpus mutants", "B9 (M3)"),
+            CorpusCmd::Mutants { repo, out } => corpus_cmd::mutants_cmd(repo, out),
         },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
