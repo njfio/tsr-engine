@@ -64,6 +64,10 @@ Three rules follow:
    typed events to the store. In M0 it records and never blocks: it always exits 0 and never emits a
    `deny`/`block` decision.
 
+A `tsr forecast …` call is the forecast itself, so the hook records nothing before or after it: an
+event between a forecast and the commitment it names would break the state-version rule (found by
+the first real Claude Code session; see `docs/m0-evidence.md`).
+
 `PostToolUse` records only what already happened: for a `tsr exec -- …` call it records nothing
 (`tsr exec` recorded the dispatch and the execution), for any other `Bash` call it records `Executed`
 (or `Unresolved`) against the candidate the matching `PreToolUse` committed, and for `Read`/`Edit`/
