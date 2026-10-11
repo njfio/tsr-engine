@@ -20,6 +20,7 @@
 
 pub mod mine;
 pub mod mutants;
+pub mod split;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

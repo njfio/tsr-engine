@@ -139,6 +139,20 @@ enum CorpusCmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Split a corpus into train and holdout with clone groups and leakage probes (B9).
+    Split {
+        /// The corpus directory: `tasks.jsonl` and the CAS are read here.
+        dir: PathBuf,
+        /// The split rule: `time` (forward-time by task) or `repo` (lineage-separated).
+        #[arg(long)]
+        by: String,
+        /// The holdout fraction, in (0, 1).
+        #[arg(long)]
+        holdout: f64,
+        /// The seed: the same seed and corpus give the same split.
+        #[arg(long)]
+        seed: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -192,6 +206,12 @@ fn main() -> ExitCode {
                 suite,
             } => corpus_cmd::mine_cmd(repo, out, since, suite),
             CorpusCmd::Mutants { repo, out } => corpus_cmd::mutants_cmd(repo, out),
+            CorpusCmd::Split {
+                dir,
+                by,
+                holdout,
+                seed,
+            } => corpus_cmd::split_cmd(dir, by, holdout, seed),
         },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),

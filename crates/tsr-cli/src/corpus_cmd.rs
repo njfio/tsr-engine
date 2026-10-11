@@ -76,3 +76,46 @@ pub fn mutants_cmd(repo: String, out: PathBuf) -> ExitCode {
         }
     }
 }
+
+/// `tsr corpus split <dir> --by time|repo --holdout <fraction> --seed <n>`.
+///
+/// Reads `tasks.jsonl` and the CAS under `dir`, groups near-clones, assigns sides under the rule,
+/// runs the three leakage probes, and writes `<dir>/split.json`. A caught probe is a refusal: the
+/// manifest is written with the verdicts and the command exits non-zero.
+pub fn split_cmd(dir: PathBuf, by: String, holdout: f64, seed: u64) -> ExitCode {
+    let rule = match tsr_corpus::split::SplitRule::parse(&by) {
+        Ok(rule) => rule,
+        Err(e) => {
+            eprintln!("tsr: corpus split failed: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let opts = tsr_corpus::split::SplitOptions {
+        rule,
+        holdout,
+        seed,
+        command: format!(
+            "tsr corpus split {} --by {by} --holdout {holdout} --seed {seed}",
+            dir.display()
+        ),
+        ..Default::default()
+    };
+    match tsr_corpus::split::split(&dir, &opts) {
+        Ok(manifest) => {
+            println!(
+                "split by {}: {} train, {} holdout, {} clone groups, {} holdout accesses",
+                manifest.rule,
+                manifest.train.len(),
+                manifest.holdout.len(),
+                manifest.clone_groups.len(),
+                manifest.holdout_access.len()
+            );
+            println!("wrote {}", dir.join("split.json").display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus split failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
