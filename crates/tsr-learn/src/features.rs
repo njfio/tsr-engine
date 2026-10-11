@@ -183,8 +183,10 @@ pub fn pre_action_counts(events_before: &[(i64, Event)]) -> PreActionCounts {
     let mut inspect_targets: HashSet<tsr_domain::Hash> = HashSet::new();
     let mut patch_targets: HashSet<tsr_domain::Hash> = HashSet::new();
     // The kind and args digest of each proposed candidate, so an Executed can be attributed.
-    let mut proposed: std::collections::HashMap<tsr_domain::CandidateId, (ActionKind, tsr_domain::Hash)> =
-        std::collections::HashMap::new();
+    let mut proposed: std::collections::HashMap<
+        tsr_domain::CandidateId,
+        (ActionKind, tsr_domain::Hash),
+    > = std::collections::HashMap::new();
 
     for (_, e) in events_before {
         match &e.kind {
@@ -368,7 +370,9 @@ mod tests {
         let spec = spec_for_families(&["a".to_string(), "b".to_string()]);
         assert_eq!(spec.version, "features@v1");
         assert!(spec.names.contains(&"family:a".to_string()));
-        assert!(spec.names.contains(&"family:b_x_generator_logit".to_string()));
+        assert!(spec
+            .names
+            .contains(&"family:b_x_generator_logit".to_string()));
         assert!(spec.names.contains(&"inspections_so_far".to_string()));
         assert!(spec.names.contains(&"budget_ceiling_missing".to_string()));
         assert_eq!(spec.names.len(), spec.numeric_widths.len());
@@ -433,7 +437,14 @@ mod tests {
         let spec = spec_for_families(&["a".to_string(), "b".to_string()]);
         let row = index_row("b", Some(1000));
         let events = vec![ev(proposed(ActionKind::Inspect, b"i1"), b"1")];
-        let fv = extract(&spec, &events, &row, ActionKind::ProposePatch, &[], Some(0.9));
+        let fv = extract(
+            &spec,
+            &events,
+            &row,
+            ActionKind::ProposePatch,
+            &[],
+            Some(0.9),
+        );
         assert_eq!(fv.get(&spec, "family:a"), Some(0.0));
         assert_eq!(fv.get(&spec, "family:b"), Some(1.0));
         assert_eq!(fv.get(&spec, "action:propose_patch"), Some(1.0));
@@ -475,7 +486,14 @@ mod tests {
         assert_eq!(fv.get(&spec, "budget_ceiling_missing"), Some(0.0));
 
         let row2 = index_row("a", None);
-        let fv2 = extract(&spec, &events, &row2, ActionKind::RunApprovedTest, &[], None);
+        let fv2 = extract(
+            &spec,
+            &events,
+            &row2,
+            ActionKind::RunApprovedTest,
+            &[],
+            None,
+        );
         assert_eq!(fv2.get(&spec, "budget_fraction_used"), Some(0.0));
         assert_eq!(fv2.get(&spec, "budget_ceiling_missing"), Some(1.0));
     }

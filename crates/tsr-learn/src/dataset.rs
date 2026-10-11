@@ -110,6 +110,14 @@ pub struct SplitFractions {
     pub holdout: f64,
 }
 
+/// The split configuration: the rule, the fractions and the seed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplitConfig {
+    pub by: SplitBy,
+    pub fractions: SplitFractions,
+    pub seed: u64,
+}
+
 /// Assign every task to a side, before any fitting.
 ///
 /// `--by time`: forward-time by the index timestamp — the earliest tasks are fit, the next
@@ -163,8 +171,11 @@ pub fn make_split(
             lineages.dedup();
             let mut rng = SplitMix64::new(seed);
             rng.shuffle(&mut lineages);
-            let rank: BTreeMap<String, usize> =
-                lineages.iter().enumerate().map(|(i, l)| (l.clone(), i)).collect();
+            let rank: BTreeMap<String, usize> = lineages
+                .iter()
+                .enumerate()
+                .map(|(i, l)| (l.clone(), i))
+                .collect();
             units.sort_by(|a, b| {
                 rank[&unit_lineage[a]]
                     .cmp(&rank[&unit_lineage[b]])
@@ -218,13 +229,11 @@ pub fn split_digest(by: SplitBy, seed: u64, assignments: &BTreeMap<String, Side>
     parts.push(seed.to_le_bytes().to_vec());
     for (task, side) in assignments {
         parts.push(task.as_bytes().to_vec());
-        parts.push(
-            match side {
-                Side::Fit => b"fit".to_vec(),
-                Side::Calibrate => b"calibrate".to_vec(),
-                Side::HeldOut => b"held_out".to_vec(),
-            },
-        );
+        parts.push(match side {
+            Side::Fit => b"fit".to_vec(),
+            Side::Calibrate => b"calibrate".to_vec(),
+            Side::HeldOut => b"held_out".to_vec(),
+        });
     }
     let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
     Hash::of(&refs)
@@ -285,14 +294,16 @@ pub fn build_dataset(
     index: &[TaskIndexRow],
     labels: &[LabelRecord],
     operator: &str,
-    by: SplitBy,
-    fractions: SplitFractions,
-    seed: u64,
+    split_cfg: SplitConfig,
     source_root: Hash,
 ) -> Result<Dataset, LearnError> {
+    let SplitConfig {
+        by,
+        fractions,
+        seed,
+    } = split_cfg;
     let task_labels = resolve_labels(events, labels, operator)?;
-    let label_of: BTreeMap<TaskId, &TaskLabel> =
-        task_labels.iter().map(|l| (l.task, l)).collect();
+    let label_of: BTreeMap<TaskId, &TaskLabel> = task_labels.iter().map(|l| (l.task, l)).collect();
     let index_of: BTreeMap<TaskId, &TaskIndexRow> = index.iter().map(|r| (r.task, r)).collect();
 
     // The fit slice's families, in name order, define the one-hot. The split is made first, so the
@@ -424,7 +435,10 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
         rows.push('\n');
     }
     std::fs::write(dir.join("rows.jsonl"), rows)?;
-    std::fs::write(dir.join("split.json"), serde_json::to_string_pretty(&ds.split)?)?;
+    std::fs::write(
+        dir.join("split.json"),
+        serde_json::to_string_pretty(&ds.split)?,
+    )?;
     let manifest = serde_json::json!({
         "feature_schema": ds.spec.version,
         "data_root": ds.data_root.to_hex(),
@@ -452,14 +466,22 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
 mod tests {
     use super::*;
     use crate::decision::DiffLabel;
-    use tsr_domain::{Candidate, Decision, EventKind, Forecast, Forecaster, Horizon, Probability, Source, Utility};
+    use tsr_domain::{
+        Candidate, Decision, EventKind, Forecast, Forecaster, Horizon, Probability, Source, Utility,
+    };
 
     fn task(tag: &[u8]) -> TaskId {
         TaskId(Hash::of(&[tag]))
     }
 
     fn ev(task: TaskId, kind: EventKind, tag: &[u8]) -> Event {
-        let mut e = Event::new(task, Vec::new(), Source::Rules, kind, "2024-01-01T00:00:00Z");
+        let mut e = Event::new(
+            task,
+            Vec::new(),
+            Source::Rules,
+            kind,
+            "2024-01-01T00:00:00Z",
+        );
         e.recorded_at = format!("2024-01-01T00:00:00Z#{}", hex(tag));
         e
     }
@@ -577,12 +599,14 @@ mod tests {
             &index,
             &labels,
             "operator",
-            by,
-            SplitFractions {
-                calibrate: 0.25,
-                holdout: 0.25,
+            SplitConfig {
+                by,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed,
             },
-            seed,
             Hash::of(&[b"src"]),
         )
         .unwrap()
@@ -625,7 +649,12 @@ mod tests {
         for i in 0..8u8 {
             let t = task(&[100 + i]);
             events.extend(session(t, &[100 + i], 0.9));
-            let mut row = index_row(t, "fam", "repo-a", &format!("2024-01-{:02}T00:00:00Z", i + 1));
+            let mut row = index_row(
+                t,
+                "fam",
+                "repo-a",
+                &format!("2024-01-{:02}T00:00:00Z", i + 1),
+            );
             row.clone_group = Some("clone-1".to_string());
             index.push(row);
             labels.push(label(t, true));
@@ -635,12 +664,14 @@ mod tests {
             &index,
             &labels,
             "operator",
-            SplitBy::Time,
-            SplitFractions {
-                calibrate: 0.25,
-                holdout: 0.25,
+            SplitConfig {
+                by: SplitBy::Time,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed: 7,
             },
-            7,
             Hash::of(&[b"src"]),
         )
         .unwrap();
@@ -675,7 +706,12 @@ mod tests {
             let t = task(&[i]);
             events.extend(session(t, &[i], 0.9));
             if i != 0 {
-                index.push(index_row(t, "fam", "repo-a", &format!("2024-01-0{}T00:00:00Z", i + 1)));
+                index.push(index_row(
+                    t,
+                    "fam",
+                    "repo-a",
+                    &format!("2024-01-0{}T00:00:00Z", i + 1),
+                ));
             }
             labels.push(label(t, true));
         }
@@ -684,12 +720,14 @@ mod tests {
             &index,
             &labels,
             "operator",
-            SplitBy::Time,
-            SplitFractions {
-                calibrate: 0.25,
-                holdout: 0.25,
+            SplitConfig {
+                by: SplitBy::Time,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed: 7,
             },
-            7,
             Hash::of(&[b"src"]),
         )
         .unwrap();
@@ -708,12 +746,14 @@ mod tests {
             &index,
             &[l],
             "operator",
-            SplitBy::Time,
-            SplitFractions {
-                calibrate: 0.25,
-                holdout: 0.25,
+            SplitConfig {
+                by: SplitBy::Time,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed: 7,
             },
-            7,
             Hash::of(&[b"src"]),
         )
         .unwrap_err();

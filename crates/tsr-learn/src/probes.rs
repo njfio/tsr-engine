@@ -83,12 +83,8 @@ impl ProbeReport {
 /// An extractor: a function from the pre-action events, the index row, the action and the
 /// generator's raw probability on the common event to a feature vector. It receives **no label** —
 /// by type, so a label cannot reach a feature.
-pub type Extractor<'a> = &'a dyn Fn(
-    &[(i64, Event)],
-    &TaskIndexRow,
-    ActionKind,
-    Option<f64>,
-) -> FeatureVector;
+pub type Extractor<'a> =
+    &'a dyn Fn(&[(i64, Event)], &TaskIndexRow, ActionKind, Option<f64>) -> FeatureVector;
 
 /// Probe (a): recompute every row's features from the log truncated before the commitment and fail
 /// on any difference.
@@ -171,10 +167,7 @@ pub fn probe_label_reach(ds: &Dataset, spec: &FeatureSpec) -> ProbeReport {
             }
         }
         // Perfect separation: the two value sets are disjoint and each is a singleton.
-        if true_vals.len() == 1
-            && false_vals.len() == 1
-            && true_vals.is_disjoint(&false_vals)
-        {
+        if true_vals.len() == 1 && false_vals.len() == 1 && true_vals.is_disjoint(&false_vals) {
             leaks.push(Leak {
                 probe: Probe::LabelReach,
                 row: format!("feature:{name}"),
@@ -232,7 +225,10 @@ pub fn probe_boundary(ds: &Dataset, index: &[TaskIndexRow]) -> ProbeReport {
     if ds.split.by == SplitBy::Repo {
         let mut lineage_sides: BTreeMap<String, BTreeSet<Side>> = BTreeMap::new();
         for r in &ds.rows {
-            lineage_sides.entry(r.lineage.clone()).or_default().insert(r.side);
+            lineage_sides
+                .entry(r.lineage.clone())
+                .or_default()
+                .insert(r.side);
         }
         for (l, sides) in &lineage_sides {
             if sides.len() > 1 {
@@ -353,7 +349,7 @@ pub fn commitment_of(row: &Row) -> EventId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataset::{build_dataset, SplitFractions};
+    use crate::dataset::{build_dataset, SplitConfig, SplitFractions};
     use crate::features::spec_for_families;
     use tsr_domain::{
         Candidate, Decision, EventKind, Forecast, Forecaster, Hash, Horizon, Probability, Source,
@@ -365,7 +361,13 @@ mod tests {
     }
 
     fn ev(task: TaskId, kind: EventKind, tag: &[u8]) -> Event {
-        let mut e = Event::new(task, Vec::new(), Source::Rules, kind, "2024-01-01T00:00:00Z");
+        let mut e = Event::new(
+            task,
+            Vec::new(),
+            Source::Rules,
+            kind,
+            "2024-01-01T00:00:00Z",
+        );
         e.recorded_at = format!("2024-01-01T00:00:00Z#{}", hex(tag));
         e
     }
@@ -482,12 +484,14 @@ mod tests {
             &index,
             &labels,
             "operator",
-            SplitBy::Time,
-            SplitFractions {
-                calibrate: 0.25,
-                holdout: 0.25,
+            SplitConfig {
+                by: SplitBy::Time,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed: 7,
             },
-            7,
             Hash::of(&[b"src"]),
         )
         .unwrap();
@@ -509,20 +513,21 @@ mod tests {
         let families: Vec<String> = Vec::new();
         // A leaky extractor: it reads the decision's own Executed exit code, which is a
         // post-action event. It appends the exit code as an extra value.
-        let leaky = |before: &[(i64, Event)], row: &TaskIndexRow, action: ActionKind, raw: Option<f64>| {
-            let mut fv = extract(&ds.spec, before, row, action, &families, raw);
-            // Read the *whole* log's Executed for this task — a post-action read.
-            let mut extra = 0.0;
-            for (_, e) in &events {
-                if e.task == row.task {
-                    if let EventKind::Executed { exit_code, .. } = &e.kind {
-                        extra += exit_code.unwrap_or(0) as f64;
+        let leaky =
+            |before: &[(i64, Event)], row: &TaskIndexRow, action: ActionKind, raw: Option<f64>| {
+                let mut fv = extract(&ds.spec, before, row, action, &families, raw);
+                // Read the *whole* log's Executed for this task — a post-action read.
+                let mut extra = 0.0;
+                for (_, e) in &events {
+                    if e.task == row.task {
+                        if let EventKind::Executed { exit_code, .. } = &e.kind {
+                            extra += exit_code.unwrap_or(0) as f64;
+                        }
                     }
                 }
-            }
-            fv.values.push(extra);
-            fv
-        };
+                fv.values.push(extra);
+                fv
+            };
         let report = probe_post_action(&ds, &events, &index, &ds.spec, &leaky);
         assert!(!report.is_clean());
         assert_eq!(report.leaks[0].probe, Probe::PostAction);
