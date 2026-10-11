@@ -630,7 +630,7 @@ pub fn selftest() -> anyhow::Result<std::path::PathBuf> {
 pub const SELFTEST_RECORDED_AT: &str = "2026-01-01T00:00:00Z";
 
 /// The argv the self-test runs in the container: `cargo test --offline -p parser`.
-const SELFTEST_TEST_ARGV: [&str; 4] = ["cargo", "test", "--offline", "-p"];
+const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "parser"];
 /// The full command string the forecast and the hook payload name for the first run.
 const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
 
