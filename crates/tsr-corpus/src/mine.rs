@@ -209,6 +209,9 @@ pub fn mine(
     fs::create_dir_all(out).map_err(MineError::Io)?;
     let cas = out.join("cas");
     fs::create_dir_all(&cas).map_err(MineError::Io)?;
+    // The materialised checkouts live under the output directory, one per revision.
+    let snapshots = out.join("snapshots");
+    fs::create_dir_all(&snapshots).map_err(MineError::Io)?;
 
     let mut report = MineReport {
         repo: repo_str.clone(),
@@ -221,12 +224,18 @@ pub fn mine(
     let mut lines: Vec<String> = Vec::new();
 
     for (parent, commit) in &commits {
-        // The suite at the parent and at the commit, through the Runner. The report file is read
-        // from the snapshot after each run; a missing report is an error.
-        let parent_run = runner.run(repo, &opts.suite, &opts.limits);
-        let parent_report = read_report(repo)?;
-        let commit_run = runner.run(repo, &opts.suite, &opts.limits);
-        let commit_report = read_report(repo)?;
+        // Materialise the parent and the commit as separate checkouts under the output directory,
+        // so the suite at each revision runs against the tree it claims (D4). Running both in the
+        // repository itself would run the same tree twice and make the two runs indistinguishable.
+        let parent_snap = materialize(repo, parent, &snapshots.join(parent))?;
+        let commit_snap = materialize(repo, commit, &snapshots.join(commit))?;
+
+        // The suite at the parent and at the commit, through the Runner, each in its own checkout.
+        // The report file is read from the snapshot after each run; a missing report is an error.
+        let _parent_run = runner.run(&parent_snap, &opts.suite, &opts.limits);
+        let parent_report = read_report(&parent_snap)?;
+        let commit_run = runner.run(&commit_snap, &opts.suite, &opts.limits);
+        let commit_report = read_report(&commit_snap)?;
 
         // The flip is read from the reports: a test that failed at the parent and passed at the
         // commit. The commit must be green (the oracle's second half); a commit that is red is a
@@ -263,7 +272,7 @@ pub fn mine(
             repo: repo_str.clone(),
             parent: parent.clone(),
             commit: commit.clone(),
-            parent_snapshot: parent_run.stdout_digest.clone(),
+            parent_snapshot: tree_id(repo, parent)?,
             flipped_tests: flipped,
             hidden_diff,
             family,
@@ -356,6 +365,31 @@ pub(crate) fn write_cas(cas: &Path, digest_hex: &str, bytes: &[u8]) -> Result<()
         return Ok(());
     }
     fs::write(path, bytes).map_err(MineError::Io)
+}
+
+/// Materialise `sha` as a checkout at `dest` and return `dest`.
+///
+/// The checkout is a `git worktree` of the repository, detached at `sha`, so the suite run against
+/// it sees exactly the tree that revision names (D4). `git` reads history and writes the working
+/// tree; it executes nothing from the repository. An existing checkout at `dest` is reused.
+pub fn materialize(repo: &Path, sha: &str, dest: &Path) -> Result<PathBuf, MineError> {
+    if dest.exists() {
+        return Ok(dest.to_path_buf());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(MineError::Io)?;
+    }
+    let dest_str = dest.display().to_string();
+    git(repo, &["worktree", "add", "--detach", &dest_str, sha])?;
+    Ok(dest.to_path_buf())
+}
+
+/// The tree id of a commit: `git rev-parse <sha>^{tree}`. This is what a task's `parent_snapshot`
+/// records — the parent commit's tree, not the digest of a suite run's stdout (D4).
+pub fn tree_id(repo: &Path, sha: &str) -> Result<String, MineError> {
+    Ok(git(repo, &["rev-parse", &format!("{sha}^{{tree}}")])?
+        .trim()
+        .to_string())
 }
 
 /// Run `git -C <repo> <args>` and return stdout as UTF-8. `git` reads history; it executes nothing

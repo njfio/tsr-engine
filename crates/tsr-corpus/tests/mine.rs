@@ -258,9 +258,35 @@ fn mine_yields_exactly_the_flip_commit() {
         .iter()
         .all(|t| t["commit"] != serde_json::json!(regression)));
 
-    // The runner saw exactly two runs per commit, all against the repository snapshot.
+    // The runner saw exactly two runs per commit, each against a materialised checkout under the
+    // output directory — the parent and the commit are separate trees (D4).
     assert_eq!(runner.calls.borrow().len(), 6);
-    assert!(runner.calls.borrow().iter().all(|(snap, _)| snap == &repo));
+    let snapshots = out.join("snapshots");
+    assert!(
+        runner
+            .calls
+            .borrow()
+            .iter()
+            .all(|(snap, _)| snap.starts_with(&snapshots)),
+        "every run is against a checkout under --out/snapshots"
+    );
+    // The parent and the commit of the flip are two different checkouts.
+    let parent_snap = out.join("snapshots").join(&root);
+    let commit_snap = out.join("snapshots").join(&flip);
+    assert_ne!(parent_snap, commit_snap);
+    assert!(parent_snap.exists() && commit_snap.exists());
+
+    // parent_snapshot is the parent commit's tree id, not a stdout digest (D4).
+    let parent_tree = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["rev-parse", &format!("{root}^{{tree}}")])
+        .output()
+        .expect("git rev-parse");
+    let parent_tree = String::from_utf8_lossy(&parent_tree.stdout)
+        .trim()
+        .to_string();
+    assert_eq!(task["parent_snapshot"], serde_json::json!(parent_tree));
 }
 
 #[test]
