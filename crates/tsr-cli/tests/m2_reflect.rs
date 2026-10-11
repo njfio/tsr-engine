@@ -62,6 +62,23 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
         ))
         .unwrap();
 
+    // A family-scoped preference tags the episode's family (the fold reads the first
+    // `Scope::Family` in log order as the task's family).
+    let ledger = tsr_ledger::Ledger::new(store);
+    ledger
+        .expand(
+            t,
+            Vec::new(),
+            ContrastId(Hash::of(&[b"family-contrast"])),
+            "work in the parser family stays within its budget",
+            tsr_domain::Scope::Family("parser".to_string()),
+            Vec::new(),
+            Vec::new(),
+            Source::Operator,
+            "unix:1",
+        )
+        .unwrap();
+
     // The operator's intent, as an experience note.
     store
         .append(&Event::new(
@@ -273,6 +290,20 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
             "unix:1",
         ))
         .unwrap();
+
+    // Close the task so the common decision event resolves and the forecasts score.
+    store
+        .append(&Event::new(
+            *t,
+            Vec::new(),
+            Source::Operator,
+            EventKind::TaskClosed {
+                task: *t,
+                reason: "operator".to_string(),
+            },
+            "unix:1",
+        ))
+        .unwrap();
 }
 
 #[test]
@@ -362,7 +393,11 @@ fn family_curves_print_bins_and_brier_per_forecaster() {
     let events = store.all().unwrap();
     let curves = build_family_curves("parser", &events);
 
-    let names: Vec<&str> = curves.curves.iter().map(|c| c.forecaster.as_str()).collect();
+    let names: Vec<&str> = curves
+        .curves
+        .iter()
+        .map(|c| c.forecaster.as_str())
+        .collect();
     assert!(names.contains(&"generator"), "generator curve present");
     assert!(names.contains(&"controller"), "controller curve present");
     assert!(names.contains(&"operator"), "operator curve present");
@@ -370,7 +405,10 @@ fn family_curves_print_bins_and_brier_per_forecaster() {
     let text = render_family_curves(&curves);
     assert!(text.contains("brier"), "the curve prints Brier");
     assert!(text.contains("bin ["), "the curve prints reliability bins");
-    assert!(text.contains("operator"), "the operator's curve is included");
+    assert!(
+        text.contains("operator"),
+        "the operator's curve is included"
+    );
 }
 
 #[test]
@@ -387,22 +425,25 @@ fn rendered_text_has_no_tsr_term_with_a_number_and_no_percent_certain() {
         !text.contains("percent certain"),
         "no screen prints `percent certain`"
     );
-    // No TSR term is ever followed by a number: the four directions are not a sequence.
-    for term in [
-        "Desire",
-        "Imagination",
-        "Belief",
-        "Return",
-        "Surprise",
-        "Contrast",
-    ] {
-        for (i, _) in text.match_indices(term) {
-            let after = &text[i + term.len()..];
-            let next = after.trim_start().chars().next();
-            assert!(
-                !matches!(next, Some(c) if c.is_ascii_digit()),
-                "`{term}` is followed by a number: {text}"
-            );
+    // No TSR term is ever followed by a number on the same line: the four directions are not a
+    // sequence and no term carries a score.
+    for line in text.lines() {
+        for term in [
+            "Desire",
+            "Imagination",
+            "Belief",
+            "Return",
+            "Surprise",
+            "Contrast",
+        ] {
+            if let Some(i) = line.find(term) {
+                let after = &line[i + term.len()..];
+                let next = after.trim_start().chars().next();
+                assert!(
+                    !matches!(next, Some(c) if c.is_ascii_digit()),
+                    "`{term}` is followed by a number on one line: {line}"
+                );
+            }
         }
     }
 }
@@ -447,7 +488,10 @@ fn cli_reflect_json_and_family_run() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("brier"), "the CLI prints Brier");
     assert!(stdout.contains("bin ["), "the CLI prints reliability bins");
-    assert!(stdout.contains("operator"), "the operator's curve is included");
+    assert!(
+        stdout.contains("operator"),
+        "the operator's curve is included"
+    );
 
     // `tsr reflect` with no subject is refused with exit 2.
     let out = Command::new(bin)

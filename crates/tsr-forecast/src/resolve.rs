@@ -110,6 +110,19 @@ impl TaskFacts {
                     }
                     f.evidence.push(ev.id);
                 }
+                EventKind::OutcomeRecorded { record } => {
+                    // `tsr review` records labels as `OutcomeRecorded` events; `resolve` reads the
+                    // label *names* ("accepted"/"rejected"/"disputed"), so map the status the way
+                    // the review command does.
+                    let label = match record.status {
+                        tsr_domain::LabelStatus::Observed => "accepted",
+                        tsr_domain::LabelStatus::Invalid => "rejected",
+                        tsr_domain::LabelStatus::Disputed => "disputed",
+                        _ => record.status.name(),
+                    };
+                    f.labels.push((label.to_string(), ev.id));
+                    f.evidence.push(ev.id);
+                }
                 EventKind::Observed { observation } => match observation {
                     Observation::Experience { .. } => {
                         f.operator_experience = true;

@@ -26,8 +26,7 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 use tsr_domain::{
-    Candidate, CandidateId, Event, EventKind, Hash, LabelStatus, Observation,
-    PreferenceStatus, Source, TaskId,
+    Candidate, CandidateId, Event, EventKind, Hash, Observation, PreferenceStatus, Source, TaskId,
 };
 use tsr_forecast::resolve::{forecaster_name, resolve, TaskFacts};
 use tsr_forecast::score::{calibration_label, reliability_bins, Score, ScoredForecast};
@@ -381,7 +380,11 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     let mut contrast: Vec<ContrastRow> = Vec::new();
     for ev in &evs {
         if let EventKind::Observed {
-            observation: Observation::Return { surprise: s, contrast: c },
+            observation:
+                Observation::Return {
+                    surprise: s,
+                    contrast: c,
+                },
         } = &ev.kind
         {
             for one in s {
@@ -458,7 +461,10 @@ pub fn render_mirror(m: &Mirror) -> String {
             } else {
                 "considered"
             };
-            out.push_str(&format!("  candidate {} ({}) {} — {}\n", c.id, c.source, c.kind, mark));
+            out.push_str(&format!(
+                "  candidate {} ({}) {} — {}\n",
+                c.id, c.source, c.kind, mark
+            ));
             if c.source == "intuition" {
                 let served = if c.support.is_empty() {
                     "none yet".to_string()
@@ -578,31 +584,28 @@ pub fn build_family_curves(family: &str, events: &[(i64, Event)]) -> FamilyCurve
         // The task's family: the first `Scope::Family` preference in log order.
         let root = Hash::of(&[b"family-curves"]);
         let collective = tsr_ledger::fold(
-            &evs.iter().cloned().enumerate().map(|(i, e)| (i as i64, e)).collect::<Vec<_>>(),
+            &evs.iter()
+                .cloned()
+                .enumerate()
+                .map(|(i, e)| (i as i64, e))
+                .collect::<Vec<_>>(),
             root,
         );
-        let task_family = collective.entries.iter().find_map(|entry| match &entry.preference.scope {
-            tsr_domain::Scope::Family(name) => Some(name.clone()),
-            _ => None,
-        });
+        let task_family =
+            collective
+                .entries
+                .iter()
+                .find_map(|entry| match &entry.preference.scope {
+                    tsr_domain::Scope::Family(name) => Some(name.clone()),
+                    _ => None,
+                });
         if task_family.as_deref() != Some(family) {
             continue;
         }
 
-        let mut facts = TaskFacts::from_events(evs);
-        // The review command records labels as `OutcomeRecorded` events; fold them into the facts so
-        // the curves score the same labels the Mirror shows.
-        for ev in evs {
-            if let EventKind::OutcomeRecorded { record } = &ev.kind {
-                let label = match record.status {
-                    LabelStatus::Observed => "accepted",
-                    LabelStatus::Invalid => "rejected",
-                    LabelStatus::Disputed => "disputed",
-                    _ => continue,
-                };
-                facts = facts.with_label(label, ev.id);
-            }
-        }
+        // `TaskFacts::from_events` folds the log's own facts, including the `OutcomeRecorded`
+        // labels `tsr review` writes, so each task's forecasts resolve against its own returns.
+        let facts = TaskFacts::from_events(evs);
         for ev in evs {
             if let EventKind::Forecast { forecast, .. } = &ev.kind {
                 let resolved = resolve(forecast, &facts);
