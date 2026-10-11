@@ -32,9 +32,15 @@ enum Cmd {
     },
     /// Record a forecast for the current state version before a gated action (B5, B7).
     Forecast {
-        /// Named event, e.g. task_accepted_in_budget@v1
+        /// The gated action being forecast: run_approved_test | propose_patch | request_approval
         #[arg(long)]
-        event: String,
+        kind: Option<String>,
+        /// The action's arguments: the Bash command, or the Edit/Write file path
+        #[arg(long)]
+        args: Option<String>,
+        /// An already-proposed candidate id (alternative to --kind/--args)
+        #[arg(long)]
+        event: Option<String>,
         /// Raw probability in [0, 1]; always recorded, acted on only when calibrated
         #[arg(long)]
         p: f64,
@@ -146,11 +152,20 @@ fn main() -> ExitCode {
     match cli.cmd {
         Cmd::Task { cmd } => run_task(cmd),
         Cmd::Forecast {
+            kind,
+            args,
             event,
             p,
             source,
             task,
-        } => run_forecast(&event, p, &source, task.as_deref()),
+        } => run_forecast(
+            kind.as_deref(),
+            args.as_deref(),
+            event.as_deref(),
+            p,
+            &source,
+            task.as_deref(),
+        ),
         Cmd::Hook { stage, selftest } => run_hook(&stage, selftest),
         Cmd::Exec { argv } => run_exec(&argv),
         Cmd::Policy { cmd } => match cmd {
@@ -230,7 +245,14 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
     }
 }
 
-fn run_forecast(event: &str, p: f64, source: &str, task: Option<&str>) -> ExitCode {
+fn run_forecast(
+    kind: Option<&str>,
+    args: Option<&str>,
+    event: Option<&str>,
+    p: f64,
+    source: &str,
+    task: Option<&str>,
+) -> ExitCode {
     let store = match store_path::open_store() {
         Ok(s) => s,
         Err(e) => {
@@ -242,7 +264,35 @@ fn run_forecast(event: &str, p: f64, source: &str, task: Option<&str>) -> ExitCo
         Some(name) => store_path::resolve_task(&store, name),
         None => store_path::task_for_session("default"),
     };
-    match tsr_cli::hook::record_forecast(&store, &task_id, event, p, source) {
+    let result = match (kind, args, event) {
+        (Some(kind), Some(args), None) => {
+            let kind = match hook::parse_action_kind(kind) {
+                Some(k) => k,
+                None => {
+                    eprintln!(
+                        "tsr: unknown --kind `{kind}` (run_approved_test|propose_patch|request_approval)"
+                    );
+                    return ExitCode::from(1);
+                }
+            };
+            hook::record_forecast_for_action(&store, &task_id, kind, args, p, source)
+        }
+        (None, None, Some(event)) => {
+            let cid = match hook::parse_candidate_id(event) {
+                Some(c) => c,
+                None => {
+                    eprintln!("tsr: --event must be a 64-hex candidate id");
+                    return ExitCode::from(1);
+                }
+            };
+            hook::record_forecast_for_candidate(&store, &task_id, cid, p, source)
+        }
+        _ => {
+            eprintln!("tsr: forecast needs either --kind <kind> --args <string> or --event <id>");
+            return ExitCode::from(1);
+        }
+    };
+    match result {
         Ok(id) => {
             println!("{id}");
             ExitCode::SUCCESS
@@ -262,8 +312,8 @@ fn run_hook(stage: &str, selftest: bool) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("tsr: hook selftest failed: {e}");
-                ExitCode::from(1)
+                eprintln!("tsr: hook selftest: {e}");
+                ExitCode::from(3)
             }
         };
     }

@@ -12,9 +12,10 @@
 //! - the `Stop` stage → `Stop`.
 //!
 //! Gated actions (`RunApprovedTest`, `ProposePatch`, `RequestApproval`) are recorded as
-//! `Proposed` → `Forecast` → `Committed` in one batch, so the forecast is on record at the state
-//! version the commitment occupies (B5, forecast-gated execution). A sandboxed test run then
-//! records `Dispatched { in_sandbox: true }` and `Executed`/`Unresolved`.
+//! `Proposed` → `Committed`. The forecast is **not** written here: it enters the log through
+//! `tsr forecast` *before* the tool call (B5, forecast-gated execution). A `Bash` test run that is
+//! not a `tsr exec -- …` invocation records `Dispatched { in_sandbox: false }` — a host run was
+//! observed; only `tsr exec` records `in_sandbox: true`.
 
 use crate::store_path;
 use serde_json::Value;
@@ -99,7 +100,10 @@ pub fn action_for(tool_name: Option<&str>, bash_command: Option<&str>) -> Action
         Some("Read") | Some("Grep") | Some("Glob") | Some("rts") => ActionKind::Inspect,
         Some("Edit") | Some("Write") => ActionKind::ProposePatch,
         Some("Bash") => match bash_command {
-            Some(cmd) if cmd.trim_start().starts_with(ALLOWLISTED_TEST_PREFIX) => {
+            Some(cmd)
+                if cmd.trim_start().starts_with(ALLOWLISTED_TEST_PREFIX)
+                    || is_tsr_exec_command(cmd) =>
+            {
                 ActionKind::RunApprovedTest
             }
             _ => ActionKind::Generate,
@@ -125,20 +129,65 @@ fn source_for(kind: ActionKind) -> Source {
     }
 }
 
-/// A digest of a tool's arguments, so a candidate's identity commits to what it was called with.
-fn args_digest(payload: &HookPayload) -> Hash {
-    let mut parts: Vec<Vec<u8>> = Vec::new();
-    if let Some(t) = &payload.tool_name {
-        parts.push(t.as_bytes().to_vec());
+/// The argument string a tool call commits to: for `Bash` the command, for `Edit`/`Write` the file
+/// path, otherwise the tool input (or the prompt). This is the single source of the string both the
+/// hook and `tsr forecast` digest, so the two paths mint the same candidate for the same call.
+pub fn action_args(payload: &HookPayload) -> String {
+    if let Some(cmd) = payload.bash_command() {
+        return cmd;
     }
-    if let Some(i) = &payload.tool_input {
-        parts.push(serde_json::to_vec(i).unwrap_or_default());
+    if let Some(v) = &payload.tool_input {
+        if let Some(fp) = v.get("file_path").and_then(|x| x.as_str()) {
+            return fp.to_string();
+        }
+        return serde_json::to_string(v).unwrap_or_default();
     }
-    if let Some(p) = &payload.prompt {
-        parts.push(p.as_bytes().to_vec());
-    }
-    let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
-    Hash::of(&refs)
+    payload.prompt.clone().unwrap_or_default()
+}
+
+/// The one shared digest of a tool call's arguments. Both the hook and `tsr forecast` call this with
+/// the same `(kind, args)` pair, so a candidate minted by either path has the same identity. For
+/// `Bash` `args` is the command string; for `Edit`/`Write` it is the file path.
+pub fn args_digest(kind: ActionKind, args: &str) -> Hash {
+    let kind_tag = match kind {
+        ActionKind::Inspect => "inspect",
+        ActionKind::RunApprovedTest => "run_approved_test",
+        ActionKind::Generate => "generate",
+        ActionKind::ProposePatch => "propose_patch",
+        ActionKind::RequestApproval => "request_approval",
+        ActionKind::Stop => "stop",
+    };
+    Hash::of(&[kind_tag.as_bytes(), args.as_bytes()])
+}
+
+/// Mint the candidate for a gated action from its `(kind, args)` pair alone.
+///
+/// The candidate's identity is `(kind, args digest)` and **nothing else**: `Candidate::new` hashes
+/// the parents into the id, so a candidate minted with the events present at forecast time would
+/// differ from one minted with the events present at tool-call time, and the hook would never
+/// recognise the forecast's proposal. Both `tsr forecast` and the hook go through this function, so
+/// the two paths agree on identity and `pending_proposal` matches.
+pub fn mint_candidate(kind: ActionKind, args: &str) -> anyhow::Result<Candidate> {
+    Ok(Candidate::new(
+        kind,
+        source_for(kind),
+        args_digest(kind, args),
+        vec![],
+        vec![],
+    )?)
+}
+
+/// Whether a `Bash` command is a `tsr exec -- …` invocation: the first token's basename is `tsr`
+/// (optionally with a path prefix, e.g. `./target/debug/tsr`) and the second token is `exec`. Such a
+/// command records its own dispatch inside `tsr exec`, so the hook records nothing further for it.
+pub fn is_tsr_exec_command(cmd: &str) -> bool {
+    let mut tokens = cmd.split_whitespace();
+    let first = match tokens.next() {
+        Some(t) => t,
+        None => return false,
+    };
+    let base = first.rsplit('/').next().unwrap_or(first);
+    base == "tsr" && tokens.next() == Some("exec")
 }
 
 thread_local! {
@@ -242,10 +291,12 @@ pub fn record_stop(store: &Store, payload: &HookPayload) -> anyhow::Result<Event
 
 /// Record a tool call. Returns the events appended, in order.
 ///
-/// A gated action is recorded as `Proposed` → `Forecast` → `Committed` in one batch: the forecast
-/// is pinned to the state version the commitment occupies, which is what the M0 invariant checks.
-/// A `RunApprovedTest` additionally records `Dispatched { in_sandbox: true }` and then `Executed`
-/// (from the `PostToolUse` response) or `Unresolved`.
+/// The hook records only what happened. A gated action is recorded as `Proposed` → `Committed`; the
+/// forecast is *not* written here — it must already be on record, written by `tsr forecast` before
+/// the tool call. If a pending `Proposed` with the same candidate id already exists (the agent
+/// forecast first), only `Committed` is appended. A `RunApprovedTest` whose command is a
+/// `tsr exec -- …` invocation records nothing further (exec records its own dispatch); any other
+/// `Bash` test run records `Dispatched { in_sandbox: false }` — a host run was observed.
 pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<EventId>> {
     let task = payload.task();
     let kind = action_for(
@@ -253,12 +304,13 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
         payload.bash_command().as_deref(),
     );
     let source = source_for(kind);
-    let args = args_digest(payload);
     let parents: Vec<EventId> = last_event(store, &task)?
         .map(|e| vec![e.id])
         .unwrap_or_default();
 
-    let candidate = Candidate::new(kind, source, args, parents.clone(), vec![])?;
+    // Identity is `(kind, args digest)` only — the same candidate `tsr forecast` minted for this
+    // tool call, so a prior forecast's `Proposed` is recognised here.
+    let candidate = mint_candidate(kind, &action_args(payload))?;
     let cid = candidate.id;
 
     let mut batch: Vec<Event> = Vec::new();
@@ -269,14 +321,22 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
         id
     };
 
-    // 1. The candidate is proposed. The model's own turn is typed `Generate` (B4 line 218); every
-    //    other action is a `Proposed` candidate.
+    // 1. The candidate is proposed, unless it is already pending (the agent forecast first). The
+    //    model's own turn is typed `Generate` (B4 line 218); every other action is a `Proposed`
+    //    candidate.
+    let already_proposed = kind != ActionKind::Generate && pending_proposal(store, &task, cid)?;
     let proposed_id = if kind == ActionKind::Generate {
         push(
             EventKind::Generate { candidate: cid },
             source,
             parents.clone(),
         )
+    } else if already_proposed {
+        // The proposal is already on record; the commitment chains to the last event.
+        parents
+            .last()
+            .copied()
+            .unwrap_or_else(|| EventId(Hash::of(&[b"genesis"])))
     } else {
         push(
             EventKind::Proposed {
@@ -287,34 +347,8 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
         )
     };
 
-    // 2. A gated action gets a forecast at the state version its commitment will occupy.
-    //    The commitment is the next event after the forecast, so its 0-based index is
-    //    (events before the batch) + (index of the forecast in the batch) + 1.
-    let mut forecast_id = None;
-    if is_gated(kind) {
-        let before = event_count(store, &task)?;
-        // The forecast is the second event of the batch (index 1), so the commitment that follows
-        // it is at index 2 within the batch.
-        let commit_version = before + 2;
-        let forecast = Forecast::new(
-            OutcomeDefId(Hash::of(&[DECISION_EVENT.as_bytes()])),
-            Horizon::ThisDispatch,
-            Forecaster::Generator,
-            Probability::new(0.5)?,
-            commit_version,
-        );
-        forecast_id = Some(push(
-            EventKind::Forecast {
-                forecast,
-                candidate: cid,
-            },
-            source,
-            vec![proposed_id],
-        ));
-    }
-
-    // 3. The commitment. The decision is a deterministic selection (propensity 1.0).
-    let commit_parents = forecast_id.map(|f| vec![f]).unwrap_or(vec![proposed_id]);
+    // 2. The commitment. The decision is a deterministic selection (propensity 1.0). No forecast is
+    //    written here: the hook never constructs one.
     let committed_id = push(
         EventKind::Committed {
             candidate: cid,
@@ -331,25 +365,50 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
             },
         },
         source,
-        commit_parents,
+        vec![proposed_id],
     );
 
-    // 4. A test run is dispatched into the sealed sandbox. The reconciliation (`Executed` or
-    //    `Unresolved`) is recorded by the matching `PostToolUse`, which carries the exit code.
+    // 3. A test run is dispatched. A `tsr exec -- …` command records its own dispatch inside
+    //    `tsr exec`; any other `Bash` test run ran on the host, which is what is recorded.
     if kind == ActionKind::RunApprovedTest {
-        push(
-            EventKind::Dispatched {
-                candidate: cid,
-                in_sandbox: true,
-            },
-            Source::Rules,
-            vec![committed_id],
-        );
+        let is_exec = payload
+            .bash_command()
+            .as_deref()
+            .map(is_tsr_exec_command)
+            .unwrap_or(false);
+        if !is_exec {
+            push(
+                EventKind::Dispatched {
+                    candidate: cid,
+                    in_sandbox: false,
+                },
+                Source::Rules,
+                vec![committed_id],
+            );
+        }
     }
 
     let seqs = store.append_all(&batch)?;
     debug_assert_eq!(seqs.len(), batch.len());
     Ok(batch.iter().map(|e| e.id).collect())
+}
+
+/// Whether a `Proposed` for `cid` exists with no `Committed` for it yet (a pending proposal).
+fn pending_proposal(store: &Store, task: &TaskId, cid: CandidateId) -> anyhow::Result<bool> {
+    use std::collections::HashSet;
+    let events = store.by_task(task)?;
+    let mut proposed = false;
+    let mut committed: HashSet<CandidateId> = HashSet::new();
+    for (_, e) in &events {
+        match &e.kind {
+            EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
+            EventKind::Committed { candidate, .. } => {
+                committed.insert(*candidate);
+            }
+            _ => {}
+        }
+    }
+    Ok(proposed && !committed.contains(&cid))
 }
 
 /// The exit code and log digest of a `PostToolUse` response, if the payload carries them.
@@ -443,60 +502,123 @@ pub fn candidate_for(payload: &HookPayload) -> anyhow::Result<CandidateId> {
         payload.tool_name.as_deref(),
         payload.bash_command().as_deref(),
     );
-    let source = source_for(kind);
-    Ok(Candidate::new(kind, source, args_digest(payload), vec![], vec![])?.id)
+    candidate_for_action(kind, &action_args(payload))
 }
 
-/// Record a `Forecast` for the current state version (B5, B7).
-///
-/// The state version is the number of events in the task *including* the forecast being recorded —
-/// i.e. the version the next commitment will occupy. That is what makes a forecast recorded before
-/// a gated action line up with the commitment's own state version, which is the M0 invariant.
-pub fn record_forecast(
-    store: &Store,
-    task: &TaskId,
-    event: &str,
-    p: f64,
-    source: &str,
-) -> anyhow::Result<EventId> {
-    let forecaster = match source {
+/// The candidate id a `(kind, args)` pair would produce, without recording it. `tsr forecast` and
+/// the hook both go through this, so the two paths agree on identity.
+pub fn candidate_for_action(kind: ActionKind, args: &str) -> anyhow::Result<CandidateId> {
+    Ok(mint_candidate(kind, args)?.id)
+}
+
+/// Parse the `--kind` of `tsr forecast`: the three gated actions of B5.
+pub fn parse_action_kind(s: &str) -> Option<ActionKind> {
+    match s {
+        "run_approved_test" => Some(ActionKind::RunApprovedTest),
+        "propose_patch" => Some(ActionKind::ProposePatch),
+        "request_approval" => Some(ActionKind::RequestApproval),
+        _ => None,
+    }
+}
+
+/// Parse the `--event` of `tsr forecast`: a 64-hex candidate id.
+pub fn parse_candidate_id(s: &str) -> Option<CandidateId> {
+    Hash::from_hex(s).ok().map(CandidateId)
+}
+
+/// The forecaster named by `--source`.
+fn forecaster_for(source: &str) -> Forecaster {
+    match source {
         "controller" => Forecaster::Controller,
         "operator" => Forecaster::Operator,
         _ => Forecaster::Generator,
-    };
-    let before = event_count(store, task)?;
-    let state_version = before + 1;
+    }
+}
+
+/// Append a `Forecast` for `cid` at the state version the next event will occupy.
+///
+/// `state_version` is the number of events in the task *after* the forecast itself is appended — the
+/// index the next event (the commitment) will occupy, which is what the M0 invariant checks.
+fn append_forecast(
+    store: &Store,
+    task: &TaskId,
+    cid: CandidateId,
+    p: f64,
+    source: &str,
+) -> anyhow::Result<EventId> {
+    let state_version = event_count(store, task)? + 1;
     let forecast = Forecast::new(
-        OutcomeDefId(Hash::of(&[event.as_bytes()])),
+        OutcomeDefId(Hash::of(&[DECISION_EVENT.as_bytes()])),
         Horizon::ThisDispatch,
-        forecaster,
+        forecaster_for(source),
         Probability::new(p)?,
         state_version,
     );
-    let parents = last_event(store, task)?
-        .map(|e| vec![e.id])
-        .unwrap_or_default();
-    let ev = Event::new(
-        *task,
-        parents,
+    append_chained(
+        store,
+        task,
         Source::Rules,
         EventKind::Forecast {
             forecast,
-            candidate: CandidateId(Hash::of(&[event.as_bytes()])),
+            candidate: cid,
         },
-        now_rfc3339(),
-    );
-    let id = ev.id;
-    store.append(&ev)?;
-    Ok(id)
+    )
+}
+
+/// Record a forecast for a gated action, before the tool call (B5, B7).
+///
+/// This is how a forecast enters the log: `tsr forecast` mints the candidate exactly as the hook
+/// would for the same tool call (same `ActionKind`, same args digest), appends `Proposed` unless a
+/// pending proposal with that id already exists, then appends `Forecast { candidate, state_version }`
+/// where `state_version` is the index the next event will occupy — the number of events in the task
+/// after the forecast itself is appended. That is the version the commitment will occupy, which is
+/// what the M0 invariant checks.
+pub fn record_forecast_for_action(
+    store: &Store,
+    task: &TaskId,
+    kind: ActionKind,
+    args: &str,
+    p: f64,
+    source: &str,
+) -> anyhow::Result<EventId> {
+    let candidate = mint_candidate(kind, args)?;
+    let cid = candidate.id;
+
+    // Append `Proposed` unless a pending proposal with this id already exists.
+    if !pending_proposal(store, task, cid)? {
+        append_chained(
+            store,
+            task,
+            source_for(kind),
+            EventKind::Proposed { candidate },
+        )?;
+    }
+
+    append_forecast(store, task, cid, p, source)
+}
+
+/// Record a forecast for an already-proposed candidate (`tsr forecast --event <id>`).
+///
+/// The candidate is not re-minted: the id names a `Proposed` already on record. The forecast is
+/// appended at the state version the next event will occupy, exactly as the `--kind/--args` path.
+pub fn record_forecast_for_candidate(
+    store: &Store,
+    task: &TaskId,
+    cid: CandidateId,
+    p: f64,
+    source: &str,
+) -> anyhow::Result<EventId> {
+    append_forecast(store, task, cid, p, source)
 }
 
 /// The M0 self-test harness: drive realistic Claude Code hook payloads through the hook and write
 /// `fixtures/m0/session.events.jsonl`.
 ///
-/// The sequence is the one the milestone names: a task opened, two inspections, a forecast, a
-/// sandboxed test run, a patch proposal, a forecast, a second run, a stop. It runs against a fresh
-/// store at `fixtures/m0/session.db` so it is reproducible and never touches the operator's store.
+/// The sequence is the honest one the milestone names: a task opened, two inspections, a forecast
+/// before each gated action, a test run through `tsr exec` in the real container, a patch proposal,
+/// a second run, a stop. Nothing is fabricated: the forecast is written by the forecast path and the
+/// dispatch by `tsr exec`. With no container runtime reachable the harness refuses (exit 3) and
+/// writes nothing.
 pub fn selftest() -> anyhow::Result<std::path::PathBuf> {
     // `recorded_at` is hashed into every event id, so the fixture is only reproducible if the
     // clock is pinned. The production hook path is untouched and keeps real wall-clock time.
@@ -507,7 +629,20 @@ pub fn selftest() -> anyhow::Result<std::path::PathBuf> {
 /// changes every event id in `fixtures/m0/session.events.jsonl`.
 pub const SELFTEST_RECORDED_AT: &str = "2026-01-01T00:00:00Z";
 
+/// The argv the self-test runs in the container: `cargo test --offline -p parser`.
+const SELFTEST_TEST_ARGV: [&str; 4] = ["cargo", "test", "--offline", "-p"];
+/// The full command string the forecast and the hook payload name for the first run.
+const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
+
 fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
+    // Refuse before writing anything when no runtime is reachable: the fixture must never be
+    // fabricated, and a half-written fixture is worse than none.
+    if crate::exec::Runtime::detect().is_none() {
+        anyhow::bail!(
+            "no container runtime reachable (podman/docker); refusing to fabricate the fixture"
+        );
+    }
+
     let fixture_dir = std::path::Path::new("fixtures/m0");
     std::fs::create_dir_all(fixture_dir)?;
     let db = fixture_dir.join("session.db");
@@ -516,16 +651,13 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
 
     let session = "m0-selftest-session";
     let task = crate::store_path::task_for_session(session);
+    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     // 1. The task is opened.
     let start = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("SessionStart".to_string()),
-        cwd: Some(
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default(),
-        ),
+        cwd: Some(workspace.display().to_string()),
         ..Default::default()
     };
     record_session_start(&store, &start)?;
@@ -542,30 +674,50 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         record_tool(&store, &p)?;
     }
 
-    // 3. A forecast before the first gated action.
-    record_forecast(&store, &task, DECISION_EVENT, 0.7, "generator")?;
+    // 3. A forecast before the first gated action, naming the action and its arguments.
+    record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.7,
+        "generator",
+    )?;
 
-    // 4. A sandboxed test run (PreToolUse proposes+commits+dispatches; PostToolUse reconciles).
-    let test_cmd = "cargo test --offline -p parser";
+    // 4. The first run: the agent's Bash call is `tsr exec -- cargo test …`. The hook records the
+    //    commitment only (the forecast is already on record); `tsr exec` records the dispatch and
+    //    the execution in the real container; the matching PostToolUse reconciles nothing further.
+    let exec_cmd = format!("tsr exec -- {SELFTEST_TEST_CMD}");
     let pre = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PreToolUse".to_string()),
         tool_name: Some("Bash".to_string()),
-        tool_input: Some(serde_json::json!({ "command": test_cmd })),
+        tool_input: Some(serde_json::json!({ "command": exec_cmd })),
         ..Default::default()
     };
     record_tool(&store, &pre)?;
+    let argv: Vec<String> = SELFTEST_TEST_ARGV.iter().map(|s| s.to_string()).collect();
+    crate::exec::run(&store, &task, &workspace, &argv)
+        .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
     let post = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PostToolUse".to_string()),
         tool_name: Some("Bash".to_string()),
-        tool_input: Some(serde_json::json!({ "command": test_cmd })),
+        tool_input: Some(serde_json::json!({ "command": exec_cmd })),
         tool_response: Some(serde_json::json!({ "exit_code": 0, "stdout": "test result: ok" })),
         ..Default::default()
     };
     record_post_tool(&store, &post)?;
 
-    // 5. A patch proposal (gated).
+    // 5. A forecast before the patch proposal, then the proposal itself (gated).
+    record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::ProposePatch,
+        "crates/tsr-cli/src/lib.rs",
+        0.6,
+        "generator",
+    )?;
     let edit = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PreToolUse".to_string()),
@@ -575,30 +727,36 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     };
     record_tool(&store, &edit)?;
 
-    // 6. A forecast before the second gated action.
-    record_forecast(&store, &task, DECISION_EVENT, 0.6, "generator")?;
-
-    // 7. A second run.
-    let test_cmd2 = "cargo test --offline -p parser";
+    // 6. A forecast before the second gated action, then the second run the same way.
+    record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.6,
+        "generator",
+    )?;
     let pre2 = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PreToolUse".to_string()),
         tool_name: Some("Bash".to_string()),
-        tool_input: Some(serde_json::json!({ "command": test_cmd2 })),
+        tool_input: Some(serde_json::json!({ "command": exec_cmd })),
         ..Default::default()
     };
     record_tool(&store, &pre2)?;
+    crate::exec::run(&store, &task, &workspace, &argv)
+        .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
     let post2 = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PostToolUse".to_string()),
         tool_name: Some("Bash".to_string()),
-        tool_input: Some(serde_json::json!({ "command": test_cmd2 })),
+        tool_input: Some(serde_json::json!({ "command": exec_cmd })),
         tool_response: Some(serde_json::json!({ "exit_code": 0, "stdout": "test result: ok" })),
         ..Default::default()
     };
     record_post_tool(&store, &post2)?;
 
-    // 8. A stop.
+    // 7. A stop.
     let stop = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("Stop".to_string()),
