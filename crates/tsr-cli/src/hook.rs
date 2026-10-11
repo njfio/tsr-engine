@@ -15,7 +15,7 @@
 //! `Proposed` → `Committed`. The forecast is **not** written here: it enters the log through
 //! `tsr forecast` *before* the tool call (B5, forecast-gated execution). A `Bash` test run that is
 //! not a `tsr exec -- …` invocation records `Dispatched { in_sandbox: false }` — a host run was
-//! observed; only `tsr exec` records `in_sandbox: true`.
+//! observed; only `tsr exec` records a sandboxed dispatch.
 
 use crate::store_path;
 use serde_json::Value;
@@ -423,22 +423,29 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
     Ok(batch.iter().map(|e| e.id).collect())
 }
 
-/// Whether a `Proposed` for `cid` exists with no `Committed` for it yet (a pending proposal).
+/// Whether a `Proposed` for `cid` is pending: the newest `Proposed` for it comes after the newest
+/// `Committed` for it (or there is no `Committed` yet).
+///
+/// Ordering, not a set: a candidate may be proposed, committed, and proposed again (a second run of
+/// the same command). The second proposal is pending even though an earlier commitment exists, so
+/// the hook records `Committed` only and the commitment lands at the state version its forecast
+/// named.
 fn pending_proposal(store: &Store, task: &TaskId, cid: CandidateId) -> anyhow::Result<bool> {
-    use std::collections::HashSet;
     let events = store.by_task(task)?;
-    let mut proposed = false;
-    let mut committed: HashSet<CandidateId> = HashSet::new();
-    for (_, e) in &events {
+    let mut last_proposed: Option<usize> = None;
+    let mut last_committed: Option<usize> = None;
+    for (i, (_, e)) in events.iter().enumerate() {
         match &e.kind {
-            EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
-            EventKind::Committed { candidate, .. } => {
-                committed.insert(*candidate);
-            }
+            EventKind::Proposed { candidate } if candidate.id == cid => last_proposed = Some(i),
+            EventKind::Committed { candidate, .. } if *candidate == cid => last_committed = Some(i),
             _ => {}
         }
     }
-    Ok(proposed && !committed.contains(&cid))
+    Ok(match (last_proposed, last_committed) {
+        (Some(p), Some(c)) => p > c,
+        (Some(_), None) => true,
+        _ => false,
+    })
 }
 
 /// The exit code and log digest of a `PostToolUse` response, if the payload carries them.

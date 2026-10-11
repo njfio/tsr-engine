@@ -19,7 +19,7 @@ pub mod reconstruct {
     //! - every gated action (`RunApprovedTest`, `ProposePatch`, `RequestApproval`) has a forecast
     //!   recorded at the *same state version* before it was committed (B5, forecast-gated execution);
     //! - every dispatch is reconciled — `Executed` or an explicit `Unresolved` — never silent (B6);
-    //! - every command ran in the sealed sandbox (`Dispatched { in_sandbox: true }`), never on the
+    //! - every command ran in the sealed sandbox (`Dispatched` with `in_sandbox` set), never on the
     //!   host (B4).
 
     use std::path::Path;
