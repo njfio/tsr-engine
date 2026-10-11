@@ -1,13 +1,14 @@
 //! `tsr` — the operator's CLI and the hook binary of the TSR Decision Engine.
 //!
-//! M0 skeleton: the command groups exist and say what milestone fills them. Every unimplemented
-//! command exits 2 with one sentence naming the PRD section, so a swarm or an operator never
-//! mistakes scaffolding for a feature.
+//! M0 (PRD §B11) fills `hook`, `exec`, `task` and `forecast`; the later-milestone commands still
+//! exit 2 with one sentence naming the PRD section, so scaffolding is never mistaken for a feature.
 
 #![forbid(unsafe_code)]
 
 use clap::{Parser, Subcommand};
+use std::io::Read;
 use std::process::ExitCode;
+use tsr_cli::{exec, hook, store_path, task};
 
 #[derive(Parser)]
 #[command(
@@ -38,12 +39,18 @@ enum Cmd {
         /// Forecaster: generator | controller | operator
         #[arg(long, default_value = "generator")]
         source: String,
+        /// The task to record against (defaults to the session task)
+        #[arg(long)]
+        task: Option<String>,
     },
     /// The hook entry point: reads a Claude Code hook payload on stdin and records it (M0, B4).
     Hook {
         /// PreToolUse | PostToolUse | SessionStart | Stop
-        #[arg(long)]
+        #[arg(long, default_value = "")]
         stage: String,
+        /// Drive realistic payloads through the hook and write fixtures/m0/session.events.jsonl
+        #[arg(long)]
+        selftest: bool,
     },
     /// Run a command in the sealed sibling sandbox and reconcile the result (M0, B4).
     Exec {
@@ -83,7 +90,17 @@ enum Cmd {
 #[derive(Subcommand)]
 enum TaskCmd {
     /// Open a task: workspace, intent, criteria, limits, capabilities (FR 001).
-    Open,
+    Open {
+        /// The task name (defaults to the session id)
+        #[arg(long)]
+        name: Option<String>,
+        /// The workspace the task runs in
+        #[arg(long)]
+        workspace: Option<String>,
+        /// The task's intent
+        #[arg(long)]
+        intent: Option<String>,
+    },
     Status {
         task: String,
     },
@@ -125,17 +142,15 @@ fn not_yet(what: &str, section: &str) -> ExitCode {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Task { cmd } => match cmd {
-            TaskCmd::Open => not_yet("task open", "B3/B5 (M0)"),
-            TaskCmd::Status { .. } => not_yet("task status", "B11 M0"),
-            TaskCmd::Export { .. } => not_yet("task export", "B11 M0 — the trace export"),
-        },
-        Cmd::Forecast { .. } => not_yet(
-            "forecast",
-            "B5 forecast-gated execution (M1) and B7 (M0 records it)",
-        ),
-        Cmd::Hook { .. } => not_yet("hook", "B4 path A — tsr-hook records every tool call (M0)"),
-        Cmd::Exec { .. } => not_yet("exec", "B4 — the sealed sibling sandbox (M0)"),
+        Cmd::Task { cmd } => run_task(cmd),
+        Cmd::Forecast {
+            event,
+            p,
+            source,
+            task,
+        } => run_forecast(&event, p, &source, task.as_deref()),
+        Cmd::Hook { stage, selftest } => run_hook(&stage, selftest),
+        Cmd::Exec { argv } => run_exec(&argv),
         Cmd::Policy { .. } => not_yet("policy check", "B5 (M1, the RATCHET profile)"),
         Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
@@ -144,5 +159,149 @@ fn main() -> ExitCode {
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
         Cmd::Eval => not_yet("eval", "B9 (M4–M5)"),
         Cmd::Model { .. } => not_yet("model", "B8 bundles (M5)"),
+    }
+}
+
+fn run_task(cmd: TaskCmd) -> ExitCode {
+    let store = match store_path::open_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tsr: cannot open store: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    match cmd {
+        TaskCmd::Open {
+            name,
+            workspace,
+            intent,
+        } => {
+            let name = name.unwrap_or_else(|| "default".to_string());
+            let workspace = workspace.unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            });
+            let intent = intent.unwrap_or_default();
+            match task::open(&store, &name, &workspace, &intent) {
+                Ok(id) => {
+                    println!("{id}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tsr: task open failed: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        TaskCmd::Status { task: name } => {
+            let id = store_path::task_for_name(&name);
+            match task::status(&store, &id) {
+                Ok((count, last)) => {
+                    println!("task {id}: {count} events");
+                    if let Some(ev) = last {
+                        println!("last: {}", serde_json::to_string(&ev).unwrap_or_default());
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tsr: task status failed: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        TaskCmd::Export { task: name } => {
+            let id = store_path::task_for_name(&name);
+            match task::export(&store, &id) {
+                Ok(json) => {
+                    print!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tsr: task export failed: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+    }
+}
+
+fn run_forecast(event: &str, p: f64, source: &str, task: Option<&str>) -> ExitCode {
+    let store = match store_path::open_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tsr: cannot open store: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let task_id = match task {
+        Some(name) => store_path::task_for_name(name),
+        None => store_path::task_for_session("default"),
+    };
+    match tsr_cli::hook::record_forecast(&store, &task_id, event, p, source) {
+        Ok(id) => {
+            println!("{id}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: forecast failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_hook(stage: &str, selftest: bool) -> ExitCode {
+    if selftest {
+        return match tsr_cli::hook::selftest() {
+            Ok(path) => {
+                println!("wrote {}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("tsr: hook selftest failed: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        // M0 records and never blocks: an unreadable payload is not a reason to fail the turn.
+        return ExitCode::SUCCESS;
+    }
+    let store = match store_path::open_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tsr: cannot open store: {e}");
+            return ExitCode::SUCCESS;
+        }
+    };
+    match hook::run(&store, stage, &input) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            // Never block: a recording failure is logged, not enforced.
+            eprintln!("tsr: hook recorded nothing: {e}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn run_exec(argv: &[String]) -> ExitCode {
+    let store = match store_path::open_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tsr: cannot open store: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let task = store_path::task_for_session("default");
+    match exec::run(&store, &task, &workspace, argv) {
+        Ok(outcome) => ExitCode::from(outcome.exit_code.clamp(0, 255) as u8),
+        Err(exec::ExecRefusal::NoRuntime) => {
+            eprintln!(
+                "tsr: no container runtime reachable (podman/docker); refusing to run on the host"
+            );
+            ExitCode::from(exec::EXIT_NO_RUNTIME as u8)
+        }
     }
 }
