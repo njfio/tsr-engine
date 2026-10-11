@@ -65,6 +65,7 @@ $ cargo clippy --workspace --all-targets -- -D warnings
 ```
 $ cargo test --workspace --no-fail-fast
      Running unittests src/lib.rs (tsr_cli)
+running 3 tests
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
      Running tests/m0_harness.rs
@@ -76,12 +77,23 @@ running 1 test
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
      Running tests/policy_check.rs
+running 3 tests
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
      Running unittests src/lib.rs (tsr_domain)
+running 9 tests
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
+     Running unittests src/lib.rs (tsr_policy)
+running 52 tests
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests/adversarial.rs
+running 17 tests
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
      Running unittests src/lib.rs (tsr_store)
+running 8 tests
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
@@ -157,11 +169,12 @@ $ ./target/debug/tsr task export "$S" | python3 -c '...'
 ```
 
 A `tsr exec -- …` `Bash` records `Committed` and **no** `Dispatched` from the hook — `tsr exec`
-records the dispatch itself:
+records the dispatch itself. The hook digests the **inner** command (`cargo test --offline -p
+parser`), so its candidate is the one the forecast named, and it records `Committed` only:
 
 ```
-$ export TSR_DB="$PWD/.tsr-repro/tsr.db"; rm -rf .tsr-repro
-$ S=repro-session
+$ export TSR_DB="$PWD/.tsr-repro3/tsr.db"; rm -rf .tsr-repro3
+$ S=repro3
 $ echo '{"session_id":"'"$S"'","hook_event_name":"SessionStart","cwd":"/w"}' \
     | ./target/debug/tsr hook --stage SessionStart
 $ ./target/debug/tsr forecast --kind run_approved_test --args "cargo test --offline -p parser" \
@@ -172,19 +185,11 @@ $ ./target/debug/tsr task export "$S" | python3 -c '...'
 1 task_opened
 2 proposed candidate=e07bad41b1e4
 3 forecast state_version=3
-4 proposed candidate=846b7fac29f2
-5 committed candidate=846b7fac29f2
+4 committed candidate=e07bad41b1e4
 ```
 
-> **Known defect (open).** The last block is the honest record of a real bug: the hook digests the
-> full `tsr exec -- …` command string, so its candidate (`846b7fac…`) differs from the forecast's
-> candidate for the bare command (`e07bad41…`), and the hook records a second `Proposed`. The
-> self-test harness forecasts the bare command but sends the full `tsr exec -- …` command to the
-> hook, so the fixture it writes would fail
-> `every_gated_action_has_prior_forecast_at_same_state_version`. The fix is to make the two agree —
-> either the harness forecasts the full command string, or the hook strips the `tsr exec --` prefix
-> when it digests a `tsr exec` call. Reported to the implementer; this section is updated when it
-> lands.
+The `Committed` at seq 4 carries the forecast's candidate (`e07bad41…`) and there is no second
+`Proposed` and no `Dispatched` from the hook — `tsr exec` records the dispatch when it runs.
 
 ### The hook records and never blocks
 
