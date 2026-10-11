@@ -66,12 +66,12 @@
 use std::path::Path;
 
 use tsr_domain::{
-    ActionKind, Candidate, CandidateId, Decision, Event, EventId, EventKind, Forecast, Forecaster,
-    Hash, Horizon, Probability, Source, TaskId, Utility,
+    ActionKind, Candidate, Decision, Event, EventId, EventKind, Forecast, Forecaster, Hash, Horizon,
+    Probability, Source, TaskId, Utility,
 };
 use tsr_store::Store;
 
-use crate::decision::LabelRecord;
+use crate::decision::{DiffLabel, LabelRecord};
 use crate::rng::SplitMix64;
 use crate::LearnError;
 
@@ -339,33 +339,38 @@ fn placeholder_utility() -> Utility {
     }
 }
 
-/// Append one event to the store, chaining it to the task's last event, with a fixed timestamp.
+/// Build one event, chaining it to the task's last event, with a fixed timestamp, and push it onto
+/// `out`. Returns the event's id. `step` is the event's position within the task, so the timestamp
+/// is a pure function of `(task_index, step)`.
 ///
-/// Returns the event's id. `step` is the event's position within the task, so the timestamp is a
-/// pure function of `(task_index, step)`.
-fn append(
-    store: &Store,
+/// Events are built in memory and appended in one transaction at the end ([`Store::append_all`]):
+/// the id is a pure function of the content and parents, so nothing needs the store to be written
+/// first, and one transaction keeps the generator fast.
+fn push(
+    out: &mut Vec<Event>,
     task: &TaskId,
     parents: Vec<EventId>,
     source: Source,
     kind: EventKind,
     task_index: usize,
     step: usize,
-) -> Result<EventId, LearnError> {
+) -> EventId {
     let ev = Event::new(*task, parents, source, kind, stamp(task_index, step));
-    store.append(&ev)?;
-    Ok(ev.id)
+    let id = ev.id;
+    out.push(ev);
+    id
 }
 
-/// Generate the corpus into `store`, returning the side files.
+/// Generate the whole corpus into `store`, returning the side files.
 ///
-/// The store must be empty (a fresh file). Every event is appended in the honest M0 order, and the
-/// forecast's `state_version` is the *global* 0-based index of the commitment in the concatenated
-/// log — the version `tsr_cli::reconstruct` checks a gated action against.
+/// The store must be empty: the generator appends the corpus in one transaction and the event ids
+/// are content-derived, so a second run over a non-empty store would collide.
 pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
     let mut rng = SplitMix64::new(SEED);
     let mut tasks: Vec<SynthTaskRow> = Vec::new();
     let mut labels: Vec<LabelRecord> = Vec::new();
+    // Every event, built in memory and appended in one transaction at the end.
+    let mut events: Vec<Event> = Vec::new();
     // The global event count, so a forecast can name the version its commitment will occupy.
     let mut global: u64 = 0;
 
@@ -378,15 +383,15 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
             let mut step = 0usize;
 
             // TaskOpened.
-            let id = append(
-                store,
+            let id = push(
+                &mut events,
                 &task,
                 parents.clone(),
                 Source::Operator,
                 EventKind::TaskOpened { task },
                 task_index,
                 step,
-            )?;
+            );
             parents = vec![id];
             step += 1;
             global += 1;
@@ -394,8 +399,8 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
             // The inspections before the first decision.
             for k in 0..plan.inspections {
                 let cand = mint(ActionKind::Inspect, &format!("src/file_{k}.rs"));
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -404,13 +409,13 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
                 // The inspection is dispatched and executed (in the sandbox), so it is reconciled.
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -420,12 +425,12 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -437,7 +442,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
@@ -453,8 +458,8 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     _ => ActionKind::RequestApproval,
                 };
                 let cand = mint(kind, &format!("step_{d}"));
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -463,13 +468,15 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
 
-                // The forecast, at the version the commitment will occupy (global count now).
-                let commit_version = global;
+                // The forecast, at the version the commitment will occupy. The commitment is
+                // pushed after the generator forecast (and the operator forecast, when present),
+                // so its 0-based index is `global` plus those events.
+                let commit_version = global + 1 + u64::from(plan.operator_forecasts);
                 let f = Forecast::new(
                     crate::decision_event_id(),
                     Horizon::TaskClose,
@@ -477,8 +484,8 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     gen_prob(&plan.family, insp),
                     commit_version,
                 );
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Generator,
@@ -488,7 +495,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
@@ -501,8 +508,8 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         op_prob(&plan.family, insp),
                         commit_version,
                     );
-                    let id = append(
-                        store,
+                    let id = push(
+                        &mut events,
                         &task,
                         parents.clone(),
                         Source::Operator,
@@ -512,15 +519,15 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         },
                         task_index,
                         step,
-                    )?;
+                    );
                     parents = vec![id];
                     step += 1;
                     global += 1;
                 }
 
                 // The commitment.
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -535,14 +542,14 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
 
                 // Dispatch (in the sandbox) and execute.
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -552,13 +559,13 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
                 let exit = if plan.accepted[d] { 0 } else { 1 };
-                let id = append(
-                    store,
+                let id = push(
+                    &mut events,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -570,7 +577,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     },
                     task_index,
                     step,
-                )?;
+                );
                 parents = vec![id];
                 step += 1;
                 global += 1;
@@ -579,8 +586,8 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
             // The terminal state.
             match plan.terminal {
                 Terminal::ClosedReviewed | Terminal::ClosedUnreviewed => {
-                    let _ = append(
-                        store,
+                    let _ = push(
+                        &mut events,
                         &task,
                         parents.clone(),
                         Source::Operator,
@@ -590,12 +597,12 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         },
                         task_index,
                         step,
-                    )?;
+                    );
                     global += 1;
                 }
                 Terminal::OperatorStop => {
-                    let _ = append(
-                        store,
+                    let _ = push(
+                        &mut events,
                         &task,
                         parents.clone(),
                         Source::Operator,
@@ -604,7 +611,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         },
                         task_index,
                         step,
-                    )?;
+                    );
                     global += 1;
                 }
                 Terminal::Open => {}
@@ -620,20 +627,23 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 tool_ms_ceiling: plan.tool_ms_ceiling,
             });
 
-            // The label record, only for a reviewed close.
+            // The label record, only for a reviewed close (B8: labels only after review).
             if plan.terminal == Terminal::ClosedReviewed {
-                // The true acceptance of the task: the last decision's outcome decides the diff.
-                let accepted = *plan.accepted.last().unwrap_or(&false);
+                // The task closed with criteria met and the diff accepted, unless the last decision
+                // failed — then the diff is rejected. A disputed diff resolves false, as lane 04
+                // resolves `diff_accepted`.
+                let last_ok = *plan.accepted.last().unwrap_or(&true);
+                let (criteria_met, diff_label) = if last_ok {
+                    (true, DiffLabel::Accepted)
+                } else {
+                    (false, DiffLabel::Rejected)
+                };
                 labels.push(LabelRecord {
                     task,
-                    criteria_met: accepted,
-                    diff_label: Some(if accepted {
-                        crate::decision::DiffLabel::Accepted
-                    } else {
-                        crate::decision::DiffLabel::Rejected
-                    }),
+                    criteria_met,
+                    diff_label: Some(diff_label),
                     reviewer: OPERATOR.to_string(),
-                    recorded_at: stamp(task_index, 99),
+                    recorded_at: stamp(task_index, step + 1),
                 });
             }
 
@@ -641,48 +651,133 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
         }
     }
 
+    // One transaction for the whole corpus: the ids are content-derived, so nothing needed the
+    // store while the events were built.
+    store.append_all(&events)?;
+
     Ok(Corpus { tasks, labels })
 }
 
-/// Write the corpus to `dir`: `events.jsonl`, `tasks.jsonl`, `labels.jsonl`.
+/// Write the three fixture files under `dir`, creating it if needed.
 ///
-/// `events.jsonl` is the `tsr task export` line format (`{"seq": n, "event": …}`), one line per
-/// event, in global sequence order. `tasks.jsonl` and `labels.jsonl` are one JSON object per line.
-pub fn write_fixtures(store: &Store, corpus: &Corpus, dir: &Path) -> Result<(), LearnError> {
+/// `events.jsonl` is the `tsr task export` line format (`{"seq": n, "event": {…}}`), one line per
+/// event in global sequence order; `tasks.jsonl` and `labels.jsonl` are one JSON object per line.
+pub fn write_fixtures(dir: &Path, store: &Store, corpus: &Corpus) -> Result<(), LearnError> {
     std::fs::create_dir_all(dir)?;
-
-    // events.jsonl: every event, in sequence order, in the export line format.
-    let mut events = String::new();
-    for (seq, ev) in store.all()? {
+    let events = store.all()?;
+    let mut out = String::new();
+    for (seq, ev) in &events {
         let line = serde_json::json!({ "seq": seq, "event": ev });
-        events.push_str(&serde_json::to_string(&line)?);
-        events.push('\n');
+        out.push_str(&serde_json::to_string(&line)?);
+        out.push('\n');
     }
-    std::fs::write(dir.join("events.jsonl"), events)?;
+    std::fs::write(dir.join("events.jsonl"), out)?;
 
-    // tasks.jsonl.
-    let mut tasks = String::new();
+    let mut out = String::new();
     for row in &corpus.tasks {
-        tasks.push_str(&serde_json::to_string(row)?);
-        tasks.push('\n');
+        out.push_str(&serde_json::to_string(row)?);
+        out.push('\n');
     }
-    std::fs::write(dir.join("tasks.jsonl"), tasks)?;
+    std::fs::write(dir.join("tasks.jsonl"), out)?;
 
-    // labels.jsonl.
-    let mut labels = String::new();
+    let mut out = String::new();
     for rec in &corpus.labels {
-        labels.push_str(&serde_json::to_string(rec)?);
-        labels.push('\n');
+        out.push_str(&serde_json::to_string(rec)?);
+        out.push('\n');
     }
-    std::fs::write(dir.join("labels.jsonl"), labels)?;
-
+    std::fs::write(dir.join("labels.jsonl"), out)?;
     Ok(())
 }
 
-/// Generate the corpus into a fresh store at `db` and write the three fixture files to `dir`.
+/// Generate the corpus into a fresh store at `db` and write the fixtures under `dir`.
 pub fn generate_fixtures(db: &Path, dir: &Path) -> Result<Corpus, LearnError> {
     let store = Store::open(db)?;
     let corpus = generate(&store)?;
-    write_fixtures(&store, &corpus, dir)?;
+    write_fixtures(dir, &store, &corpus)?;
     Ok(corpus)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fixtures directory, at the workspace root.
+    fn fixtures_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m4")
+    }
+
+    /// Regenerate `fixtures/m4/` in place. Run with `TSR_REGEN_FIXTURES=1`:
+    /// `TSR_REGEN_FIXTURES=1 cargo test -p tsr-learn synth::tests::regen -- --nocapture`.
+    #[test]
+    fn regen() {
+        if std::env::var("TSR_REGEN_FIXTURES").ok().as_deref() != Some("1") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("tsr-m4-regen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir is creatable");
+        let db = dir.join("corpus.db");
+        let out = dir.join("fixtures");
+        generate_fixtures(&db, &out).expect("the corpus generates");
+        let fixtures = fixtures_dir();
+        std::fs::create_dir_all(&fixtures).expect("the fixtures dir is creatable");
+        for name in ["events.jsonl", "tasks.jsonl", "labels.jsonl"] {
+            std::fs::copy(out.join(name), fixtures.join(name))
+                .unwrap_or_else(|e| panic!("rewriting {name}: {e}"));
+        }
+        eprintln!("TSR_REGEN_FIXTURES=1: rewrote {}", fixtures.display());
+    }
+
+    /// The generator is deterministic: two runs over fresh stores give identical bytes.
+    #[test]
+    fn the_generator_is_deterministic() {
+        let a = std::env::temp_dir().join(format!("tsr-m4-det-a-{}", std::process::id()));
+        let b = std::env::temp_dir().join(format!("tsr-m4-det-b-{}", std::process::id()));
+        for d in [&a, &b] {
+            let _ = std::fs::remove_dir_all(d);
+            std::fs::create_dir_all(d).expect("a temp dir is creatable");
+        }
+        generate_fixtures(&a.join("corpus.db"), &a.join("fixtures")).expect("generates");
+        generate_fixtures(&b.join("corpus.db"), &b.join("fixtures")).expect("generates");
+        for name in ["events.jsonl", "tasks.jsonl", "labels.jsonl"] {
+            let x = std::fs::read(a.join("fixtures").join(name)).expect("readable");
+            let y = std::fs::read(b.join("fixtures").join(name)).expect("readable");
+            assert_eq!(x, y, "{name} is not reproducible");
+        }
+    }
+
+    /// The shape the brief names: 380 tasks, four families, at least eight lineages.
+    #[test]
+    fn the_shape_is_the_briefs() {
+        let dir = std::env::temp_dir().join(format!("tsr-m4-shape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir is creatable");
+        let corpus = generate_fixtures(&dir.join("corpus.db"), &dir.join("fixtures"))
+            .expect("generates");
+        assert_eq!(corpus.tasks.len(), 380);
+        let mut families: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        let mut lineages: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for row in &corpus.tasks {
+            *families.entry(row.family.as_str()).or_default() += 1;
+            lineages.insert(row.lineage.as_str());
+        }
+        assert_eq!(families.get("overconfident"), Some(&120));
+        assert_eq!(families.get("calibrated"), Some(&120));
+        assert_eq!(families.get("underconfident"), Some(&120));
+        assert_eq!(families.get("rare"), Some(&20));
+        assert!(lineages.len() >= 8, "lineages: {}", lineages.len());
+        assert!(!corpus.labels.is_empty(), "some tasks are reviewed");
+        for rec in &corpus.labels {
+            assert_eq!(rec.reviewer, OPERATOR);
+        }
+    }
+
+    /// The overconfident family is §B8's example: the generator says ~0.9 where the family succeeds
+    /// ~0.4 with little inspected.
+    #[test]
+    fn the_overconfident_family_is_the_b8_example() {
+        let over = FAMILIES.iter().find(|f| f.name == "overconfident").unwrap();
+        assert!((p_generator(over, 0) - 0.9).abs() < 0.02, "{}", p_generator(over, 0));
+        assert!((p_true(over, 0) - 0.4).abs() < 0.02, "{}", p_true(over, 0));
+    }
 }
