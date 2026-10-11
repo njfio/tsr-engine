@@ -22,6 +22,7 @@ tsr-store = { path = "../tsr-store" }
 tsr-policy = { path = "../tsr-policy" }
 tsr-corpus = { path = "../tsr-corpus" }
 tsr-batch = { path = "../tsr-batch" }
+tsr-eval = { path = "../tsr-eval" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true

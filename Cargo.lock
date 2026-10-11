@@ -567,6 +567,7 @@ dependencies = [
  "tsr-batch",
  "tsr-corpus",
  "tsr-domain",
+ "tsr-eval",
  "tsr-policy",
  "tsr-store",
 ]
@@ -591,6 +592,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "tsr-eval"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tsr-batch",
 ]
 
 [[package]]

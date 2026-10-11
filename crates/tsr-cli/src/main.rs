@@ -12,6 +12,7 @@ use std::process::ExitCode;
 
 mod batch_cmd;
 mod corpus_cmd;
+mod eval_cmd;
 mod policy_cmd;
 
 #[derive(Parser)]
@@ -77,7 +78,10 @@ enum Cmd {
     /// Train calibration heads (M4, B8).
     Train,
     /// Evaluate: calibration, paired comparison, state isolation (M4–M5, B9).
-    Eval,
+    Eval {
+        #[command(subcommand)]
+        cmd: EvalCmd,
+    },
     /// Bundle registry: promote, rollback (M5, B8).
     Model {
         #[command(subcommand)]
@@ -162,6 +166,22 @@ enum DataCmd {
 }
 
 #[derive(Subcommand)]
+enum EvalCmd {
+    /// The first numbers with intervals: paired by task, cluster bootstrap by
+    /// lineage, 90% intervals, INCONCLUSIVE when an interval spans zero (B9).
+    Baseline {
+        /// The results directory: `results.jsonl` is read here.
+        results_dir: PathBuf,
+        /// The pairing rule (only `task` is defined).
+        #[arg(long, default_value = "task")]
+        pair_by: String,
+        /// The bootstrap seed: the same seed gives the same report.
+        #[arg(long, default_value_t = tsr_eval::DEFAULT_SEED)]
+        seed: u64,
+    },
+}
+
+#[derive(Subcommand)]
 enum ModelCmd {
     List,
     Promote { bundle: String },
@@ -215,7 +235,13 @@ fn main() -> ExitCode {
         },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
-        Cmd::Eval => not_yet("eval", "B9 (M4–M5)"),
+        Cmd::Eval { cmd } => match cmd {
+            EvalCmd::Baseline {
+                results_dir,
+                pair_by,
+                seed,
+            } => eval_cmd::baseline_cmd(&results_dir, &pair_by, seed),
+        },
         Cmd::Model { .. } => not_yet("model", "B8 bundles (M5)"),
     }
 }
