@@ -109,7 +109,11 @@ impl BudgetLedger {
 
     /// Reserve `cost` for `kind` **before dispatch**. Returns `Err` naming the first budget whose
     /// ceiling would be exceeded by `reserved + consumed + cost`.
-    pub fn reserve(&mut self, kind: ActionKind, cost: &BudgetCost) -> Result<Reservation, BudgetError> {
+    pub fn reserve(
+        &mut self,
+        kind: ActionKind,
+        cost: &BudgetCost,
+    ) -> Result<Reservation, BudgetError> {
         if let Some(budget) = self.first_overrun(cost) {
             return Err(BudgetError::Exhausted { budget });
         }
@@ -118,10 +122,7 @@ impl BudgetLedger {
         self.reserved.wall_clock_secs += cost.wall_clock_secs;
         self.reserved.generator_calls += cost.generator_calls;
         self.reserved.patch_bytes += cost.patch_bytes;
-        Ok(Reservation {
-            kind,
-            cost: *cost,
-        })
+        Ok(Reservation { kind, cost: *cost })
     }
 
     /// Commit a reservation: its hold becomes consumed. The reservation is spent.
@@ -158,7 +159,8 @@ impl BudgetLedger {
                 BUDGET_NAMES[0],
             ),
             (
-                self.reserved.tool_minutes + self.consumed.tool_minutes >= self.ceilings.tool_minutes,
+                self.reserved.tool_minutes + self.consumed.tool_minutes
+                    >= self.ceilings.tool_minutes,
                 BUDGET_NAMES[1],
             ),
             (
@@ -176,7 +178,10 @@ impl BudgetLedger {
                 BUDGET_NAMES[4],
             ),
         ];
-        checks.iter().find(|(spent, _)| *spent).map(|(_, name)| *name)
+        checks
+            .iter()
+            .find(|(spent, _)| *spent)
+            .map(|(_, name)| *name)
     }
 
     /// True when no further dispatch may be reserved: some budget is exhausted.
@@ -188,7 +193,9 @@ impl BudgetLedger {
     fn first_overrun(&self, cost: &BudgetCost) -> Option<&'static str> {
         let checks: [(bool, &'static str); 5] = [
             (
-                self.reserved.generator_tokens + self.consumed.generator_tokens + cost.generator_tokens
+                self.reserved.generator_tokens
+                    + self.consumed.generator_tokens
+                    + cost.generator_tokens
                     > self.ceilings.generator_tokens,
                 BUDGET_NAMES[0],
             ),
@@ -198,12 +205,16 @@ impl BudgetLedger {
                 BUDGET_NAMES[1],
             ),
             (
-                self.reserved.wall_clock_secs + self.consumed.wall_clock_secs + cost.wall_clock_secs
+                self.reserved.wall_clock_secs
+                    + self.consumed.wall_clock_secs
+                    + cost.wall_clock_secs
                     > self.ceilings.wall_clock_secs,
                 BUDGET_NAMES[2],
             ),
             (
-                self.reserved.generator_calls + self.consumed.generator_calls + cost.generator_calls
+                self.reserved.generator_calls
+                    + self.consumed.generator_calls
+                    + cost.generator_calls
                     > self.ceilings.generator_calls,
                 BUDGET_NAMES[3],
             ),

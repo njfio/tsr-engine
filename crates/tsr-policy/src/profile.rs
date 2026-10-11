@@ -103,6 +103,12 @@ pub enum ProfileError {
         /// The repeated id.
         id: String,
     },
+    /// A read-scope path prefix was empty.
+    #[error("read-scope path prefix at index {index} is empty")]
+    EmptyPathPrefix {
+        /// The index of the offending entry.
+        index: usize,
+    },
 }
 
 impl Profile {
@@ -132,7 +138,7 @@ impl Profile {
         self.tests.iter().find(|t| t.id == id)
     }
 
-    /// Reject empty or duplicate test-command ids.
+    /// Reject empty or duplicate test-command ids, and empty read-scope path prefixes.
     fn validate(&self) -> Result<(), ProfileError> {
         let mut seen: BTreeSet<&str> = BTreeSet::new();
         for (index, test) in self.tests.iter().enumerate() {
@@ -143,6 +149,13 @@ impl Profile {
                 return Err(ProfileError::DuplicateTestId {
                     id: test.id.clone(),
                 });
+            }
+        }
+        // An empty path prefix is a prefix of every path: it would widen the read scope to the whole
+        // repository. Reject it at load, so a malformed profile cannot be constructed from TOML.
+        for (index, prefix) in self.read_scope.paths.iter().enumerate() {
+            if prefix.trim().is_empty() {
+                return Err(ProfileError::EmptyPathPrefix { index });
             }
         }
         Ok(())

@@ -21,11 +21,12 @@
 //!
 //! ## Expiry
 //!
-//! `now` and `expires_at` are RFC 3339 / ISO 8601 UTC strings compared **lexicographically**. For
-//! fixed-width UTC timestamps (`YYYY-MM-DDTHH:MM:SSZ`, optionally with a fractional part) that
-//! ordering is the same as chronological ordering, which is the assumption this module documents
-//! and relies on. An approval is expired when `now >= expires_at` (the boundary is inclusive: at
-//! the expiry instant the approval is already gone).
+//! `expires_at` is parsed **strictly** as an RFC 3339 UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`,
+//! optionally with a fractional second part). A value that does not parse is treated as **already
+//! expired** — an approval whose expiry cannot be read is not an approval, and policy is
+//! fail-closed. `now` is the log's `recorded_at`; it is compared to `expires_at` as a fixed-width
+//! UTC string, whose lexicographic order is chronological order. An approval is expired when
+//! `now >= expires_at` (the boundary is inclusive: at the expiry instant the approval is gone).
 
 use tsr_domain::{CandidateId, Event, EventKind, Hash, TaskId};
 
@@ -102,7 +103,9 @@ impl Approval {
         if self.scope != scope {
             return Err(ApprovalError::ScopeChanged);
         }
-        if now >= self.expires_at.as_str() {
+        // Fail closed: an `expires_at` that is not a well-formed RFC 3339 UTC timestamp is treated
+        // as expired, so a malformed operator record can never yield an approval that never expires.
+        if !is_rfc3339_utc(&self.expires_at) || now >= self.expires_at.as_str() {
             return Err(ApprovalError::Expired {
                 expires_at: self.expires_at.clone(),
             });
@@ -114,6 +117,62 @@ impl Approval {
     /// `scope=<scope>;artifact=<hex>;snapshot=<hex>`.
     pub fn scope_string(&self) -> String {
         encode_scope(&self.scope, &self.artifact_digest, &self.snapshot_digest)
+    }
+}
+
+/// True when `s` is a well-formed RFC 3339 UTC timestamp: `YYYY-MM-DDTHH:MM:SS` with an optional
+/// fractional second part, terminated by `Z`. The date and time fields are range-checked (month
+/// 1-12, day 1-31, hour 0-23, minute 0-59, second 0-60 for a leap second). This is deliberately
+/// strict: anything else — an empty string, `"zzz"`, a local offset, a missing `Z` — is not a
+/// timestamp, and an approval carrying one is expired.
+fn is_rfc3339_utc(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    // `YYYY-MM-DDTHH:MM:SSZ` is 20 bytes; a fractional part adds `.` plus at least one digit.
+    if bytes.len() < 20 {
+        return false;
+    }
+    let digits = |range: std::ops::Range<usize>| -> Option<u32> {
+        let slice = s.get(range)?;
+        if slice.bytes().all(|b| b.is_ascii_digit()) {
+            slice.parse::<u32>().ok()
+        } else {
+            None
+        }
+    };
+    let (Some(_year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        digits(0..4),
+        digits(5..7),
+        digits(8..10),
+        digits(11..13),
+        digits(14..16),
+        digits(17..19),
+    ) else {
+        return false;
+    };
+    if bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return false;
+    }
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return false;
+    }
+    if hour > 23 || minute > 59 || second > 60 {
+        return false;
+    }
+    // The tail is either `Z` or `.<digits>Z`.
+    match bytes[19] {
+        b'Z' => bytes.len() == 20,
+        b'.' => {
+            let frac = &bytes[20..];
+            frac.len() >= 2
+                && frac[frac.len() - 1] == b'Z'
+                && frac[..frac.len() - 1].iter().all(|b| b.is_ascii_digit())
+        }
+        _ => false,
     }
 }
 
@@ -161,6 +220,31 @@ pub fn from_event(e: &Event) -> Option<Approval> {
         scope,
         expires_at: expires_at.clone(),
     })
+}
+
+/// The single named entry point for the dispatch re-check: validate `a` against the current task,
+/// candidate, artifact digest, snapshot digest, scope and instant.
+///
+/// This is the one place the approval predicate is applied at dispatch. [`crate::gate::evaluate_dispatch`]
+/// calls it and maps `Err` to a deny reason; it must not re-implement the predicate, because two
+/// copies of one rule can drift and a drift here is a fail-open at the dispatch boundary.
+pub fn validate(
+    a: &Approval,
+    now: &str,
+    task: TaskId,
+    candidate: CandidateId,
+    artifact_digest: Hash,
+    snapshot_digest: Hash,
+    scope: &str,
+) -> Result<(), ApprovalError> {
+    a.is_valid(
+        now,
+        task,
+        candidate,
+        artifact_digest,
+        snapshot_digest,
+        scope,
+    )
 }
 
 /// True if a [`EventKind::Denied`] event for `candidate` appears **after** its
@@ -400,11 +484,20 @@ mod tests {
         );
 
         // Approved then denied: revoked.
-        assert!(revoked_between(&[approved.clone(), denied.clone()], candidate()));
+        assert!(revoked_between(
+            &[approved.clone(), denied.clone()],
+            candidate()
+        ));
         // Denied then approved: the later approval stands.
-        assert!(!revoked_between(&[denied.clone(), approved.clone()], candidate()));
+        assert!(!revoked_between(
+            &[denied.clone(), approved.clone()],
+            candidate()
+        ));
         // Approved only: not revoked.
-        assert!(!revoked_between(&[approved.clone()], candidate()));
+        assert!(!revoked_between(
+            std::slice::from_ref(&approved),
+            candidate()
+        ));
         // Denied only (no approval to revoke): not a revocation.
         assert!(!revoked_between(&[denied], candidate()));
         // A denial for a different candidate does not revoke this one.

@@ -265,10 +265,15 @@ pub fn evaluate_dispatch(input: &GateInput) -> Verdict {
             // The current artifact digest is the candidate's args digest; the current repository
             // snapshot digest is the head of the log. Both are read from the inputs, never from
             // repository text or provider output.
+            //
+            // The predicate itself lives in `approval::validate` — the single implementation shared
+            // with the decision path. This function must not re-implement it: a second copy could
+            // drift and accept an approval the validator rejects (a fail-open at dispatch).
             let artifact_digest = input.candidate.args;
             let snapshot_digest = log_head(input.log);
             let now = log_now(input.log);
-            if let Err(e) = a.is_valid(
+            if let Err(e) = approval::validate(
+                &a,
                 &now,
                 input.grant.task,
                 input.candidate.id,
@@ -311,8 +316,12 @@ fn log_now(log: &[Event]) -> String {
 // Checks
 // ---------------------------------------------------------------------------------------------
 
-/// A path is inside the scope when it is relative, has no `..` segment, and starts with a prefix
+/// A path is inside the scope when it is relative, has no `..` segment, and lies under a prefix
 /// that is in **both** the profile's and the grant's path allowlists.
+///
+/// A prefix matches on a **path-segment boundary**: `src` matches `src` and `src/lib.rs`, but not
+/// `src-evil/evil.rs` or `srcx`. A trailing `/` on the prefix is normalised away before matching,
+/// so `src` and `src/` are the same prefix. An empty prefix matches nothing (fail closed).
 fn check_path(input: &GateInput, path: &str) -> Option<String> {
     if path.is_empty() {
         return Some("inspect path is empty".to_string());
@@ -422,9 +431,20 @@ fn has_forecast(input: &GateInput) -> bool {
 // Small helpers
 // ---------------------------------------------------------------------------------------------
 
-/// True when `path` starts with one of `prefixes`.
+/// True when `path` lies under one of `prefixes`, on a path-segment boundary.
+///
+/// The prefix is normalised by stripping a trailing `/`, then matched as `path == p` or
+/// `path.starts_with("{p}/")`. This is what stops `src` from matching the sibling `src-evil/evil.rs`
+/// and `Cargo.toml` from matching `Cargo.toml.bak`. An empty prefix (or one that is only `/`) is
+/// skipped: it would otherwise match every path, which is a total scope bypass. Fail closed.
 fn prefix_match(prefixes: &[String], path: &str) -> bool {
-    prefixes.iter().any(|p| path.starts_with(p.as_str()))
+    prefixes.iter().any(|p| {
+        let p = p.trim_end_matches('/');
+        if p.is_empty() {
+            return false;
+        }
+        path == p || path.starts_with(&format!("{p}/"))
+    })
 }
 
 /// The engineering name of an action kind.
@@ -985,5 +1005,61 @@ mod tests {
         // Keep the imports honest: these types are part of the frozen surface.
         let _ = CandidateId(hash(0));
         let _ = EventId(hash(0));
+    }
+
+    /// D1: the dispatch re-check must go through the single approval predicate
+    /// (`approval::validate`), not a second hand-written copy. This pins the seam: an approval the
+    /// validator rejects (here, an unparseable expiry) must also be denied at dispatch.
+    #[test]
+    fn dispatch_recheck_uses_the_single_approval_predicate() {
+        let p = profile();
+        let g = grant();
+        let c = candidate(ActionKind::RequestApproval);
+        let forecast = forecast_event(&c, 1);
+        let snapshot_digest = forecast.id.0;
+        let approval = Approval {
+            task: task(),
+            candidate: c.id,
+            artifact_digest: c.args,
+            snapshot_digest,
+            scope: "promote diff".to_string(),
+            // A malformed expiry: `Approval::is_valid` treats it as expired, and dispatch must too.
+            expires_at: "zzz".to_string(),
+        };
+        let approved = Event::new(
+            task(),
+            vec![],
+            Source::Operator,
+            EventKind::Approved {
+                candidate: c.id,
+                scope: approval.scope_string(),
+                expires_at: approval.expires_at.clone(),
+            },
+            "2025-12-31T00:00:00Z",
+        );
+        let log = vec![forecast, approved];
+
+        // The validator rejects it...
+        assert!(approval::validate(
+            &approval,
+            "2025-12-31T00:00:00Z",
+            task(),
+            c.id,
+            c.args,
+            snapshot_digest,
+            "promote diff",
+        )
+        .is_err());
+
+        // ...and dispatch denies it, with the same predicate's reason.
+        let v = evaluate_dispatch(&input(
+            &p,
+            &g,
+            &log,
+            &c,
+            ActionArgs::Boundary(BoundaryAction::PromoteDiff),
+        ));
+        assert_eq!(v.decision, Decision::Deny, "{}", v.reason);
+        assert!(v.reason.contains("no longer holds"), "{}", v.reason);
     }
 }
