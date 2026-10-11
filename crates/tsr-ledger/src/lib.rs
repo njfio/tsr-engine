@@ -28,6 +28,7 @@
 
 pub mod active;
 pub mod error;
+pub mod filter;
 pub mod write;
 
 pub use active::{
@@ -35,6 +36,7 @@ pub use active::{
     LedgerEntry, VibrationalReality,
 };
 pub use error::LedgerError;
+pub use filter::{dimension_name, dimension_text, Filter};
 pub use write::{is_operator_only, status_name, Ledger};
 
 /// The ledger root hash at a fold: the store's `head_root()`, one hash for the whole culmination
