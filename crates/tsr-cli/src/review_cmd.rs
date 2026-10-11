@@ -26,15 +26,17 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use tsr_domain::{
-    ContrastId, Event, EventId, EventKind, Hash, LabelStatus, OutcomeDefId, OutcomeRecord,
-    PreferenceId, PreferenceStatus, Scope, Source, TaskId,
+    CriterionId, Event, EventId, EventKind, Hash, LabelStatus, OutcomeRecord, PreferenceId,
+    PreferenceStatus, Scope, Source, TaskId, UnmetKind,
 };
-use tsr_ledger::Ledger;
+use tsr_ledger::{Filter, Ledger};
 use tsr_store::{Store, StoreError};
 
 /// The outcome definition a review label resolves. The PRD names `diff_accepted` as the event a
 /// review settles (§B7); a label on a return is exactly that.
-pub const REVIEW_OUTCOME: &str = "diff_accepted@v1";
+pub const REVIEW_OUTCOME: &str = "diff_accepted";
+/// The version of [`REVIEW_OUTCOME`].
+pub const REVIEW_OUTCOME_VERSION: u32 = 1;
 
 /// Why a review command was refused before anything was written.
 ///
@@ -50,6 +52,8 @@ pub enum ReviewError {
     BadRate(f64),
     #[error("no return {0} on this task")]
     UnknownReturn(String),
+    #[error("the rejection contrast did not expand")]
+    ContrastDidNotExpand,
     #[error("the store refused the write: {0}")]
     Store(#[from] StoreError),
     #[error("the ledger refused the write: {0}")]
@@ -178,7 +182,9 @@ pub fn outcome_record(
     if label == Label::Rejected && reason.as_deref().map(str::trim).unwrap_or("").is_empty() {
         return Err(ReviewError::MissingReason);
     }
-    let outcome = OutcomeDefId(Hash::of(&[REVIEW_OUTCOME.as_bytes()]));
+    // Route through the one minter so the id is `blake3("diff_accepted@v1")` — the same bytes
+    // `tsr hook` hashes for its named events (D2).
+    let outcome = tsr_forecast::outcome_def_id(REVIEW_OUTCOME, REVIEW_OUTCOME_VERSION);
     Ok(OutcomeRecord {
         outcome,
         subject,
@@ -247,13 +253,6 @@ pub fn standing_record(
     Ok(latest.filter(|id| !superseded.contains(id)))
 }
 
-/// The contrast id for a rejection: blake3 of (return event, reason). Deterministic, so the same
-/// rejection always names the same contrast, and the reason is committed to without being copied
-/// into a preference's text.
-pub fn rejection_contrast_id(subject: &EventId, reason: &str) -> ContrastId {
-    ContrastId(Hash::of(&[subject.0 .0.as_slice(), reason.as_bytes()]))
-}
-
 /// The task's open preferences, in log order — the `catalyzed_by` of a rejection expansion.
 pub fn open_preferences(store: &Store, task: &TaskId) -> Result<Vec<PreferenceId>, ReviewError> {
     let ledger = Ledger::new(store);
@@ -278,23 +277,35 @@ pub fn record_rejection_preference(
     reason: &str,
     recorded_at: &str,
 ) -> Result<PreferenceId, ReviewError> {
-    let ledger = Ledger::new(store);
+    let filter = Filter::new(store);
     let catalyzed_by = open_preferences(store, task)?;
-    let contrast = rejection_contrast_id(subject, reason);
-    let text = format!("rejected: {}", reason.trim());
+    // The rejection is a Contrast against the return: the criterion it failed is the return
+    // itself, and how it failed is `Rejected(reason)`. The Filter writes the Contrast as an
+    // `Observed` event and expands from it — the only path from a return to a preference.
+    let criterion = CriterionId(subject.0);
+    let contrast = Filter::contrast_from_criteria(
+        *subject,
+        vec![(
+            criterion,
+            UnmetKind::Rejected {
+                reason: reason.trim().to_string(),
+            },
+        )],
+        vec![*subject],
+    );
     let parents = head_parents(store, task)?;
-    let produced = ledger.expand(
+    let (_observed, produced) = filter.filter_return(
         task,
         parents,
-        contrast,
-        text,
+        Vec::new(),
+        Some(contrast),
         Scope::Task(*task),
         Vec::new(),
         catalyzed_by,
         Source::Operator,
         recorded_at,
     )?;
-    Ok(produced)
+    produced.ok_or(ReviewError::ContrastDidNotExpand)
 }
 
 /// Record a label on a return. Returns the appended outcome event's id.
