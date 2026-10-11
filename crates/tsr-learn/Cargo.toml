@@ -1,0 +1,21 @@
+[package]
+name = "tsr-learn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Tier 1 calibration for the TSR Decision Engine: the common decision event, features, heads, support and bundles (PRD §B8, §B11 M4)."
+
+[dependencies]
+tsr-domain = { path = "../tsr-domain" }
+tsr-store = { path = "../tsr-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[lints]
+workspace = true
