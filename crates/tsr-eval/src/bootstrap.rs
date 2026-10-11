@@ -49,6 +49,165 @@ pub struct Cluster {
     pub diffs: Vec<f64>,
 }
 
+/// One lineage's contribution to a ratio-of-sums statistic: the numerator
+/// (sum of the per-task costs) and the denominator (count of accepted tasks)
+/// under each of the two systems.
+///
+/// A ratio-of-sums metric is `sum(numerator) / sum(denominator)` over the
+/// resampled lineages, per system. The paired difference is the difference of
+/// the two systems' ratios. This is *not* the mean of per-task differences: a
+/// task that was not accepted contributes to neither the numerator nor the
+/// denominator, so the two statistics differ whenever the accepted counts
+/// differ between systems.
+#[derive(Debug, Clone)]
+pub struct RatioCluster {
+    /// The lineage (repository) name.
+    pub lineage: String,
+    /// Per-task `(record numerator, record denominator, rules numerator,
+    /// rules denominator)` for this lineage, in task-id order.
+    pub tasks: Vec<RatioTask>,
+}
+
+/// One task's contribution to a ratio-of-sums statistic under both systems.
+#[derive(Debug, Clone, Copy)]
+pub struct RatioTask {
+    /// The record system's numerator contribution (0 if not accepted).
+    pub record_num: f64,
+    /// The record system's denominator contribution (1 if accepted, else 0).
+    pub record_den: f64,
+    /// The rules system's numerator contribution (0 if not accepted).
+    pub rules_num: f64,
+    /// The rules system's denominator contribution (1 if accepted, else 0).
+    pub rules_den: f64,
+}
+
+/// The ratio of sums over a set of tasks: `sum(num) / sum(den)`, or `None`
+/// when the denominator is zero (no accepted task — the metric is undefined,
+/// never 0).
+fn ratio_of_sums(
+    tasks: &[RatioTask],
+    num: impl Fn(&RatioTask) -> f64,
+    den: impl Fn(&RatioTask) -> f64,
+) -> Option<f64> {
+    let mut n = 0.0;
+    let mut d = 0.0;
+    for t in tasks {
+        n += num(t);
+        d += den(t);
+    }
+    if d == 0.0 {
+        None
+    } else {
+        Some(n / d)
+    }
+}
+
+/// The result of a ratio-of-sums cluster bootstrap: the two systems' ratios,
+/// the paired difference, and the 90% interval over lineage.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RatioInterval {
+    /// The record system's ratio of sums on the observed sample, or `None`
+    /// when it has no accepted task (undefined).
+    pub record: Option<f64>,
+    /// The rules system's ratio of sums on the observed sample, or `None`.
+    pub rules: Option<f64>,
+    /// The paired difference (rules - record) with its interval. `None` when
+    /// either system's ratio is undefined.
+    pub diff: Option<Interval>,
+    /// The number of lineages resampled.
+    pub clusters: usize,
+    /// The number of paired tasks behind the point estimate.
+    pub tasks: usize,
+}
+
+/// Cluster bootstrap of a ratio-of-sums paired difference over lineages.
+///
+/// Each resample draws `clusters.len()` lineages with replacement, pools their
+/// tasks, and recomputes *both* systems' ratios of sums on the pooled multiset;
+/// the resample statistic is the difference of those two ratios. The 90%
+/// interval is the 5th and 95th percentiles of that distribution. A resample
+/// in which either system has no accepted task is skipped (the ratio is
+/// undefined there).
+pub fn ratio_cluster_bootstrap(
+    clusters: &[RatioCluster],
+    seed: u64,
+    resamples: usize,
+) -> RatioInterval {
+    let all: Vec<RatioTask> = clusters
+        .iter()
+        .flat_map(|c| c.tasks.iter().copied())
+        .collect();
+    let record = ratio_of_sums(&all, |t| t.record_num, |t| t.record_den);
+    let rules = ratio_of_sums(&all, |t| t.rules_num, |t| t.rules_den);
+    let point = match (record, rules) {
+        (Some(r), Some(u)) => Some(u - r),
+        _ => None,
+    };
+    let mut out = RatioInterval {
+        record,
+        rules,
+        diff: None,
+        clusters: clusters.len(),
+        tasks: all.len(),
+    };
+
+    let point = match point {
+        Some(p) => p,
+        None => return out,
+    };
+
+    if clusters.is_empty() || all.is_empty() || resamples == 0 {
+        out.diff = Some(Interval {
+            point,
+            lo: point,
+            hi: point,
+            resamples,
+            clusters: clusters.len(),
+            tasks: all.len(),
+        });
+        return out;
+    }
+
+    let mut rng = SplitMix64::new(seed);
+    let mut stats = Vec::with_capacity(resamples);
+    for _ in 0..resamples {
+        let mut pooled: Vec<RatioTask> = Vec::new();
+        for _ in 0..clusters.len() {
+            let c = &clusters[rng.below(clusters.len())];
+            pooled.extend_from_slice(&c.tasks);
+        }
+        let r = ratio_of_sums(&pooled, |t| t.record_num, |t| t.record_den);
+        let u = ratio_of_sums(&pooled, |t| t.rules_num, |t| t.rules_den);
+        if let (Some(r), Some(u)) = (r, u) {
+            stats.push(u - r);
+        }
+    }
+
+    if stats.is_empty() {
+        out.diff = Some(Interval {
+            point,
+            lo: point,
+            hi: point,
+            resamples,
+            clusters: clusters.len(),
+            tasks: all.len(),
+        });
+        return out;
+    }
+
+    let lo = quantile(&mut stats, 0.05);
+    let hi = quantile(&mut stats, 0.95);
+    out.diff = Some(Interval {
+        point,
+        lo,
+        hi,
+        resamples,
+        clusters: clusters.len(),
+        tasks: all.len(),
+    });
+    out
+}
+
 /// The result of a cluster bootstrap.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Interval {
@@ -71,6 +230,18 @@ impl Interval {
     /// distinguishable from no difference at this confidence.
     pub fn spans_zero(&self) -> bool {
         self.lo <= 0.0 && self.hi >= 0.0
+    }
+
+    /// Whether the interval is defined at all (D5).
+    ///
+    /// The cluster bootstrap resamples *lineages*. With fewer than two
+    /// lineages every resample draws the same single lineage, so the bootstrap
+    /// distribution is one point and the interval has zero width — a
+    /// degenerate interval that must not be read as "clear". An interval is
+    /// defined only when there are at least two lineages to resample, at least
+    /// one resample, and at least one paired task behind the point estimate.
+    pub fn is_defined(&self) -> bool {
+        self.clusters >= 2 && self.resamples > 0 && self.tasks > 0
     }
 }
 
