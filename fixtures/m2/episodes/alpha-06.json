@@ -1,0 +1,379 @@
+{
+  "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+  "family": "alpha",
+  "index": 6,
+  "outcome": "accepted",
+  "events": [
+    {
+      "id": "86e224aa3c1c298cb8feadee5a9655bd4c5852e459597dd2c9af9ce9541c807a",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [],
+      "recorded_at": "2024-01-01T00:00:06.000Z",
+      "observed_at": null,
+      "source": "operator",
+      "kind": {
+        "kind": "task_opened",
+        "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e"
+      }
+    },
+    {
+      "id": "24bb303f742667ddd80b6df65a2d3f4c0e8dbc94821ffb0da2b7907c84037a61",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "86e224aa3c1c298cb8feadee5a9655bd4c5852e459597dd2c9af9ce9541c807a"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.001Z",
+      "observed_at": null,
+      "source": "operator",
+      "kind": {
+        "kind": "expanded",
+        "expansion": {
+          "from_contrast": "3511f24b77881c570298ef665eb34b7d5d90b796a661506d8a20778de89b4c43",
+          "produced": "3782bf6dd06e42a291166103c521f7448852772abe0af7d6ee9b08e6f3dbbf06",
+          "catalyzed_by": [],
+          "text": "work in the alpha family stays within its budget",
+          "scope": {
+            "family": "alpha"
+          },
+          "parents": [],
+          "origin": "operator"
+        }
+      }
+    },
+    {
+      "id": "b4b18df662256897b889199de5bac4885458e0667371a3a7cdbe1713f3fe710c",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "24bb303f742667ddd80b6df65a2d3f4c0e8dbc94821ffb0da2b7907c84037a61"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.002Z",
+      "observed_at": null,
+      "source": "operator",
+      "kind": {
+        "kind": "expanded",
+        "expansion": {
+          "from_contrast": "2a826b713f715d244a2bb17eadc6a2f94ad246c5019f45104cc3741589df0a21",
+          "produced": "44e7b19853af14b087e36195250291805a32c6cf996182000a58e3bdb94dbf41",
+          "catalyzed_by": [
+            "3782bf6dd06e42a291166103c521f7448852772abe0af7d6ee9b08e6f3dbbf06"
+          ],
+          "text": "the approved test passes without touching the schema",
+          "scope": {
+            "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e"
+          },
+          "parents": [],
+          "origin": "operator"
+        }
+      }
+    },
+    {
+      "id": "f0e8ebdb6eef0d21a2c779572a0e77ae66c1997207aab915e644de8b0c9ed01e",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "b4b18df662256897b889199de5bac4885458e0667371a3a7cdbe1713f3fe710c"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.003Z",
+      "observed_at": null,
+      "source": "generator",
+      "kind": {
+        "kind": "proposed",
+        "candidate": {
+          "id": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52",
+          "kind": "propose_patch",
+          "source": "generator",
+          "args": "26ffaf628d4f59301be5d1a05882e06d2509b507fda8481edea2c67f4e6a90a5",
+          "parents": [
+            "b4b18df662256897b889199de5bac4885458e0667371a3a7cdbe1713f3fe710c"
+          ],
+          "conflicts_with": [],
+          "support": [],
+          "forecasts": []
+        }
+      }
+    },
+    {
+      "id": "7fb021c23e6eb4b3629a750cde3f6dfb01f00a3d34a1225a02a425315b12762c",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "f0e8ebdb6eef0d21a2c779572a0e77ae66c1997207aab915e644de8b0c9ed01e"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.003Z",
+      "observed_at": null,
+      "source": "council",
+      "kind": {
+        "kind": "proposed",
+        "candidate": {
+          "id": "349f856b4ba5fc33beb1946c7bc66c94d9c696c2255913e86fa2a88a5af98bbb",
+          "kind": "propose_patch",
+          "source": "council",
+          "args": "e5c20a46dc4d5b2524d258c65e75d0db744fb8c272ffd68204168abaf27c24c9",
+          "parents": [
+            "b4b18df662256897b889199de5bac4885458e0667371a3a7cdbe1713f3fe710c"
+          ],
+          "conflicts_with": [
+            "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52"
+          ],
+          "support": [],
+          "forecasts": []
+        }
+      }
+    },
+    {
+      "id": "c38126c51a0648ff86e44e28cf5cd22a9418d625b4a25177e689810b7991e071",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "7fb021c23e6eb4b3629a750cde3f6dfb01f00a3d34a1225a02a425315b12762c"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.003Z",
+      "observed_at": null,
+      "source": "intuition",
+      "kind": {
+        "kind": "proposed",
+        "candidate": {
+          "id": "af138c34d4ec24aa4ee63bc14bb333cba976526e4c36eee92a56d39d8bc94b9d",
+          "kind": "inspect",
+          "source": "intuition",
+          "args": "5ca6aaf902849bd04a91dfa4987ba9bd11feb091a23a64dd3b869d622619c4eb",
+          "parents": [
+            "b4b18df662256897b889199de5bac4885458e0667371a3a7cdbe1713f3fe710c"
+          ],
+          "conflicts_with": [],
+          "support": [
+            "44e7b19853af14b087e36195250291805a32c6cf996182000a58e3bdb94dbf41"
+          ],
+          "forecasts": []
+        }
+      }
+    },
+    {
+      "id": "0d75742f99381607af07160991210f460b3f245733a2695562ebf95e845fb65b",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "c38126c51a0648ff86e44e28cf5cd22a9418d625b4a25177e689810b7991e071"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.004Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "forecast",
+        "forecast": {
+          "id": "e9db3a6a6d0cd27a5bf2aef7fbf954ce9a91d3b7a6c566e1f2d8ba35494a8d76",
+          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "horizon": {
+            "task_close_days": 7
+          },
+          "source": "generator",
+          "raw": 0.92567415887633,
+          "calibrated": null,
+          "support": {
+            "episodes": 7
+          },
+          "state_version": 1
+        },
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52"
+      }
+    },
+    {
+      "id": "7a4ed53f7a496c3d85336f98238cc7d126aa0482e4bbdc9059e27176efa2d1cd",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "0d75742f99381607af07160991210f460b3f245733a2695562ebf95e845fb65b"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.004Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "forecast",
+        "forecast": {
+          "id": "279cff5ebe721ce7a804cfa63aed7096a2a12fd903602bf26d195a5afc3026f4",
+          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "horizon": {
+            "task_close_days": 7
+          },
+          "source": "controller",
+          "raw": 0.6973683707679668,
+          "calibrated": null,
+          "support": {
+            "episodes": 7
+          },
+          "state_version": 1
+        },
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52"
+      }
+    },
+    {
+      "id": "4e9e8d0550e5e91c1d02451aa479d594d08eec1a2d88947827cbc1992cbad13e",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "7a4ed53f7a496c3d85336f98238cc7d126aa0482e4bbdc9059e27176efa2d1cd"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.004Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "forecast",
+        "forecast": {
+          "id": "d55e378175ad519c916a63a191629ee41dcf82f8e4cd3f5b299b991968601136",
+          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "horizon": {
+            "task_close_days": 7
+          },
+          "source": "operator",
+          "raw": 0.7472058081529354,
+          "calibrated": null,
+          "support": {
+            "episodes": 7
+          },
+          "state_version": 1
+        },
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52"
+      }
+    },
+    {
+      "id": "fedd1b316025aaf1f5804a466cf865cba747182d5b2a64d66cd640d258b21708",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "4e9e8d0550e5e91c1d02451aa479d594d08eec1a2d88947827cbc1992cbad13e"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.005Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "committed",
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52",
+        "decision": {
+          "selected": {
+            "value": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52",
+            "utility": {
+              "p_success": 0.92567415887633,
+              "value": 1.0,
+              "cost": 0.2,
+              "ev": 0.7256741588763298
+            },
+            "propensity": 1.0,
+            "evidence": [
+              "86e224aa3c1c298cb8feadee5a9655bd4c5852e459597dd2c9af9ce9541c807a"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "e98e4740a503e12475e598c557ef58d6d678b861b22f4b9ffda03a145972e3e1",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "fedd1b316025aaf1f5804a466cf865cba747182d5b2a64d66cd640d258b21708"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.006Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "dispatched",
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52",
+        "in_sandbox": true
+      }
+    },
+    {
+      "id": "8bdea317c73ec11497390e9c06069ebcbdcf097164303af8189fac8e6c26a39d",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "e98e4740a503e12475e598c557ef58d6d678b861b22f4b9ffda03a145972e3e1"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.007Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "executed",
+        "candidate": "7ba66498724aa6e776a4175a3b6fe62ac3441f09667140bce0b22badd8e1da52",
+        "exit_code": 0,
+        "log_digest": "dd3f16ef074b9c359cdfccb6d755aed3794a6956ced07770c591c9e2da629c8b",
+        "duration_ms": 142
+      }
+    },
+    {
+      "id": "7c49985e2f33283e7391749f2b8fd4a664fc33bb661a994c6ef4aa7bf557cdab",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "8bdea317c73ec11497390e9c06069ebcbdcf097164303af8189fac8e6c26a39d"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.008Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "observed",
+        "observation": {
+          "return": {
+            "surprise": [
+              {
+                "forecast": "e9db3a6a6d0cd27a5bf2aef7fbf954ce9a91d3b7a6c566e1f2d8ba35494a8d76",
+                "residual": 0.07432584112367013
+              },
+              {
+                "forecast": "279cff5ebe721ce7a804cfa63aed7096a2a12fd903602bf26d195a5afc3026f4",
+                "residual": 0.30263162923203324
+              },
+              {
+                "forecast": "d55e378175ad519c916a63a191629ee41dcf82f8e4cd3f5b299b991968601136",
+                "residual": 0.25279419184706464
+              }
+            ],
+            "contrast": null
+          }
+        }
+      }
+    },
+    {
+      "id": "475c2472539442d6a2f4b0051ad62db984c6d7810fc473ef543b7f39dfd2e670",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "7c49985e2f33283e7391749f2b8fd4a664fc33bb661a994c6ef4aa7bf557cdab"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.009Z",
+      "observed_at": null,
+      "source": "operator",
+      "kind": {
+        "kind": "task_closed",
+        "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+        "reason": "operator"
+      }
+    },
+    {
+      "id": "702d53826405e72a47bbab8b67f5a4b93430f20d77c22fb340d606398efcf00c",
+      "schema_version": 1,
+      "task": "e7b8bf9f5cf1bc30e8be3ec1e51c786617fd85020932c84116f37b0916cb4f0e",
+      "parents": [
+        "475c2472539442d6a2f4b0051ad62db984c6d7810fc473ef543b7f39dfd2e670"
+      ],
+      "recorded_at": "2024-01-01T00:00:06.010Z",
+      "observed_at": "2024-01-01T00:00:06.010Z",
+      "source": "operator",
+      "kind": {
+        "kind": "outcome_recorded",
+        "record": {
+          "outcome": "3ea8f654fd8404111b276ac583cb9e4dad20605965066c8dfe748fa8f9dbf6f2",
+          "subject": "8bdea317c73ec11497390e9c06069ebcbdcf097164303af8189fac8e6c26a39d",
+          "status": "observed",
+          "reviewer": "operator",
+          "reason": null,
+          "evidence": "dd3f16ef074b9c359cdfccb6d755aed3794a6956ced07770c591c9e2da629c8b",
+          "supersedes": null,
+          "weight": null
+        }
+      }
+    }
+  ]
+}
