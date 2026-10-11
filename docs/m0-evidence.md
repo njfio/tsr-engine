@@ -52,6 +52,17 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 `crates/tsr-cli/tests/m0_reconstruct.rs` is green **with its assertions unchanged**.
 
+### No container runtime is present in this sandbox
+
+```
+$ command -v podman docker ; echo "exit=$?"
+exit=127
+```
+
+Neither `podman` nor `docker` exists here, so the exec path exercised in this workspace is the
+refusal path (exit 3, nothing recorded). The container invocation itself is covered by
+`exec.rs::container_argv` and is not runnable in this sandbox.
+
 ### `tsr exec` refuses with exit 3 when no runtime is reachable
 
 ```
@@ -144,3 +155,14 @@ $ TSR_DB="$PWD/.tsr-verify/tsr.db" ./target/debug/tsr task export demo | head -1
   (`EventKind::Stop`, `Forecast::new`, `Event::state_version`) landed in commit `608cf64`.
 - `crates/tsr-store`'s `latest_seq` / `append_all` helpers landed in the store lane.
 - The fixture is produced by the tool under test (`tsr hook --selftest`), never written by hand.
+
+## The commits
+
+```
+$ git log --oneline -10
+c5e3361 docs: M0 evidence page and README hook registration
+ad9d810 cli: tsr hook/exec/task/forecast + reconstruct::from_events (M0)
+608cf64 contract: EventKind::Stop, Forecast::new, Event::state_version (additive, M0 hook needs)
+a525758 docs: keep the cargo cache inside the workspace when sandboxed
+6bbfeca chore: M0 skeleton — contract crate, append-only store, red M0 test, lane briefs
+```
