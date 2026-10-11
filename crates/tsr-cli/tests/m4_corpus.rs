@@ -92,7 +92,8 @@ fn every_fixture_session_satisfies_the_m0_invariants() {
         path.display()
     );
 
-    let session = reconstruct::from_events(&path).expect("the corpus reconstructs from events.jsonl");
+    let session =
+        reconstruct::from_events(&path).expect("the corpus reconstructs from events.jsonl");
 
     assert!(!session.events.is_empty(), "a corpus has events");
     assert!(session.monotone_seq(), "B6: sequence is monotone");
@@ -126,7 +127,11 @@ fn the_corpus_has_the_shape_the_brief_names() {
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str(l).expect("a task row is JSON"))
         .collect();
-    assert_eq!(task_lines.len(), 380, "three families of 120 plus one of 20");
+    assert_eq!(
+        task_lines.len(),
+        380,
+        "three families of 120 plus one of 20"
+    );
 
     let mut families: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let mut lineages: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -140,7 +145,11 @@ fn the_corpus_has_the_shape_the_brief_names() {
     assert_eq!(families.get("calibrated"), Some(&120));
     assert_eq!(families.get("underconfident"), Some(&120));
     assert_eq!(families.get("rare"), Some(&20));
-    assert!(lineages.len() >= 8, "at least eight lineages: {}", lineages.len());
+    assert!(
+        lineages.len() >= 8,
+        "at least eight lineages: {}",
+        lineages.len()
+    );
 
     // labels.jsonl: only reviewed closes, all by the operator.
     let label_lines: Vec<serde_json::Value> = std::fs::read_to_string(&labels)

@@ -66,8 +66,8 @@
 use std::path::Path;
 
 use tsr_domain::{
-    ActionKind, Candidate, Decision, Event, EventId, EventKind, Forecast, Forecaster, Hash, Horizon,
-    Probability, Source, TaskId, Utility,
+    ActionKind, Candidate, Decision, Event, EventId, EventKind, Forecast, Forecaster, Hash,
+    Horizon, Probability, Source, TaskId, Utility,
 };
 use tsr_store::Store;
 
@@ -752,10 +752,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tsr-m4-shape-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a temp dir is creatable");
-        let corpus = generate_fixtures(&dir.join("corpus.db"), &dir.join("fixtures"))
-            .expect("generates");
+        let corpus =
+            generate_fixtures(&dir.join("corpus.db"), &dir.join("fixtures")).expect("generates");
         assert_eq!(corpus.tasks.len(), 380);
-        let mut families: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        let mut families: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
         let mut lineages: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for row in &corpus.tasks {
             *families.entry(row.family.as_str()).or_default() += 1;
@@ -777,7 +778,11 @@ mod tests {
     #[test]
     fn the_overconfident_family_is_the_b8_example() {
         let over = FAMILIES.iter().find(|f| f.name == "overconfident").unwrap();
-        assert!((p_generator(over, 0) - 0.9).abs() < 0.02, "{}", p_generator(over, 0));
+        assert!(
+            (p_generator(over, 0) - 0.9).abs() < 0.02,
+            "{}",
+            p_generator(over, 0)
+        );
         assert!((p_true(over, 0) - 0.4).abs() < 0.02, "{}", p_true(over, 0));
     }
 }
