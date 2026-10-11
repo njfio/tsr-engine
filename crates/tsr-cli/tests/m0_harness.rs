@@ -533,3 +533,341 @@ fn a_second_run_of_the_same_command_commits_without_a_second_proposal() {
         "both commitments have a prior forecast at their state version"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// The selftest sequence, replayed through the library with a FakeRunner (no container needed)
+// ---------------------------------------------------------------------------------------------
+
+/// The argv the selftest runs in the container: `cargo test --offline -p parser`.
+const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "parser"];
+/// The command string the forecast and the hook payload name for a run.
+const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
+
+/// A `PreToolUse` payload for a tool call, as a parsed [`HookPayload`].
+fn pre(session: &str, tool: &str, input: serde_json::Value) -> HookPayload {
+    HookPayload::parse(&pretooluse(session, tool, input))
+}
+
+/// A `PostToolUse` payload for a `Bash` call, as a parsed [`HookPayload`].
+fn post_bash(session: &str, cmd: &str, exit_code: i32) -> HookPayload {
+    HookPayload::parse(
+        &serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": cmd },
+            "tool_response": { "exit_code": exit_code, "stdout": "test result: ok" },
+        })
+        .to_string(),
+    )
+}
+
+/// Replay the selftest's exact sequence through the library, with the container invocation injected
+/// as a [`exec::FakeRunner`]. Returns the store, the task and the scratch directory.
+///
+/// This is `hook::selftest_inner` with `exec::run` replaced by `exec::run_with(…, &FakeRunner)`: the
+/// same calls, in the same order, so the resulting log is the log the selftest would write on a host
+/// with a container runtime — without needing one.
+fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
+    let (store, dir) = fresh_store(name);
+    let session = "m0-selftest-session";
+    let task = store_path::task_for_session(session);
+    let workspace = dir.clone();
+
+    // 1. The task is opened.
+    let start = HookPayload::parse(
+        &serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "SessionStart",
+            "cwd": workspace.display().to_string(),
+        })
+        .to_string(),
+    );
+    hook::record_session_start(&store, &start).expect("record session start");
+
+    // 2. Two inspections.
+    for path in ["crates/tsr-cli/src/lib.rs", "crates/tsr-store/src/lib.rs"] {
+        hook::record_tool(
+            &store,
+            &pre(session, "Read", serde_json::json!({ "file_path": path })),
+        )
+        .expect("record read");
+    }
+
+    // 3. A forecast before the first gated action.
+    hook::record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.7,
+        "generator",
+    )
+    .expect("record forecast");
+
+    // 4. The first run: the agent's Bash call is `tsr exec -- cargo test …`. The hook records the
+    //    commitment; `tsr exec` records the dispatch and the execution; the PostToolUse reconciles
+    //    nothing further.
+    let exec_cmd = format!("tsr exec -- {SELFTEST_TEST_CMD}");
+    let argv: Vec<String> = SELFTEST_TEST_ARGV.iter().map(|s| s.to_string()).collect();
+    hook::record_tool(
+        &store,
+        &pre(session, "Bash", serde_json::json!({ "command": exec_cmd })),
+    )
+    .expect("record exec pre");
+    exec::run_with(
+        &store,
+        &task,
+        &workspace,
+        &argv,
+        &exec::FakeRunner::new(0, "test result: ok"),
+    )
+    .expect("fake exec run");
+    hook::record_post_tool(&store, &post_bash(session, &exec_cmd, 0)).expect("record exec post");
+
+    // 5. A forecast before the patch proposal, then the proposal itself (gated).
+    hook::record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::ProposePatch,
+        "crates/tsr-cli/src/lib.rs",
+        0.6,
+        "generator",
+    )
+    .expect("record patch forecast");
+    hook::record_tool(
+        &store,
+        &pre(
+            session,
+            "Edit",
+            serde_json::json!({ "file_path": "crates/tsr-cli/src/lib.rs" }),
+        ),
+    )
+    .expect("record edit");
+
+    // 6. A forecast before the second gated action, then the second run the same way.
+    hook::record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        SELFTEST_TEST_CMD,
+        0.6,
+        "generator",
+    )
+    .expect("record second forecast");
+    hook::record_tool(
+        &store,
+        &pre(session, "Bash", serde_json::json!({ "command": exec_cmd })),
+    )
+    .expect("record second exec pre");
+    exec::run_with(
+        &store,
+        &task,
+        &workspace,
+        &argv,
+        &exec::FakeRunner::new(0, "test result: ok"),
+    )
+    .expect("second fake exec run");
+    hook::record_post_tool(&store, &post_bash(session, &exec_cmd, 0))
+        .expect("record second exec post");
+
+    // 7. A stop.
+    let stop = HookPayload::parse(
+        &serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "Stop",
+            "stop_hook_active": false,
+        })
+        .to_string(),
+    );
+    hook::record_stop(&store, &stop).expect("record stop");
+
+    (store, task, dir)
+}
+
+/// The selftest sequence replayed through the FakeRunner has exactly 19 events and satisfies every
+/// `reconstruct::Session` invariant — in particular B5, the one the real record failed.
+#[test]
+fn selftest_sequence_through_the_fake_runner_has_19_events_and_holds_every_invariant() {
+    let (store, task, _dir) = replay_selftest("replay-selftest");
+
+    let ks = kinds(&store, &task);
+    let tags: Vec<&str> = ks.iter().map(|(_, k)| k.as_str()).collect();
+    eprintln!("replayed selftest event kinds: {tags:?}");
+
+    assert_eq!(
+        tags,
+        vec![
+            "task_opened",
+            "proposed",
+            "committed",
+            "proposed",
+            "committed",
+            "proposed",
+            "forecast",
+            "committed",
+            "dispatched",
+            "executed",
+            "proposed",
+            "forecast",
+            "committed",
+            "proposed",
+            "forecast",
+            "committed",
+            "dispatched",
+            "executed",
+            "stop",
+        ],
+        "the repaired selftest sequence is exactly 19 events"
+    );
+    assert_eq!(ks.len(), 19, "exactly 19 events");
+
+    let session = reconstruct_task(&store, &task);
+    assert_eq!(session.events.len(), 19);
+    assert!(session.monotone_seq(), "sequence is monotone");
+    assert!(
+        session.every_parent_precedes_its_child(),
+        "every parent precedes its child"
+    );
+    assert!(
+        session.every_gated_action_has_prior_forecast_at_same_state_version(),
+        "B5: every gated action has a forecast at its commitment's state version"
+    );
+    assert!(
+        session.every_dispatch_reconciled_or_unresolved(),
+        "B6: every dispatch is reconciled"
+    );
+    assert!(
+        session.every_command_ran_in_sandbox(),
+        "B4: every command ran in the sealed sandbox"
+    );
+}
+
+/// No `Proposed` or `Committed` follows a `tsr exec` PostToolUse, and the second run dispatches the
+/// candidate committed at its own `PreToolUse` — not a freshly minted one.
+#[test]
+fn no_proposal_after_a_tsr_exec_post_tool_and_the_second_run_reuses_its_commitment() {
+    let (store, task, _dir) = replay_selftest("replay-no-proposal");
+
+    let events = store.by_task(&task).expect("by_task");
+
+    // The two `tsr exec` PostToolUse calls append nothing: the log is unchanged across each. Replay
+    // the sequence and compare the log length before and after each PostToolUse.
+    let exec_cmd = format!("tsr exec -- {SELFTEST_TEST_CMD}");
+    let (store2, task2, _dir2) = replay_selftest("replay-no-proposal-2");
+    let before = store2.by_task(&task2).expect("by_task").len();
+    hook::record_post_tool(&store2, &post_bash("m0-selftest-session", &exec_cmd, 0))
+        .expect("record exec post");
+    let after = store2.by_task(&task2).expect("by_task").len();
+    assert_eq!(
+        before, after,
+        "a tsr exec PostToolUse appends nothing: no Proposed/Committed after it"
+    );
+
+    assert_eq!(
+        count_of(&store, &task, "proposed"),
+        5,
+        "two inspections + three gated actions: five proposals, none from a PostToolUse"
+    );
+
+    // The second run dispatches the candidate committed at its own PreToolUse. The two runs share a
+    // candidate id (same kind + args), so the check is on the *occurrence*: the second Dispatched
+    // must follow the second Committed, and the second Executed must follow that Dispatched.
+    let committed: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, e))| match &e.kind {
+            EventKind::Committed { .. } => Some(i),
+            _ => None,
+        })
+        .collect();
+    let dispatched: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (_, e))| match &e.kind {
+            EventKind::Dispatched { .. } => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(committed.len(), 5, "five commitments");
+    assert_eq!(dispatched.len(), 2, "two dispatches");
+    // The second dispatch follows the fifth commitment (the second run's PreToolUse), not a fresh
+    // proposal: no Proposed sits between them.
+    assert!(
+        committed[4] < dispatched[1],
+        "the second dispatch follows the second run's commitment"
+    );
+    assert!(
+        !events[committed[4] + 1..dispatched[1]]
+            .iter()
+            .any(|(_, e)| matches!(e.kind, EventKind::Proposed { .. })),
+        "the second run mints no fresh candidate between its commitment and its dispatch"
+    );
+}
+
+/// A host `Bash` (`cargo test …` without `tsr exec`) yields `Dispatched { in_sandbox: false }` at
+/// `PreToolUse` and `Executed` at `PostToolUse`, with no new `Proposed`.
+#[test]
+fn host_bash_yields_a_host_dispatch_and_an_executed_post_tool_with_no_new_proposal() {
+    let (store, _dir) = fresh_store("replay-host-bash");
+    let session = "replay-host-bash";
+    let task = store_path::task_for_session(session);
+    let cmd = SELFTEST_TEST_CMD;
+
+    // A forecast first, so the gated action is legitimate.
+    hook::record_forecast_for_action(
+        &store,
+        &task,
+        ActionKind::RunApprovedTest,
+        cmd,
+        0.7,
+        "generator",
+    )
+    .expect("record forecast");
+
+    hook::record_tool(
+        &store,
+        &pre(session, "Bash", serde_json::json!({ "command": cmd })),
+    )
+    .expect("record host pre");
+
+    let ks = kinds(&store, &task);
+    let tags: Vec<&str> = ks.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(
+        tags,
+        vec!["proposed", "forecast", "committed", "dispatched"],
+        "a host Bash run is dispatched on the host at PreToolUse"
+    );
+    let in_sandbox: Vec<bool> = store
+        .by_task(&task)
+        .expect("by_task")
+        .into_iter()
+        .filter_map(|(_, ev)| match ev.kind {
+            EventKind::Dispatched { in_sandbox, .. } => Some(in_sandbox),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        in_sandbox,
+        vec![false],
+        "the host run is not in the sandbox"
+    );
+
+    // The PostToolUse reconciles the commitment: Executed, and no new Proposed.
+    hook::record_post_tool(&store, &post_bash(session, cmd, 0)).expect("record host post");
+    let ks = kinds(&store, &task);
+    let tags: Vec<&str> = ks.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(
+        tags,
+        vec![
+            "proposed",
+            "forecast",
+            "committed",
+            "dispatched",
+            "executed"
+        ],
+        "the PostToolUse records Executed and no new Proposed"
+    );
+    assert_eq!(count_of(&store, &task, "proposed"), 1, "no new Proposed");
+    assert_eq!(count_of(&store, &task, "committed"), 1, "no new Committed");
+}
