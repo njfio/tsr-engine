@@ -7,3 +7,6 @@
 *.db-shm
 .DS_Store
 /.cargo-home
+/.check-wt
+/.evidence
+/mutants.out.old

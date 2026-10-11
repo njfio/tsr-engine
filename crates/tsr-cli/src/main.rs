@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod batch_cmd;
 mod corpus_cmd;
 mod policy_cmd;
 
@@ -88,6 +89,21 @@ enum Cmd {
 enum TaskCmd {
     /// Open a task: workspace, intent, criteria, limits, capabilities (FR 001).
     Open,
+    /// Run a batch of corpus tasks through a driver (M3, B9, B11).
+    Run {
+        /// record | rules
+        #[arg(long)]
+        mode: String,
+        /// The corpus task manifest (tasks.jsonl).
+        #[arg(long)]
+        tasks: PathBuf,
+        /// scripted | claude-code
+        #[arg(long)]
+        driver: String,
+        /// Output directory: results.jsonl and the per-task stores.
+        #[arg(long)]
+        out: PathBuf,
+    },
     Status {
         task: String,
     },
@@ -148,6 +164,12 @@ fn main() -> ExitCode {
     match cli.cmd {
         Cmd::Task { cmd } => match cmd {
             TaskCmd::Open => not_yet("task open", "B3/B5 (M0)"),
+            TaskCmd::Run {
+                mode,
+                tasks,
+                driver,
+                out,
+            } => batch_cmd::run_cmd(&mode, &tasks, &driver, &out),
             TaskCmd::Status { .. } => not_yet("task status", "B11 M0"),
             TaskCmd::Export { .. } => not_yet("task export", "B11 M0 — the trace export"),
         },

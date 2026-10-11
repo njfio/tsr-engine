@@ -1,0 +1,151 @@
+//! `tsr task run` — the batch runner over a corpus task manifest (PRD §B9, §B11 M3).
+//!
+//! This is the CLI face of `tsr-batch`. It reads a `tasks.jsonl`, runs every task under one system
+//! (`record` or `rules`) through one driver (`scripted` or `claude-code`), and writes
+//! `results.jsonl` plus the per-task stores under `--out`.
+//!
+//! The `scripted` driver replays a fixture session per task, found next to the manifest:
+//! `<manifest-dir>/sessions/<task-id>-<mode>.json`, then `<manifest-dir>/session-<mode>.json`, then
+//! the well-formed default `<manifest-dir>/session-inspect-test-propose.json`. The `claude-code`
+//! driver is the documented stub: it returns exit 2 with its reason (no Claude Code, no container
+//! runtime in this sandbox).
+
+use std::path::Path;
+
+use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedSession};
+use tsr_batch::run::{run_all, BatchConfig};
+use tsr_batch::task::read_tasks;
+use tsr_batch::ClaudeCodeDriver;
+use tsr_corpus::ExecRunner;
+use tsr_policy::profile::Profile;
+
+/// Run the batch. Returns the process exit code.
+pub fn run_cmd(mode: &str, tasks: &Path, driver: &str, out: &Path) -> std::process::ExitCode {
+    match run_inner(mode, tasks, driver, out) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("tsr: task run: {e}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
+fn run_inner(
+    mode: &str,
+    tasks_path: &Path,
+    driver: &str,
+    out: &Path,
+) -> Result<std::process::ExitCode, String> {
+    let mode = match mode {
+        "record" => Mode::Record,
+        "rules" => Mode::Rules,
+        other => return Err(format!("unknown --mode `{other}` (want record|rules)")),
+    };
+
+    let profile = Profile::load(Path::new("profiles/default.toml"))
+        .map_err(|e| format!("loading profiles/default.toml: {e}"))?;
+
+    let tasks =
+        read_tasks(tasks_path).map_err(|e| format!("reading {}: {e}", tasks_path.display()))?;
+    if tasks.is_empty() {
+        return Err(format!("{} holds no tasks", tasks_path.display()));
+    }
+
+    std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
+    let config = BatchConfig::new(out, profile);
+
+    let manifest_dir = tasks_path.parent().unwrap_or_else(|| Path::new("."));
+
+    let results = match driver {
+        "scripted" => {
+            // A scripted driver replays a fixture session, so the oracle runs through the same
+            // scripted runner: nothing here executes a repository's tests on the host.
+            let runner = tsr_corpus::ScriptedRunner::ok();
+            let sessions = load_sessions(manifest_dir, &tasks, mode)?;
+            run_all(
+                &tasks,
+                mode,
+                |task| {
+                    let session = sessions
+                        .get(&task.id)
+                        .cloned()
+                        .unwrap_or_else(|| sessions.values().next().cloned().expect("a session"));
+                    Box::new(ScriptedDriver::new(mode, session))
+                },
+                &runner,
+                &config,
+            )
+            .map_err(|e| format!("running the batch: {e}"))?
+        }
+        "claude-code" => {
+            // In production `ExecRunner` invokes `tsr exec -- <argv>` in the sealed sibling sandbox
+            // (PRD §B4). The stub driver returns `DriverError::Unavailable`; `run_one` records each
+            // task as `unavailable` and closes it, and the batch still writes a results file.
+            let runner = ExecRunner::new();
+            let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
+            let mut out_results = Vec::with_capacity(tasks.len());
+            for task in &tasks {
+                let r = tsr_batch::run::run_one(task, mode, &driver, &runner, &config)
+                    .map_err(|e| format!("running the batch: {e}"))?;
+                out_results.push(r);
+            }
+            out_results
+        }
+        other => {
+            return Err(format!(
+                "unknown --driver `{other}` (want scripted|claude-code)"
+            ))
+        }
+    };
+
+    let results_path = out.join("results.jsonl");
+    tsr_batch::write_results(&results_path, &results)
+        .map_err(|e| format!("writing {}: {e}", results_path.display()))?;
+
+    let accepted = results
+        .iter()
+        .filter(|r| r.outcome == tsr_batch::Outcome::Accepted)
+        .count();
+    let unavailable = results
+        .iter()
+        .filter(|r| r.outcome == tsr_batch::Outcome::Unavailable)
+        .count();
+    println!(
+        "tsr task run: {} tasks, system {}, driver {} -> {} ({} accepted, {} unavailable)",
+        results.len(),
+        mode.system(),
+        driver,
+        results_path.display(),
+        accepted,
+        unavailable
+    );
+    Ok(std::process::ExitCode::SUCCESS)
+}
+
+/// Load one session per task, in the order the manifest names them.
+fn load_sessions(
+    manifest_dir: &Path,
+    tasks: &[tsr_batch::CorpusTask],
+    mode: Mode,
+) -> Result<std::collections::BTreeMap<String, ScriptedSession>, String> {
+    let mut sessions = std::collections::BTreeMap::new();
+    for task in tasks {
+        let candidates = [
+            manifest_dir
+                .join("sessions")
+                .join(format!("{}-{}.json", task.id, mode.system())),
+            manifest_dir.join(format!("session-{}.json", mode.system())),
+            manifest_dir.join("session-inspect-test-propose.json"),
+        ];
+        let path = candidates.iter().find(|p| p.exists()).ok_or_else(|| {
+            format!(
+                "no scripted session for task {} under {}",
+                task.id,
+                manifest_dir.display()
+            )
+        })?;
+        let session = read_session(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+        sessions.insert(task.id.clone(), session);
+    }
+    Ok(sessions)
+}

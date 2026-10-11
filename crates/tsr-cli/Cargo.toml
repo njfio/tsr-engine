@@ -21,6 +21,7 @@ tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
 tsr-policy = { path = "../tsr-policy" }
 tsr-corpus = { path = "../tsr-corpus" }
+tsr-batch = { path = "../tsr-batch" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
@@ -29,3 +30,6 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

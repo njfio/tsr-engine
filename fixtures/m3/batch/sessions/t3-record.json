@@ -1,0 +1,94 @@
+{
+  "name": "t3-record",
+  "steps": [
+    {
+      "kind": "inspect",
+      "args": {
+        "arg": "inspect_path",
+        "path": "src/parser.rs"
+      },
+      "forecast": 0.9,
+      "forecast_event": "test_pass",
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 40,
+      "tool_minutes": 1,
+      "wall_clock_ms": 0
+    },
+    {
+      "kind": "inspect",
+      "args": {
+        "arg": "inspect_path",
+        "path": "tests/parser.rs"
+      },
+      "forecast": 0.9,
+      "forecast_event": "test_pass",
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 40,
+      "tool_minutes": 1,
+      "wall_clock_ms": 0
+    },
+    {
+      "kind": "run_approved_test",
+      "args": {
+        "arg": "test_id",
+        "id": "cargo-test-workspace"
+      },
+      "forecast": 0.4,
+      "forecast_event": "test_pass",
+      "dispatch": true,
+      "exit_code": 101,
+      "duration_ms": 1200,
+      "generator_tokens": 40,
+      "tool_minutes": 2,
+      "wall_clock_ms": 1200
+    },
+    {
+      "kind": "propose_patch",
+      "args": {
+        "arg": "patch_bytes",
+        "bytes": 128
+      },
+      "forecast": 0.7,
+      "forecast_event": "diff_accepted",
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 40,
+      "tool_minutes": 1,
+      "wall_clock_ms": 0
+    },
+    {
+      "kind": "run_approved_test",
+      "args": {
+        "arg": "test_id",
+        "id": "cargo-test-workspace"
+      },
+      "forecast": 0.85,
+      "forecast_event": "test_pass",
+      "dispatch": true,
+      "exit_code": 0,
+      "duration_ms": 1100,
+      "generator_tokens": 40,
+      "tool_minutes": 2,
+      "wall_clock_ms": 1100
+    },
+    {
+      "kind": "stop",
+      "args": {
+        "arg": "stop"
+      },
+      "forecast": null,
+      "forecast_event": null,
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 40,
+      "tool_minutes": 1,
+      "wall_clock_ms": 0
+    }
+  ]
+}
