@@ -104,6 +104,39 @@ family bias was built to produce. The test asserts the difference and the alpha/
 does not assert a gamma/beta ordering, because ten episodes is too small a sample for the milder
 under-confidence to order reliably.
 
+## Regenerating the store
+
+`fixtures/m2/store/tsr.db` is **not committed** — `.gitignore` has `*.db`, so `git ls-files
+fixtures/m2` shows only the thirty JSON episodes. The store is a derived artifact: run the generator
+to rebuild it, then the `reflect`/`review` commands below read it.
+
+```console
+$ export PATH=/usr/local/cargo/bin:$PATH CARGO_HOME=$PWD/.cargo-home
+$ cargo test -p tsr-cli --test m2_episodes
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.00s
+     Running tests/m2_episodes.rs (target/debug/deps/m2_episodes-4b18fe78ca9a956e)
+
+running 5 tests
+test corpus_is_thirty_episodes_across_three_families ... ok
+test generation_is_deterministic ... ok
+test fixtures_are_committed_and_match_the_generator ... ok
+test generator_curve_differs_across_families ... ok
+test store_holds_every_episode_for_the_cli ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.84s
+$ ls -la fixtures/m2/store/
+-rw-r--r-- 1 root root 569344 ... tsr.db
+```
+
+The store holds all thirty episodes in one file; there is no per-episode store. A task id from any
+episode opens it, e.g. `alpha-00`'s task is
+`1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b`:
+
+```console
+$ tsr review 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store fixtures/m2/store/tsr.db
+no returns await a label
+```
+
 ## The corpus as a store the CLI can fold
 
 The JSON episodes are the committed record; `fixtures/m2/store/tsr.db` is the same corpus as a
