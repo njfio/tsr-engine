@@ -721,6 +721,11 @@ pub enum EventKind {
         status: PreferenceStatus,
         by: Source,
     },
+    /// A label on a return (B5, B7). The record carries its own provenance; a correction appends
+    /// a superseding record rather than rewriting the one it replaces.
+    OutcomeRecorded {
+        record: OutcomeRecord,
+    },
     Approved {
         candidate: CandidateId,
         scope: String,
@@ -792,6 +797,85 @@ pub struct OutcomeDef {
     pub resolves_true_when: String,
     pub censored_when: String,
     pub intervention_rule: String,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Outcome records (B5, B7): the label a return awaits, and its provenance
+// ---------------------------------------------------------------------------------------------
+
+/// Where an outcome record stands. `pending` is the state a return is in before review; the rest
+/// are the labels a reviewer can give it (B5, B7). `disputed` is a label, not a status of the
+/// tool: an operator-modified diff resolves as `disputed` (B7, `diff_accepted`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelStatus {
+    /// Awaiting a label.
+    Pending,
+    /// The reviewer accepted the return.
+    Observed,
+    /// The return was censored: it never resolved (timeout, cancellation, never reviewed).
+    Censored,
+    /// The evidence the return needed is missing.
+    Missing,
+    /// The reviewer disputed the return.
+    Disputed,
+    /// The return is invalid: it cannot be scored.
+    Invalid,
+}
+
+impl LabelStatus {
+    /// The engineering name, for the CLI and for the log's own tags.
+    pub fn name(self) -> &'static str {
+        match self {
+            LabelStatus::Pending => "pending",
+            LabelStatus::Observed => "observed",
+            LabelStatus::Censored => "censored",
+            LabelStatus::Missing => "missing",
+            LabelStatus::Disputed => "disputed",
+            LabelStatus::Invalid => "invalid",
+        }
+    }
+
+    /// Parse the CLI's spelling of a status.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "pending" => LabelStatus::Pending,
+            "observed" => LabelStatus::Observed,
+            "censored" => LabelStatus::Censored,
+            "missing" => LabelStatus::Missing,
+            "disputed" => LabelStatus::Disputed,
+            "invalid" => LabelStatus::Invalid,
+            _ => return None,
+        })
+    }
+}
+
+/// The label a return carries, with its own provenance (B5, B7).
+///
+/// An outcome record is separate from the decision record: it names the outcome definition it
+/// resolves, the status, the reviewer, the observed and recorded times, and the evidence digest.
+/// A correction appends a superseding record — `supersedes` names the record it replaces — and
+/// nothing is ever rewritten. The rejection reason is stored apart from tool results: it lives in
+/// `reason`, never in the evidence digest.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutcomeRecord {
+    /// The outcome definition this record resolves (`diff_accepted@v1`, ...).
+    pub outcome: OutcomeDefId,
+    /// The event the record is about: the return it labels.
+    pub subject: EventId,
+    pub status: LabelStatus,
+    /// The reviewer: `Source::Operator` for a human label.
+    pub reviewer: Source,
+    /// The operator's reason, when the label is `rejected`/`disputed`. Stored apart from tool
+    /// results; it enters the ledger directly as an Operator preference (B2.1, B7).
+    pub reason: Option<String>,
+    /// The evidence digest the label rests on, when there is one.
+    pub evidence: Option<Hash>,
+    /// The record this one supersedes, when it is a correction. Never a rewrite.
+    pub supersedes: Option<EventId>,
+    /// The inverse-probability weight when the return was sampled for review (B7). `None` when
+    /// the return was reviewed unconditionally (every failure, every green on the eval set).
+    pub weight: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------------------------
