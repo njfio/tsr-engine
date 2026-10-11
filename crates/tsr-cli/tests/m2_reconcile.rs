@@ -22,8 +22,8 @@ use tsr_cli::reconcile_cmd::{
     Reconciler, Resolution, ToolCheck, CANCELLED, UNKNOWN_IDEMPOTENT, UNKNOWN_NON_IDEMPOTENT,
 };
 use tsr_domain::{
-    ActionKind, Candidate, CandidateId, Event, EventKind, ExecError, ExecOutcome, Executor, Hash,
-    Source, TaskId,
+    ActionKind, Candidate, CandidateId, Event, EventId, EventKind, ExecError, ExecOutcome,
+    Executor, Hash, Source, TaskId,
 };
 use tsr_store::Store;
 
@@ -428,6 +428,54 @@ fn row_acknowledgement_missing_digest_is_unknown() {
     );
 }
 
+#[test]
+fn d5_acknowledgement_crash_point_drives_fake_executor_reconcile() {
+    // D5: the acknowledgement crash point must be exercised through the executor's own
+    // `reconcile`, not only through a hand-built ToolCheck. The crash lands after the effect
+    // happened, before the ack is recorded: `reconcile` must fail, and the tool's check must
+    // then settle the dispatch to exactly one Executed.
+    let cand = candidate("ack-executor");
+    let (s, dispatch) = dispatched(&cand);
+    let digest = Hash::of(&[b"tool-log-ack-executor"]);
+    let mut ex = FakeExecutor::new(
+        FakeTool {
+            idempotent: true,
+            log_digest: digest,
+        },
+        CrashPoint::Acknowledgement,
+    );
+    let intent = tsr_domain::DispatchIntent {
+        candidate: cand.id,
+        idempotency_key: intent_key(&cand.id),
+        expected_state_version: 3,
+    };
+    // The effect happened (the tool saw the key), but the acknowledgement never landed.
+    let handle = ex.dispatch(&intent).expect("the effect is sent");
+    assert!(ex.has_seen(&intent.idempotency_key), "the effect happened");
+    assert!(
+        ex.reconcile(&handle).is_err(),
+        "the acknowledgement crash point must make reconcile fail"
+    );
+    assert_eq!(ex.effects_for(&cand.id), 1, "exactly one effect");
+
+    // The tool's own check settles it: the log digest is in the CAS.
+    let dir = std::env::temp_dir().join(format!("tsr-cas-ack-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(digest.to_hex()), b"the tool's log").unwrap();
+    let check = ex.tool_check(&dir, cand.id);
+    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
+    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+    assert_eq!(res, Resolution::Executed);
+    assert_eq!(
+        kinds(&s),
+        vec!["task_opened", "proposed", "dispatched", "executed"]
+    );
+    let events = s.by_task(&task()).unwrap();
+    assert_eq!(events.last().unwrap().1.parents, vec![dispatch.id]);
+    assert_eq!(ex.effects_for(&cand.id), 1, "still exactly one effect");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ---------------------------------------------------------------------------------------------
 // Row 4: cancellation
 // ---------------------------------------------------------------------------------------------
@@ -478,7 +526,10 @@ fn row_cancellation_appends_unresolved_cancelled_and_task_closed() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn post_execution_forecast_edit_is_refused_while_an_outcome_append_succeeds() {
+fn d5_forecast_update_after_executed_is_refused_specifically() {
+    // D5: the store's rule is that a forecast cannot be edited *after* Executed exists. The
+    // UPDATE must be attempted after the Executed event is in the log, and the refusal must be
+    // the store's specific append-only error, not merely `is_err()`.
     let cand = candidate("store-rule");
     let (s, dispatch) = dispatched(&cand);
     let forecast = Event::new(
@@ -502,13 +553,7 @@ fn post_execution_forecast_edit_is_refused_while_an_outcome_append_succeeds() {
     );
     s.append(&forecast).unwrap();
 
-    // Editing the forecast in place is refused by the BEFORE UPDATE trigger.
-    let upd = s
-        .connection()
-        .execute("UPDATE events SET payload = '{}' WHERE seq = 4", []);
-    assert!(upd.is_err(), "the store refuses an in-place edit");
-
-    // Appending the outcome succeeds: the log grows, it never rewrites.
+    // Executed exists first: the forecast is now post-execution.
     let executed = Event::new(
         task(),
         vec![forecast.id],
@@ -522,6 +567,38 @@ fn post_execution_forecast_edit_is_refused_while_an_outcome_append_succeeds() {
         "t4",
     );
     s.append(&executed).unwrap();
+
+    // Editing the forecast in place is refused by the BEFORE UPDATE trigger, with its own message.
+    let upd = s
+        .connection()
+        .execute("UPDATE events SET payload = '{}' WHERE seq = 4", []);
+    let err = upd.expect_err("the store refuses an in-place edit after Executed");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("events is append-only: updates are refused"),
+        "the refusal must be the store's append-only error, got: {msg}"
+    );
+
+    // Appending the outcome succeeds: the log grows, it never rewrites.
+    let outcome = Event::new(
+        task(),
+        vec![executed.id],
+        Source::Operator,
+        EventKind::OutcomeRecorded {
+            record: tsr_domain::OutcomeRecord {
+                outcome: tsr_domain::OutcomeDefId(Hash::of(&[b"e"])),
+                subject: forecast.id,
+                status: tsr_domain::LabelStatus::Observed,
+                reviewer: Source::Operator,
+                reason: None,
+                evidence: None,
+                supersedes: None,
+                weight: None,
+            },
+        },
+        "t5",
+    );
+    s.append(&outcome).unwrap();
     assert_eq!(
         kinds(&s),
         vec![
@@ -529,7 +606,8 @@ fn post_execution_forecast_edit_is_refused_while_an_outcome_append_succeeds() {
             "proposed",
             "dispatched",
             "forecast",
-            "executed"
+            "executed",
+            "outcome_recorded"
         ]
     );
 }
@@ -707,17 +785,18 @@ fn cli_reconcile_over_a_real_store_reports_and_settles() {
         ])
         .output()
         .expect("the tsr binary runs");
-    // The default ToolCheck has no evidence and no idempotent candidate, so the dispatch is
-    // blocked: exit 1, and the line says so.
+    // D1: the CLI loads its evidence from the log, so a `RunApprovedTest` candidate is known
+    // idempotent. With no digest in the CAS the outcome is unknown, so the dispatch is recorded
+    // `unresolved` and is retryable (exit 0) — not blocked.
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("unresolved") && stdout.contains("blocked"),
+        stdout.contains("unresolved") && stdout.contains("retryable"),
         "stdout: {stdout}"
     );
 
@@ -727,6 +806,262 @@ fn cli_reconcile_over_a_real_store_reports_and_settles() {
         kinds(&s),
         vec!["task_opened", "proposed", "dispatched", "unresolved"]
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------------------------
+// D1: the CLI loads its ToolCheck evidence from the log and the CAS, re-checks a blocked
+// dispatch, and enforces retry-once for an idempotent unknown.
+//
+// Defect D1 (repair brief item 4): `reconcile_cmd::run` built `ToolCheck::new(cas_root)` with no
+// digests, no seen keys and nothing idempotent, so every pending dispatch was "non-idempotent,
+// blocked" and, once `Unresolved`, never re-checked (`pending_dispatches` treated any `Unresolved`
+// as settled). These tests drive the built binary over a real on-disk store and CAS.
+// ---------------------------------------------------------------------------------------------
+
+/// A scratch directory under the target dir (never `/tmp`, which this host prunes).
+fn d1_scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/d1-reconcile")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// Seed a store with `TaskOpened`, `Proposed(cand)`, `Dispatched(cand)` and return the dispatch id.
+fn d1_seed_dispatched(db: &std::path::Path, cand: &Candidate) -> EventId {
+    let s = Store::open(db).unwrap();
+    let opened = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::TaskOpened { task: task() },
+        "t0",
+    );
+    s.append(&opened).unwrap();
+    let proposed = Event::new(
+        task(),
+        vec![opened.id],
+        Source::Rules,
+        EventKind::Proposed {
+            candidate: cand.clone(),
+        },
+        "t1",
+    );
+    s.append(&proposed).unwrap();
+    let dispatch = Event::new(
+        task(),
+        vec![proposed.id],
+        Source::Rules,
+        EventKind::Dispatched {
+            candidate: cand.id,
+            in_sandbox: true,
+        },
+        "t2",
+    );
+    s.append(&dispatch).unwrap();
+    dispatch.id
+}
+
+/// Run `tsr task reconcile <task> --store <db>` and return (exit code, stdout, stderr).
+///
+/// Retries briefly on SQLite's "database is locked": the seeding connection in this process may
+/// not have released the file when the child starts.
+fn d1_run_reconcile(db: &std::path::Path) -> (Option<i32>, String, String) {
+    for attempt in 0..20 {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_tsr"))
+            .args([
+                "task",
+                "reconcile",
+                &task().to_string(),
+                "--store",
+                db.to_str().unwrap(),
+            ])
+            .output()
+            .expect("the tsr binary runs");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        if stderr.contains("database is locked") && attempt < 19 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            continue;
+        }
+        return (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr,
+        );
+    }
+    unreachable!("the retry loop returns")
+}
+
+/// D1: an idempotent (`RunApprovedTest`) dispatch whose log digest is in the CAS resolves to
+/// `Executed` — the CLI loads the digest from the log's `Executed` event and confirms the artifact
+/// is on disk. Before the fix the ToolCheck had no digest and no idempotency, so it stayed blocked.
+#[test]
+fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
+    let dir = d1_scratch("resolves-idempotent");
+    let db = dir.join("tsr.db");
+    let cas = dir.join("cas");
+    std::fs::create_dir_all(&cas).unwrap();
+
+    let cand = candidate("d1-idem");
+    let dispatch = d1_seed_dispatched(&db, &cand);
+
+    // The tool ran once (its log digest D is in the CAS) and the log recorded that `Executed`;
+    // a crash then left a second `Dispatched` with no outcome. The retry's effect already happened.
+    let digest = Hash::of(&[b"d1-tool-log"]);
+    std::fs::write(cas.join(digest.to_hex()), b"the tool's log").unwrap();
+    {
+        let s = Store::open(&db).unwrap();
+        let executed = Event::new(
+            task(),
+            vec![dispatch],
+            Source::Rules,
+            EventKind::Executed {
+                candidate: cand.id,
+                exit_code: Some(0),
+                log_digest: Some(digest),
+                duration_ms: 7,
+            },
+            "t3",
+        );
+        s.append(&executed).unwrap();
+        let retry = Event::new(
+            task(),
+            vec![executed.id],
+            Source::Rules,
+            EventKind::Dispatched {
+                candidate: cand.id,
+                in_sandbox: true,
+            },
+            "t4",
+        );
+        s.append(&retry).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        stdout.contains("executed"),
+        "the retry resolves to Executed; stdout: {stdout}"
+    );
+
+    // The reconciliation landed: the retry is settled by an Executed carrying the CAS digest.
+    let s = Store::open(&db).unwrap();
+    let events = s.by_task(&task()).unwrap();
+    let last = &events.last().unwrap().1;
+    match &last.kind {
+        EventKind::Executed {
+            candidate,
+            log_digest,
+            ..
+        } => {
+            assert_eq!(*candidate, cand.id);
+            assert_eq!(*log_digest, Some(digest), "the CAS digest is the evidence");
+        }
+        other => panic!("expected Executed, got {other:?}"),
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// D1: a non-idempotent dispatch left `Unresolved{blocked}` is re-checked on every reconcile —
+/// the CLI appends a fresh `Unresolved` rather than treating the blocked one as settled.
+#[test]
+fn d1_blocked_dispatch_is_rechecked() {
+    let dir = d1_scratch("blocked-rechecked");
+    let db = dir.join("tsr.db");
+
+    // A `Generate` candidate is not idempotent: an unknown outcome stays blocked.
+    let cand = Candidate::new(
+        ActionKind::Generate,
+        Source::Generator,
+        Hash::of(&[b"d1-blocked"]),
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    let dispatch = d1_seed_dispatched(&db, &cand);
+    {
+        let s = Store::open(&db).unwrap();
+        let blocked = Event::new(
+            task(),
+            vec![dispatch],
+            Source::Rules,
+            EventKind::Unresolved {
+                candidate: cand.id,
+                reason: UNKNOWN_NON_IDEMPOTENT.to_string(),
+            },
+            "t3",
+        );
+        s.append(&blocked).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(
+        code,
+        Some(1),
+        "still blocked; stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // The blocked dispatch was re-checked: a second Unresolved was appended.
+    let s = Store::open(&db).unwrap();
+    let unresolved = s
+        .by_task(&task())
+        .unwrap()
+        .into_iter()
+        .filter(|(_, e)| matches!(e.kind, EventKind::Unresolved { .. }))
+        .count();
+    assert_eq!(
+        unresolved, 2,
+        "a blocked Unresolved is re-checked, not settled; stdout: {stdout}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// D1: "retry once" for an idempotent unknown is enforced — a second retry refuses (exit 2).
+#[test]
+fn d1_second_retry_refuses() {
+    let dir = d1_scratch("second-retry");
+    let db = dir.join("tsr.db");
+
+    // An idempotent `RunApprovedTest` whose first retry already happened: the log holds
+    // `Unresolved{UNKNOWN_IDEMPOTENT}`. A second retry must refuse.
+    let cand = candidate("d1-retry-once");
+    let dispatch = d1_seed_dispatched(&db, &cand);
+    {
+        let s = Store::open(&db).unwrap();
+        let first = Event::new(
+            task(),
+            vec![dispatch],
+            Source::Rules,
+            EventKind::Unresolved {
+                candidate: cand.id,
+                reason: UNKNOWN_IDEMPOTENT.to_string(),
+            },
+            "t3",
+        );
+        s.append(&first).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(
+        code,
+        Some(2),
+        "a second retry refuses; stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // No third event was appended: the refusal is a refusal, not another retry.
+    let s = Store::open(&db).unwrap();
+    let unresolved = s
+        .by_task(&task())
+        .unwrap()
+        .into_iter()
+        .filter(|(_, e)| matches!(e.kind, EventKind::Unresolved { .. }))
+        .count();
+    assert_eq!(unresolved, 1, "the second retry appended nothing");
 
     std::fs::remove_dir_all(&dir).ok();
 }

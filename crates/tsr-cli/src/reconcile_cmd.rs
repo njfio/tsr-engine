@@ -20,7 +20,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use tsr_domain::{
-    CandidateId, Event, EventId, EventKind, ExecError, ExecOutcome, Hash, Source, TaskId,
+    ActionKind, CandidateId, Event, EventId, EventKind, ExecError, ExecOutcome, Hash, Source,
+    TaskId,
 };
 use tsr_store::{Store, StoreError};
 
@@ -122,6 +123,48 @@ impl ToolCheck {
         self
     }
 
+    /// Build a check from the log's own evidence (D1).
+    ///
+    /// The log is the tool's record of what it did, so it is where the check's evidence comes
+    /// from — never a guess:
+    ///
+    /// - a `Proposed` candidate whose action kind is idempotent (`RunApprovedTest`) marks the
+    ///   candidate idempotent: a retry yields at most one effect;
+    /// - an `Executed` event's `log_digest` is the artifact the tool produced, and the candidate's
+    ///   idempotency key is one the tool has seen. Both are recorded, so a later retry of the same
+    ///   candidate is settled by the earlier effect.
+    ///
+    /// The CAS is consulted at check time ([`ToolCheck::check`]): a digest is evidence only if
+    /// `cas/<digest>` is on disk.
+    pub fn from_log(cas_root: impl Into<std::path::PathBuf>, events: &[(i64, Event)]) -> Self {
+        let mut check = Self::new(cas_root);
+        for (_, e) in events {
+            match &e.kind {
+                EventKind::Proposed { candidate } => {
+                    if candidate.kind == ActionKind::RunApprovedTest {
+                        check.idempotent.insert(candidate.id);
+                    }
+                }
+                EventKind::Executed {
+                    candidate,
+                    log_digest,
+                    ..
+                } => {
+                    check
+                        .seen_keys
+                        .entry(*candidate)
+                        .or_default()
+                        .insert(intent_key(candidate));
+                    if let Some(digest) = log_digest {
+                        check.log_digests.insert(*candidate, *digest);
+                    }
+                }
+                _ => {}
+            }
+        }
+        check
+    }
+
     /// Whether `cas/<digest>` exists.
     fn digest_in_cas(&self, digest: &Hash) -> bool {
         self.cas_root.join(digest.to_hex()).is_file()
@@ -162,7 +205,7 @@ impl Reconciler for ToolCheck {
     }
 }
 
-/// A dispatch the log holds with neither `Executed` nor `Unresolved`.
+/// A dispatch the log holds with neither `Executed` nor a settling `Unresolved`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingDispatch {
     pub candidate: CandidateId,
@@ -171,6 +214,9 @@ pub struct PendingDispatch {
     pub intent: String,
     /// The event that recorded the dispatch; the reconciliation's parent.
     pub dispatched: EventId,
+    /// Whether an idempotent unknown was already recorded for this dispatch after its last
+    /// `Dispatched`. §B6 allows one retry; a second is refused.
+    pub retried: bool,
 }
 
 /// The idempotency key of a dispatch. `DispatchIntent.idempotency_key` is not part of the
@@ -180,20 +226,43 @@ pub fn intent_key(candidate: &CandidateId) -> String {
     candidate.to_string()
 }
 
-/// Every `Dispatched` candidate in `events` with neither `Executed` nor `Unresolved`.
+/// Every `Dispatched` candidate in `events` whose outcome the log does not settle.
 ///
 /// A candidate dispatched more than once is one pending dispatch: the log's `Dispatched` events
-/// are the intent, and the first `Executed` or `Unresolved` settles all of them.
+/// are the intent, and a settling event *after the last* `Dispatched` closes it. What settles a
+/// dispatch (§B6):
+///
+/// - an `Executed` — the effect is known to have happened;
+/// - an `Unresolved { reason: "cancelled" }` — the operator cancelled it.
+///
+/// An `Unresolved` recording an *unknown* outcome does **not** settle the dispatch: an idempotent
+/// unknown may be retried once (and a second retry is refused by [`reconcile_one`]), and a
+/// non-idempotent unknown stays blocked until a tool-specific check resolves it. Both are
+/// re-checked on every reconcile.
 pub fn pending_dispatches(events: &[(i64, Event)]) -> Vec<PendingDispatch> {
-    let mut dispatched: BTreeMap<CandidateId, EventId> = BTreeMap::new();
+    // The last `Dispatched` seq per candidate, and whether an idempotent unknown was recorded
+    // after it.
+    let mut dispatched: BTreeMap<CandidateId, (i64, EventId)> = BTreeMap::new();
     let mut settled: BTreeSet<CandidateId> = BTreeSet::new();
-    for (_, e) in events {
+    let mut retried: BTreeSet<CandidateId> = BTreeSet::new();
+    for (seq, e) in events {
         match &e.kind {
             EventKind::Dispatched { candidate, .. } => {
-                dispatched.entry(*candidate).or_insert(e.id);
+                // A later dispatch re-opens the candidate and clears any earlier retry.
+                dispatched.insert(*candidate, (*seq, e.id));
+                settled.remove(candidate);
+                retried.remove(candidate);
             }
-            EventKind::Executed { candidate, .. } | EventKind::Unresolved { candidate, .. } => {
+            EventKind::Executed { candidate, .. } => {
                 settled.insert(*candidate);
+            }
+            EventKind::Unresolved { candidate, reason } => {
+                if reason == CANCELLED {
+                    settled.insert(*candidate);
+                } else if reason == UNKNOWN_IDEMPOTENT {
+                    retried.insert(*candidate);
+                }
+                // An unknown non-idempotent outcome leaves the dispatch pending: it is re-checked.
             }
             _ => {}
         }
@@ -201,10 +270,11 @@ pub fn pending_dispatches(events: &[(i64, Event)]) -> Vec<PendingDispatch> {
     dispatched
         .into_iter()
         .filter(|(c, _)| !settled.contains(c))
-        .map(|(candidate, dispatched)| PendingDispatch {
+        .map(|(candidate, (_, dispatched))| PendingDispatch {
             intent: intent_key(&candidate),
             candidate,
             dispatched,
+            retried: retried.contains(&candidate),
         })
         .collect()
 }
@@ -220,6 +290,9 @@ pub enum Resolution {
     /// The check could not say and the tool is not idempotent: an `Unresolved` was appended and
     /// the dispatch stays blocked.
     UnresolvedBlocked,
+    /// The check could not say and the idempotent dispatch was already retried once: §B6 allows
+    /// one retry, so this one is refused and nothing is appended.
+    Refused,
 }
 
 impl Resolution {
@@ -228,6 +301,7 @@ impl Resolution {
         match self {
             Resolution::Executed => "executed",
             Resolution::UnresolvedIdempotent | Resolution::UnresolvedBlocked => "unresolved",
+            Resolution::Refused => "refused",
         }
     }
 
@@ -263,36 +337,28 @@ pub fn reconcile_one(
             },
             Resolution::Executed,
         ),
-        Reconciled::NotExecuted => (
-            EventKind::Unresolved {
-                candidate: pending.candidate,
-                reason: if idempotent {
-                    UNKNOWN_IDEMPOTENT.to_string()
-                } else {
-                    UNKNOWN_NON_IDEMPOTENT.to_string()
+        Reconciled::NotExecuted | Reconciled::Unknown => {
+            // §B6: an idempotent unknown may be retried once. If the log already holds that one
+            // retry, a second is refused — nothing is appended.
+            if idempotent && pending.retried {
+                return Ok(Resolution::Refused);
+            }
+            (
+                EventKind::Unresolved {
+                    candidate: pending.candidate,
+                    reason: if idempotent {
+                        UNKNOWN_IDEMPOTENT.to_string()
+                    } else {
+                        UNKNOWN_NON_IDEMPOTENT.to_string()
+                    },
                 },
-            },
-            if idempotent {
-                Resolution::UnresolvedIdempotent
-            } else {
-                Resolution::UnresolvedBlocked
-            },
-        ),
-        Reconciled::Unknown => (
-            EventKind::Unresolved {
-                candidate: pending.candidate,
-                reason: if idempotent {
-                    UNKNOWN_IDEMPOTENT.to_string()
+                if idempotent {
+                    Resolution::UnresolvedIdempotent
                 } else {
-                    UNKNOWN_NON_IDEMPOTENT.to_string()
+                    Resolution::UnresolvedBlocked
                 },
-            },
-            if idempotent {
-                Resolution::UnresolvedIdempotent
-            } else {
-                Resolution::UnresolvedBlocked
-            },
-        ),
+            )
+        }
     };
     let event = Event::new(
         *task,
@@ -379,7 +445,7 @@ pub fn from_exec_outcome(outcome: &ExecOutcome) -> Result<Reconciled, ExecError>
 /// | --- | --- |
 /// | 0 | every pending dispatch was reconciled |
 /// | 1 | at least one dispatch is blocked (non-idempotent, unknown) |
-/// | 2 | the task id or the store is malformed |
+/// | 2 | the task id or the store is malformed, or a second retry of an idempotent unknown was refused |
 pub fn run(task_hex: &str, store_path: &str) -> ExitCode {
     let task = match Hash::from_hex(task_hex) {
         Ok(h) => TaskId(h),
@@ -399,7 +465,17 @@ pub fn run(task_hex: &str, store_path: &str) -> ExitCode {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cas");
-    let reconciler = ToolCheck::new(cas_root);
+    // D1: the check's evidence comes from the log and the CAS, not from an empty ToolCheck.
+    // The log holds the digests of `Executed` events and the action kinds that decide
+    // idempotency; the CAS holds the artifacts those digests name.
+    let events = match store.by_task(&task) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("tsr: cannot read the log: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let reconciler = ToolCheck::from_log(cas_root, &events);
     let recorded_at = now_iso8601();
 
     let resolutions = match reconcile_task(&store, &task, &reconciler, &recorded_at) {
@@ -411,6 +487,7 @@ pub fn run(task_hex: &str, store_path: &str) -> ExitCode {
     };
 
     let mut blocked = 0usize;
+    let mut refused = 0usize;
     for (pending, resolution) in &resolutions {
         println!(
             "{} {} {}",
@@ -422,14 +499,19 @@ pub fn run(task_hex: &str, store_path: &str) -> ExitCode {
                 "blocked"
             }
         );
-        if !resolution.retryable() && *resolution != Resolution::Executed {
-            blocked += 1;
+        match resolution {
+            Resolution::Executed | Resolution::UnresolvedIdempotent => {}
+            Resolution::UnresolvedBlocked => blocked += 1,
+            // B6 allows one retry of an idempotent unknown; a second is refused.
+            Resolution::Refused => refused += 1,
         }
     }
     if resolutions.is_empty() {
         println!("no pending dispatches");
     }
-    if blocked > 0 {
+    if refused > 0 {
+        ExitCode::from(2)
+    } else if blocked > 0 {
         ExitCode::from(1)
     } else {
         ExitCode::from(0)
