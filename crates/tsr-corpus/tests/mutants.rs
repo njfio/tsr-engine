@@ -281,6 +281,155 @@ fn dump_fixture_tasks_jsonl() {
     println!("--- tasks.jsonl ---\n{body}--- end ---");
 }
 
+// ---------------------------------------------------------------------------------------------
+// Regression: a hostile descriptor `file` must not read the host (security review F1)
+// ---------------------------------------------------------------------------------------------
+
+/// Build an `outcomes.json` with one caught mutant whose descriptor `file` is `file`.
+fn outcomes_with_file(file: &str) -> String {
+    serde_json::json!({
+        "outcomes": [
+            {
+                "scenario": {
+                    "Mutant": {
+                        "name": "x",
+                        "package": "p",
+                        "file": file,
+                        "span": {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 2}},
+                        "replacement": "0",
+                        "genre": "FnValue"
+                    }
+                },
+                "summary": "CaughtMutant"
+            }
+        ],
+        "total_mutants": 1,
+        "caught": 1
+    })
+    .to_string()
+}
+
+/// A descriptor whose `file` is absolute must not read the host file into the CAS.
+///
+/// Pre-fix, `read_source_line` joined `/etc/hostname` onto the repo and embedded the host file's
+/// first line in the reversal diff written to `out/cas`. The fix rejects the descriptor.
+#[test]
+fn absolute_descriptor_file_does_not_leak_host_bytes() {
+    let host = Path::new("/etc/hostname");
+    let Ok(host_text) = fs::read_to_string(host) else {
+        // No /etc/hostname on this host: the test cannot observe a leak, but the guard still holds.
+        eprintln!("skipping: {host:?} unreadable");
+        return;
+    };
+    let host_line = host_text.lines().next().unwrap_or("").to_string();
+    assert!(!host_line.is_empty(), "host file has a first line");
+
+    let repo = tmpdir("abs-file");
+    let out = repo.join("out");
+    let runner = ReportRunner::new(
+        LIST_SAMPLE,
+        &outcomes_with_file("/etc/hostname"),
+        report(&["t"], &["t"]),
+    );
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(report_out.tasks, 1, "the caught mutant still yields a task");
+    assert_eq!(
+        report_out.skipped_unsafe_descriptor, 1,
+        "the untrusted descriptor is flagged as skipped"
+    );
+
+    // Every CAS object must be free of the host file's content.
+    let cas = out.join("cas");
+    for entry in fs::read_dir(&cas).expect("cas dir") {
+        let entry = entry.expect("cas entry");
+        let bytes = fs::read(entry.path()).expect("cas object");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains(&host_line),
+            "host file content leaked into CAS object {}: {text}",
+            entry.path().display()
+        );
+    }
+}
+
+/// A descriptor whose `file` escapes the repo with `..` must not read a sibling file into the CAS.
+#[test]
+fn parent_dir_descriptor_file_does_not_leak_sibling_bytes() {
+    let repo = tmpdir("dotdot-file");
+    // A secret one level above the repo, exactly as the reviewer reproduced.
+    let secret = repo.parent().expect("parent").join(format!(
+        "SECRET-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(&secret, "TOP_SECRET_LINE\n").expect("write secret");
+    let secret_name = secret.file_name().unwrap().to_string_lossy().to_string();
+    let escape = format!("../{secret_name}");
+
+    let out = repo.join("out");
+    let runner = ReportRunner::new(
+        LIST_SAMPLE,
+        &outcomes_with_file(&escape),
+        report(&["t"], &["t"]),
+    );
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(report_out.tasks, 1);
+    assert_eq!(
+        report_out.skipped_unsafe_descriptor, 1,
+        "the `..` descriptor is flagged as skipped"
+    );
+
+    let cas = out.join("cas");
+    for entry in fs::read_dir(&cas).expect("cas dir") {
+        let entry = entry.expect("cas entry");
+        let bytes = fs::read(entry.path()).expect("cas object");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains("TOP_SECRET_LINE"),
+            "sibling secret leaked into CAS object {}: {text}",
+            entry.path().display()
+        );
+    }
+    let _ = fs::remove_file(&secret);
+}
+
+/// A legitimate relative descriptor `file` still reads the source line (the fix must not weaken it).
+#[test]
+fn relative_descriptor_file_still_reads_the_source_line() {
+    let repo = tmpdir("rel-file");
+    fs::create_dir_all(repo.join("src")).expect("mkdir src");
+    fs::write(repo.join("src/lib.rs"), "fn f() -> u32 { 0 }\n").expect("write source");
+    let out = repo.join("out");
+    let runner = ReportRunner::new(
+        LIST_SAMPLE,
+        &outcomes_with_file("src/lib.rs"),
+        report(&["t"], &["t"]),
+    );
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(
+        report_out.skipped_unsafe_descriptor, 0,
+        "a legitimate relative path is not flagged"
+    );
+
+    let cas = out.join("cas");
+    let mut found = false;
+    for entry in fs::read_dir(&cas).expect("cas dir") {
+        let entry = entry.expect("cas entry");
+        let text =
+            String::from_utf8_lossy(&fs::read(entry.path()).expect("cas object")).into_owned();
+        if text.contains("fn f() -> u32 { 0 }") {
+            found = true;
+        }
+    }
+    assert!(
+        found,
+        "the legitimate source line is still in the reversal diff"
+    );
+}
+
 /// A real cargo-mutants run needs `tsr exec` and a container runtime; the operator runs it.
 #[test]
 #[ignore = "needs tsr exec and a container runtime; operator runs it"]

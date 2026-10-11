@@ -67,6 +67,14 @@ pub fn mutants_cmd(repo: String, out: PathBuf) -> ExitCode {
                 report.tasks,
                 report.skipped_not_caught
             );
+            if report.skipped_unsafe_descriptor > 0 {
+                println!(
+                    "warning: {} caught mutant(s) had an untrusted descriptor file (absolute or \
+                     containing `..`); their source line was not read and the reversal diff falls \
+                     back to the descriptor text",
+                    report.skipped_unsafe_descriptor
+                );
+            }
             println!("wrote {}", out.join("tasks.jsonl").display());
             ExitCode::SUCCESS
         }

@@ -577,6 +577,91 @@ fn empty_corpus_is_refused() {
     ));
 }
 
+// ---------------------------------------------------------------------------------------------
+// Regression: `read_cas` must not read the host (security review F2)
+// ---------------------------------------------------------------------------------------------
+
+/// `read_cas` with an absolute path, a `..` path or a short digest returns None; a valid 64-char
+/// hex digest still returns the object.
+///
+/// Pre-fix, `read_cas(dir, "/etc/hostname")` returned the host file's bytes.
+#[test]
+fn read_cas_rejects_non_digest_names() {
+    let corpus = Corpus::new();
+    let payload = b"the real cas object\n";
+    let digest = corpus.put_cas(payload);
+
+    // A valid 64-char hex digest still reads the object.
+    assert_eq!(
+        split::read_cas(corpus.path(), &digest).as_deref(),
+        Some(payload.as_slice()),
+        "a valid digest still reads the object"
+    );
+
+    // An absolute path must not escape the CAS directory.
+    assert_eq!(
+        split::read_cas(corpus.path(), "/etc/hostname"),
+        None,
+        "an absolute path must not be read"
+    );
+    // A `..` path must not escape the CAS directory.
+    assert_eq!(
+        split::read_cas(corpus.path(), "../SECRET.txt"),
+        None,
+        "a parent-dir path must not be read"
+    );
+    // A 63-char hex string is not a digest.
+    let short = &digest[..63];
+    assert_eq!(short.len(), 63);
+    assert_eq!(
+        split::read_cas(corpus.path(), short),
+        None,
+        "a 63-char hex string is not a digest"
+    );
+    // A 64-char non-hex string is not a digest.
+    let non_hex = "z".repeat(64);
+    assert_eq!(
+        split::read_cas(corpus.path(), &non_hex),
+        None,
+        "a 64-char non-hex string is not a digest"
+    );
+    // The empty string is still None.
+    assert_eq!(split::read_cas(corpus.path(), ""), None);
+}
+
+/// A crafted `tasks.jsonl` with an absolute `parent_snapshot` must not make the splitter read the
+/// host: the leakage probe treats the unreadable snapshot as its digest string, not host bytes.
+#[test]
+fn crafted_absolute_snapshot_does_not_leak_host_bytes() {
+    let Ok(host_text) = fs::read_to_string("/etc/hostname") else {
+        eprintln!("skipping: /etc/hostname unreadable");
+        return;
+    };
+    let host_line = host_text.lines().next().unwrap_or("").to_string();
+    assert!(!host_line.is_empty());
+
+    let corpus = Corpus::new();
+    let d1 = corpus.put_cas(diff_returning(1).as_bytes());
+    let d2 = corpus.put_cas(diff_unrelated("x").as_bytes());
+    corpus.write_tasks(&[
+        task("t1", "repo-a", "2024-01-01T00:00:00Z", &d1, "/etc/hostname"),
+        task("t2", "repo-b", "2024-01-02T00:00:00Z", &d2, "/etc/hostname"),
+    ]);
+    let opts = SplitOptions {
+        rule: SplitRule::Repo,
+        holdout: 0.5,
+        seed: 1,
+        ..Default::default()
+    };
+    // The split must not fail and must not embed host bytes anywhere in the manifest.
+    let manifest = split::split(corpus.path(), &opts).expect("split");
+    let json = serde_json::to_string(&manifest).expect("manifest json");
+    assert!(
+        !json.contains(&host_line),
+        "host file content leaked into the split manifest"
+    );
+}
+
 /// A missing `tasks.jsonl` is refused with a path in the message.
 #[test]
 fn missing_tasks_file_is_refused() {

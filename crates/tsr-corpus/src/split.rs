@@ -405,11 +405,24 @@ pub fn read_tasks(dir: &Path) -> Result<Vec<SplitTask>, SplitError> {
 }
 
 /// Read a CAS object by digest, if it exists.
+///
+/// `digest_hex` comes from `tasks.jsonl`, which is untrusted input: an absolute path or one
+/// containing `..` would escape the CAS directory and read a host file (security review F2). Only a
+/// blake3 hex digest — exactly 64 lowercase hex characters — is accepted; anything else is `None`.
 pub fn read_cas(dir: &Path, digest_hex: &str) -> Option<Vec<u8>> {
-    if digest_hex.is_empty() {
+    if !is_cas_digest(digest_hex) {
         return None;
     }
     fs::read(dir.join("cas").join(digest_hex)).ok()
+}
+
+/// Whether `s` is a blake3 hex digest: exactly 64 lowercase hex characters. `write_cas` only ever
+/// receives such digests, so this is the read-side guard that keeps a crafted `tasks.jsonl` from
+/// escaping the CAS directory.
+pub fn is_cas_digest(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// The diff text of a task: the CAS object named by its diff digest, or the empty string when the

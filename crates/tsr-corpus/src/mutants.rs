@@ -232,6 +232,11 @@ pub struct MutantsReport {
     pub tasks: usize,
     /// Mutants the suite did not kill (`missed`, `unviable`, `timeout`, …).
     pub skipped_not_caught: usize,
+    /// Caught mutants whose descriptor `file` was untrusted (absolute or containing `..`) and so
+    /// was not read: the task is still written, but its reversal diff falls back to the
+    /// descriptor's own text rather than a host file (security review F1).
+    #[serde(default)]
+    pub skipped_unsafe_descriptor: usize,
 }
 
 /// How to run mutants.
@@ -355,11 +360,32 @@ pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
 }
 
 /// Read the 1-based `line` of `file` under `repo`, if it exists.
+///
+/// `file` comes from a mutant descriptor parsed out of the repository under test, so it is
+/// untrusted: an absolute path or one containing a `..` component would escape `repo` and read a
+/// host file (security review F1). Such a descriptor is rejected — the reversal diff then falls
+/// back to the descriptor's own text, which is still a stable content-addressed record.
 fn read_source_line(repo: &Path, file: &str, line: u64) -> Option<String> {
+    if !is_safe_relative_path(file) {
+        return None;
+    }
     let text = fs::read_to_string(repo.join(file)).ok()?;
     text.lines()
         .nth((line as usize).saturating_sub(1))
         .map(str::to_string)
+}
+
+/// Whether `file` is a safe relative path under a repository root: not absolute, and with no `..`
+/// component. A descriptor whose `file` fails this is untrusted and must not be joined onto the
+/// host repository path.
+pub fn is_safe_relative_path(file: &str) -> bool {
+    let path = Path::new(file);
+    if path.is_absolute() {
+        return false;
+    }
+    !path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
 /// The digest of the mutated snapshot: blake3 of the mutant's own descriptor (its diff, file, span
@@ -427,6 +453,7 @@ pub fn mutants(
         mutants_run: lab.outcomes.iter().filter(|o| o.mutant().is_some()).count(),
         tasks: 0,
         skipped_not_caught: 0,
+        skipped_unsafe_descriptor: 0,
     };
     let mut lines: Vec<String> = Vec::new();
 
@@ -437,6 +464,11 @@ pub fn mutants(
         if !outcome.is_caught() {
             report_out.skipped_not_caught += 1;
             continue;
+        }
+        // A descriptor whose `file` is absolute or contains `..` is untrusted: it is not read, and
+        // the skip is recorded rather than silently producing a diff (security review F1).
+        if !is_safe_relative_path(&mutant.file) {
+            report_out.skipped_unsafe_descriptor += 1;
         }
         let failing: Vec<String> = report.failed().into_iter().collect();
         let reversal = reversal_diff(repo, mutant);
