@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use tsr_batch::driver::{read_session, Mode, ScriptedDriver};
 use tsr_batch::invariants::{check_session_invariants, session_from_store};
 use tsr_batch::results::{read_results, Outcome};
-use tsr_batch::run::{run_all, run_one, BatchConfig};
+use tsr_batch::run::{flipped_tests_argv, run_all, run_one, BatchConfig};
 use tsr_batch::session::SessionCtx;
 use tsr_batch::task::{read_tasks, CorpusTask};
 use tsr_batch::{ClaudeCodeDriver, Driver, DRIVER_UNAVAILABLE_EXIT};
@@ -42,12 +42,15 @@ fn ok_runner() -> ScriptedRunner {
 }
 
 /// A runner that fails the flipped tests (exit 1) but passes the full suite.
-fn flipped_fails_runner() -> ScriptedRunner {
+///
+/// D3: the oracle runs in the session's copy (`dest`), so the flipped argv is scripted against
+/// `dest`, not the parent snapshot.
+fn flipped_fails_runner(dest: &Path) -> ScriptedRunner {
     let mut r = ScriptedRunner::ok();
     // The flipped-tests argv carries `--tests`; the full-suite argv carries `--full-suite`.
     for task in tasks() {
-        let flipped = tsr_batch::run::flipped_tests_argv(task.snapshot(), &task.failing_tests());
-        r.script(task.snapshot(), &flipped, RunResult::exit_only(1));
+        let flipped = tsr_batch::run::flipped_tests_argv(dest, &task.failing_tests());
+        r.script(dest, &flipped, RunResult::exit_only(1));
     }
     r
 }
@@ -205,8 +208,9 @@ fn batch_run_records_results_for_the_five_fixture_tasks() {
 fn oracle_rejects_when_the_flipped_tests_fail() {
     let dir = tempfile::tempdir().unwrap();
     let config = BatchConfig::new(dir.path(), profile());
-    let runner = flipped_fails_runner();
     let task = &tasks()[0];
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let runner = flipped_fails_runner(&dest);
     let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
     let driver = ScriptedDriver::new(Mode::Rules, session);
     let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
@@ -221,10 +225,12 @@ fn oracle_rejects_when_the_flipped_tests_fail() {
 fn oracle_rejects_when_the_suite_regresses() {
     let mut runner = ScriptedRunner::ok();
     let task = &tasks()[0];
-    let suite = tsr_batch::run::full_suite_argv(task.snapshot());
-    runner.script(task.snapshot(), &suite, RunResult::exit_only(1));
     let dir = tempfile::tempdir().unwrap();
     let config = BatchConfig::new(dir.path(), profile());
+    // D3: the oracle runs in the session's copy, so the suite is scripted against `dest`.
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let suite = tsr_batch::run::full_suite_argv(&dest);
+    runner.script(&dest, &suite, RunResult::exit_only(1));
     let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
     let driver = ScriptedDriver::new(Mode::Rules, session);
     let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
@@ -278,6 +284,127 @@ fn claude_code_driver_is_a_documented_stub() {
     let err = driver.drive(&mut ctx, task).unwrap_err();
     assert!(err.to_string().contains("no Claude Code"));
     assert_eq!(driver.name(), "claude-code");
+}
+
+/// D3: the oracle must judge the session's copy (`dest`), not the unmodified parent snapshot.
+///
+/// The defect: `run_one` ran the oracle with `task.snapshot()` (the parent) as the working
+/// directory, so a session that leaves the flipped test failing was still accepted. The oracle's
+/// argv must be run against the copy the session worked in.
+#[test]
+fn d3_oracle_runs_in_the_session_copy_not_the_parent_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // A runner that records every snapshot it was asked to run against.
+    let runner = RecordingRunner::new();
+    let _ = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let oracle_calls: Vec<PathBuf> = runner
+        .calls()
+        .into_iter()
+        .filter(|(_, argv)| argv.iter().any(|a| a == "--tests" || a == "--full-suite"))
+        .map(|(snapshot, _)| snapshot)
+        .collect();
+    assert!(
+        !oracle_calls.is_empty(),
+        "the oracle ran at least once (flipped tests + full suite)"
+    );
+    for snapshot in &oracle_calls {
+        assert_eq!(
+            snapshot, &dest,
+            "D3: the oracle must run in the session's copy {dest:?}, not {snapshot:?}"
+        );
+    }
+}
+
+/// D3: a session that leaves the flipped test failing is NOT accepted; one that fixes it IS.
+///
+/// The oracle's verdict is read from the run in the session's copy, so the two sessions must
+/// differ. Before the fix both were accepted because the oracle ran against the parent snapshot.
+#[test]
+fn d3_a_session_that_leaves_the_flipped_test_failing_is_not_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The session's copy fails the flipped tests (exit 1) but the full suite passes.
+    let mut runner = ScriptedRunner::ok();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    runner.script(
+        &dest,
+        &flipped_tests_argv(&dest, &task.failing_tests()),
+        RunResult::exit_only(1),
+    );
+
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(
+        result.outcome,
+        Outcome::Rejected,
+        "D3: a session that leaves the flipped test failing must not be accepted"
+    );
+    let oracle = result.oracle.unwrap();
+    assert!(!oracle.flipped_tests_pass);
+    assert!(!oracle.accepted);
+}
+
+/// D3: a session that fixes the flipped test IS accepted.
+#[test]
+fn d3_a_session_that_fixes_the_flipped_test_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The session's copy passes the flipped tests and the full suite.
+    let mut runner = ScriptedRunner::ok();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    runner.script(
+        &dest,
+        &flipped_tests_argv(&dest, &task.failing_tests()),
+        RunResult::exit_only(0),
+    );
+
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(
+        result.outcome,
+        Outcome::Accepted,
+        "D3: a session that fixes the flipped test must be accepted"
+    );
+    assert!(result.oracle.unwrap().accepted);
+}
+
+/// A runner that records every `(snapshot, argv)` it was asked to run, and answers success.
+struct RecordingRunner {
+    calls: std::cell::RefCell<Vec<(PathBuf, Vec<String>)>>,
+}
+
+impl RecordingRunner {
+    fn new() -> Self {
+        Self {
+            calls: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> Vec<(PathBuf, Vec<String>)> {
+        self.calls.borrow().clone()
+    }
+}
+
+impl tsr_corpus::Runner for RecordingRunner {
+    fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+        self.calls
+            .borrow_mut()
+            .push((snapshot.to_path_buf(), argv.to_vec()));
+        RunResult::exit_only(0)
+    }
 }
 
 #[test]

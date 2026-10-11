@@ -8,7 +8,7 @@
 //! 3. provisions the disposable copy at the parent snapshot **through the [`Runner`]**, so nothing
 //!    in this crate touches the host repository;
 //! 4. drives the session through a [`Driver`];
-//! 5. runs the oracle **through the [`Runner`]**;
+//! 5. runs the oracle **through the [`Runner`]**, in the session's copy;
 //! 6. closes the task and records the per-task result.
 //!
 //! The runner never runs a repository's tests on the host: every command goes through the Runner,
@@ -111,26 +111,33 @@ pub fn provision_argv(snapshot: &str, dest: &Path) -> Vec<String> {
 }
 
 /// The argv that runs the flipped tests, run through the Runner.
-pub fn flipped_tests_argv(snapshot: &str, tests: &[String]) -> Vec<String> {
+///
+/// `dir` is the working directory the oracle runs in — the session's copy, not the parent
+/// snapshot (D3). The Runner sets it as the child's cwd, and the argv names it too so the sealed
+/// sandbox can materialise the same tree.
+pub fn flipped_tests_argv(dir: &Path, tests: &[String]) -> Vec<String> {
     vec![
         "tsr".to_string(),
         "corpus".to_string(),
         "oracle".to_string(),
         "--snapshot".to_string(),
-        snapshot.to_string(),
+        dir.display().to_string(),
         "--tests".to_string(),
         tests.join(","),
     ]
 }
 
 /// The argv that runs the full suite, run through the Runner.
-pub fn full_suite_argv(snapshot: &str) -> Vec<String> {
+///
+/// `dir` is the working directory the oracle runs in — the session's copy, not the parent
+/// snapshot (D3).
+pub fn full_suite_argv(dir: &Path) -> Vec<String> {
     vec![
         "tsr".to_string(),
         "corpus".to_string(),
         "oracle".to_string(),
         "--snapshot".to_string(),
-        snapshot.to_string(),
+        dir.display().to_string(),
         "--full-suite".to_string(),
     ]
 }
@@ -201,17 +208,14 @@ pub fn run_one(
         Err(e) => return Err(e.into()),
     };
 
-    // (5) Run the oracle through the Runner: the flipped tests, then the full suite.
+    // (5) Run the oracle through the Runner, in the session's copy (`dest`), not the parent
+    // snapshot: the oracle judges the work the session actually did (D3).
     let flipped = runner.run(
-        Path::new(&task.snapshot()),
-        &flipped_tests_argv(task.snapshot(), &task.failing_tests()),
+        &dest,
+        &flipped_tests_argv(&dest, &task.failing_tests()),
         &config.limits,
     );
-    let suite = runner.run(
-        Path::new(&task.snapshot()),
-        &full_suite_argv(task.snapshot()),
-        &config.limits,
-    );
+    let suite = runner.run(&dest, &full_suite_argv(&dest), &config.limits);
     let oracle = oracle_verdict(&flipped, &suite);
 
     // (6) Close the task and record the result.

@@ -16,12 +16,18 @@ use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedSession};
 use tsr_batch::run::{run_all, BatchConfig};
 use tsr_batch::task::read_tasks;
 use tsr_batch::ClaudeCodeDriver;
-use tsr_corpus::ExecRunner;
+use tsr_corpus::{ExecRunner, Runner, ScriptedRunner};
 use tsr_policy::profile::Profile;
 
 /// Run the batch. Returns the process exit code.
-pub fn run_cmd(mode: &str, tasks: &Path, driver: &str, out: &Path) -> std::process::ExitCode {
-    match run_inner(mode, tasks, driver, out) {
+pub fn run_cmd(
+    mode: &str,
+    tasks: &Path,
+    driver: &str,
+    out: &Path,
+    scripted_runner: bool,
+) -> std::process::ExitCode {
+    match run_inner(mode, tasks, driver, out, scripted_runner) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("tsr: task run: {e}");
@@ -35,6 +41,7 @@ fn run_inner(
     tasks_path: &Path,
     driver: &str,
     out: &Path,
+    scripted_runner: bool,
 ) -> Result<std::process::ExitCode, String> {
     let mode = match mode {
         "record" => Mode::Record,
@@ -56,11 +63,19 @@ fn run_inner(
 
     let manifest_dir = tasks_path.parent().unwrap_or_else(|| Path::new("."));
 
+    // The runner is chosen by the explicit test flag, not by the driver: by default the oracle
+    // runs through `ExecRunner` (`tsr exec -- <argv>` in the sealed sibling sandbox, PRD §B4), so
+    // the verdict reflects the session's actual work. `ScriptedRunner` is test-only (D3).
+    let runner: Box<dyn Runner> = if scripted_runner {
+        Box::new(ScriptedRunner::ok())
+    } else {
+        Box::new(ExecRunner::new())
+    };
+
     let results = match driver {
         "scripted" => {
-            // A scripted driver replays a fixture session, so the oracle runs through the same
-            // scripted runner: nothing here executes a repository's tests on the host.
-            let runner = tsr_corpus::ScriptedRunner::ok();
+            // A scripted driver replays a fixture session per task; the oracle still runs through
+            // the selected runner (production `ExecRunner` unless the test flag is set).
             let sessions = load_sessions(manifest_dir, &tasks, mode)?;
             run_all(
                 &tasks,
@@ -72,20 +87,18 @@ fn run_inner(
                         .unwrap_or_else(|| sessions.values().next().cloned().expect("a session"));
                     Box::new(ScriptedDriver::new(mode, session))
                 },
-                &runner,
+                runner.as_ref(),
                 &config,
             )
             .map_err(|e| format!("running the batch: {e}"))?
         }
         "claude-code" => {
-            // In production `ExecRunner` invokes `tsr exec -- <argv>` in the sealed sibling sandbox
-            // (PRD §B4). The stub driver returns `DriverError::Unavailable`; `run_one` records each
-            // task as `unavailable` and closes it, and the batch still writes a results file.
-            let runner = ExecRunner::new();
+            // The stub driver returns `DriverError::Unavailable`; `run_one` records each task as
+            // `unavailable` and closes it, and the batch still writes a results file.
             let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
             let mut out_results = Vec::with_capacity(tasks.len());
             for task in &tasks {
-                let r = tsr_batch::run::run_one(task, mode, &driver, &runner, &config)
+                let r = tsr_batch::run::run_one(task, mode, &driver, runner.as_ref(), &config)
                     .map_err(|e| format!("running the batch: {e}"))?;
                 out_results.push(r);
             }

@@ -133,6 +133,11 @@ enum TaskCmd {
         /// Output directory: results.jsonl and the per-task stores.
         #[arg(long)]
         out: PathBuf,
+        /// Test-only: run the oracle through a scripted runner (a canned success) instead of the
+        /// production `ExecRunner`. Never use this for evidence: a scripted oracle cannot tell a
+        /// session that fixed the flipped test from one that did not (D3).
+        #[arg(long)]
+        scripted_runner: bool,
     },
     Status {
         task: String,
@@ -328,7 +333,8 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             tasks,
             driver,
             out,
-        } => batch_cmd::run_cmd(&mode, &tasks, &driver, &out),
+            scripted_runner,
+        } => batch_cmd::run_cmd(&mode, &tasks, &driver, &out, scripted_runner),
         TaskCmd::Export { task: name } => {
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {
