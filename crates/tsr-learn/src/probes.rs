@@ -241,36 +241,43 @@ pub fn probe_boundary(ds: &Dataset, index: &[TaskIndexRow]) -> ProbeReport {
         }
     }
 
-    // Under time, every held_out task is later than every fit and calibrate task.
+    // Under time, the split rule (dataset.rs make_split) orders the units by their earliest
+    // timestamp and cuts them into three contiguous blocks: fit, then calibrate, then held_out.
+    // The probe checks *contiguity*: order every task by its timestamp and require the side
+    // sequence to be non-decreasing (all Fit, then all Calibrate, then all HeldOut). A pairwise
+    // extremes check is not enough — a forged manifest that moves the earliest held_out task onto
+    // the fit side leaves every remaining held_out task later than the new max(fit/calibrate), and
+    // the moved task later than every calibrate task, so no pair is out of order; only the gap in
+    // the ordered sequence reveals the forge.
     if ds.split.by == SplitBy::Time {
-        let mut max_train: Option<String> = None;
-        let mut min_hold: Option<String> = None;
+        let rank = |s: Side| match s {
+            Side::Fit => 0u8,
+            Side::Calibrate => 1,
+            Side::HeldOut => 2,
+        };
+        // One entry per task: its timestamp and its side.
+        let mut ordered: Vec<(String, Side)> = Vec::new();
+        let mut seen: BTreeSet<TaskId> = BTreeSet::new();
         for r in &ds.rows {
+            if !seen.insert(r.task) {
+                continue;
+            }
             let Some(i) = index_of.get(&r.task) else {
                 continue;
             };
-            match r.side {
-                Side::Fit | Side::Calibrate => {
-                    max_train = Some(match &max_train {
-                        Some(m) if *m >= i.timestamp => m.clone(),
-                        _ => i.timestamp.clone(),
-                    });
-                }
-                Side::HeldOut => {
-                    min_hold = Some(match &min_hold {
-                        Some(m) if *m <= i.timestamp => m.clone(),
-                        _ => i.timestamp.clone(),
-                    });
-                }
-            }
+            ordered.push((i.timestamp.clone(), r.side));
         }
-        if let (Some(mt), Some(mh)) = (max_train, min_hold) {
-            if mh <= mt {
+        ordered.sort_by(|a, b| a.0.cmp(&b.0));
+        for w in ordered.windows(2) {
+            let (ts_a, side_a) = &w[0];
+            let (ts_b, side_b) = &w[1];
+            if rank(*side_b) < rank(*side_a) {
                 leaks.push(Leak {
                     probe: Probe::Boundary,
-                    row: format!("time:{mh}"),
+                    row: format!("time:{ts_b}"),
                     detail: format!(
-                        "a held_out task ({mh}) is not later than every fit/calibrate task ({mt})"
+                        "the time split is not contiguous: a {side_b:?} task ({ts_b}) follows a \
+                         {side_a:?} task ({ts_a})"
                     ),
                 });
             }
@@ -551,7 +558,11 @@ mod tests {
     #[test]
     fn probe_c_catches_a_forged_split_manifest() {
         let (mut ds, _events, index) = fixture();
-        // Forge: move one held_out task onto the fit side, so a task is on two sides.
+        // Forge: move the earliest held_out task onto the fit side. This is not a two-sides
+        // forge (all of the task's rows move together); it is a time-boundary forge: the
+        // remaining held_out tasks are still later than the new max(fit/calibrate) timestamp,
+        // and the moved task is later than every calibrate task, so no pair is out of order —
+        // only the contiguity check (non-decreasing side rank in timestamp order) catches it.
         let held: Vec<TaskId> = ds
             .rows
             .iter()

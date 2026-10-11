@@ -464,6 +464,14 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
         dir.join("features.json"),
         serde_json::to_string_pretty(&ds.spec)?,
     )?;
+    // B9: every read of a held_out row appends a line to `<dir>/holdout-access.jsonl`. Building the
+    // dataset reads the held_out rows to assign their side, so the build logs them too. The split
+    // digest covers assignments only, so this logging never changes it.
+    for r in &ds.rows {
+        if r.side == Side::HeldOut {
+            crate::probes::log_holdout_access(dir, r, "dataset")?;
+        }
+    }
     Ok(())
 }
 

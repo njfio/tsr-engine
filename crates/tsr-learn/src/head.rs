@@ -174,6 +174,7 @@ mod tests {
             evidence: Vec::new(),
             generator_raw: None,
             operator_raw: None,
+            controller_logged: None,
         }
     }
 

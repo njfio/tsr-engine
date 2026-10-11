@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use tsr_cli::{exec, hook, store_path, task};
 
 mod policy_cmd;
+mod train_cmd;
 
 #[derive(Parser)]
 #[command(
@@ -88,7 +89,10 @@ enum Cmd {
         cmd: DataCmd,
     },
     /// Train calibration heads (M4, B8).
-    Train,
+    Train {
+        #[command(subcommand)]
+        cmd: train_cmd::TrainCmd,
+    },
     /// Evaluate: calibration, paired comparison, state isolation (M4–M5, B9).
     Eval,
     /// Bundle registry: promote, rollback (M5, B8).
@@ -180,7 +184,7 @@ fn main() -> ExitCode {
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
-        Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
+        Cmd::Train { cmd } => train_cmd::run(cmd),
         Cmd::Eval => not_yet("eval", "B9 (M4–M5)"),
         Cmd::Model { .. } => not_yet("model", "B8 bundles (M5)"),
     }

@@ -484,6 +484,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tsr-domain",
+ "tsr-learn",
  "tsr-policy",
  "tsr-store",
 ]

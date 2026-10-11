@@ -212,14 +212,40 @@ fn support_index(ds: &Dataset) -> Vec<SupportEntry> {
 }
 
 /// The families present in the fit and calibrate slices, in name order.
+/// The minimum number of mature episodes (tasks with a resolved label) fit and calibrate must hold
+/// together, per §B8 ("150 mature episodes per event").
+pub const MIN_MATURE_TASKS: usize = 150;
+
+/// The minimum number of mature episodes a family needs to enter the calibrated population, per
+/// §B8 ("≥ 30 per family").
+pub const MIN_FAMILY_TASKS: usize = 30;
+
+/// The calibrated population: each family's count of *distinct tasks* with a resolved label on the
+/// fit and calibrate slices, keeping only families that reach `MIN_FAMILY_TASKS`. A family below
+/// the floor stays outside the population, so its rows are reported `uncalibrated`.
 fn population_families(ds: &Dataset) -> BTreeMap<String, u32> {
-    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    let mut tasks: BTreeMap<String, std::collections::BTreeSet<tsr_domain::TaskId>> =
+        BTreeMap::new();
     for r in &ds.rows {
         if (r.side == Side::Fit || r.side == Side::Calibrate) && r.label.is_some() {
-            *counts.entry(r.family.clone()).or_insert(0) += 1;
+            tasks.entry(r.family.clone()).or_default().insert(r.task);
         }
     }
-    counts
+    tasks
+        .into_iter()
+        .filter(|(_, t)| t.len() >= MIN_FAMILY_TASKS)
+        .map(|(f, t)| (f, t.len() as u32))
+        .collect()
+}
+
+/// The number of distinct tasks with a resolved label on the fit and calibrate slices.
+fn mature_tasks(ds: &Dataset) -> usize {
+    ds.rows
+        .iter()
+        .filter(|r| (r.side == Side::Fit || r.side == Side::Calibrate) && r.label.is_some())
+        .map(|r| r.task)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
 }
 
 /// The code commit from `TSR_CODE_COMMIT`, or `"unknown"`.
@@ -237,6 +263,16 @@ pub fn write_bundle(
     support_floor: u32,
 ) -> Result<Hash, LearnError> {
     let ds = load_dataset(dataset_dir)?;
+
+    // §B8's minimum data: refuse with the counts when fit and calibrate hold fewer than 150 tasks
+    // with resolved labels.
+    let mature = mature_tasks(&ds);
+    if mature < MIN_MATURE_TASKS {
+        return Err(LearnError::Invalid(format!(
+            "too few mature episodes: {mature} tasks with a resolved label on fit+calibrate, \
+             need {MIN_MATURE_TASKS}"
+        )));
+    }
 
     // Re-run every probe over the dataset; refuse when one fails.
     let index = {
@@ -363,6 +399,23 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
 
+    // Fail closed: a manifest that omits its id or any content digest is refused, never treated
+    // as "no mismatch". `id` and `content_digests` are `#[serde(default)]`, so a stripped manifest
+    // parses; without this check `load_bundle` would perform no digest and no id check at all.
+    // Checked before any content file is read, so the refusal does not depend on their state.
+    if manifest.id.is_empty() {
+        return Err(LearnError::Invalid(
+            "manifest.toml: missing bundle id".to_string(),
+        ));
+    }
+    for name in CONTENT_FILES {
+        if !manifest.content_digests.contains_key(*name) {
+            return Err(LearnError::Invalid(format!(
+                "manifest.toml: missing content digest for {name:?}"
+            )));
+        }
+    }
+
     let head: Head = serde_json::from_str(&std::fs::read_to_string(dir.join("head.json"))?)?;
     let isotonic: Isotonic =
         serde_json::from_str(&std::fs::read_to_string(dir.join("isotonic.json"))?)?;
@@ -379,18 +432,20 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     for name in CONTENT_FILES {
         let bytes = std::fs::read(dir.join(name))?;
         let found = file_digest(&bytes);
-        if let Some(expected) = manifest.content_digests.get(*name) {
-            if &found.to_hex() != expected {
-                return Err(LearnError::Invalid(format!(
-                    "bundle file {name:?} has digest {}, expected {expected}",
-                    found.to_hex()
-                )));
-            }
+        let expected = manifest
+            .content_digests
+            .get(*name)
+            .expect("presence checked above");
+        if &found.to_hex() != expected {
+            return Err(LearnError::Invalid(format!(
+                "bundle file {name:?} has digest {}, expected {expected}",
+                found.to_hex()
+            )));
         }
         content_digests.push((name.to_string(), found));
     }
     let id = bundle_id(&content_digests, &manifest);
-    if !manifest.id.is_empty() && manifest.id != id.to_hex() {
+    if manifest.id != id.to_hex() {
         return Err(LearnError::Invalid(format!(
             "bundle id {} does not match the recomputed id {}",
             manifest.id,
@@ -419,19 +474,37 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
 
+    // Fail closed: a manifest that omits its id or any content digest is refused, never treated
+    // as "no mismatch". `id` and `content_digests` are `#[serde(default)]`, so a stripped manifest
+    // parses; without this check `verify_bundle` would perform no digest and no id check at all.
+    if manifest.id.is_empty() {
+        return Err(VerifyError::Learn(LearnError::Invalid(
+            "manifest.toml: missing bundle id".to_string(),
+        )));
+    }
+    for name in CONTENT_FILES {
+        if !manifest.content_digests.contains_key(*name) {
+            return Err(VerifyError::Learn(LearnError::Invalid(format!(
+                "manifest.toml: missing content digest for {name:?}"
+            ))));
+        }
+    }
+
     // Recompute every content file's digest and compare with the stored digest, naming the file.
     let mut content_digests: Vec<(String, Hash)> = Vec::new();
     for name in CONTENT_FILES {
         let bytes = std::fs::read(dir.join(name))?;
         let found = file_digest(&bytes);
-        if let Some(expected) = manifest.content_digests.get(*name) {
-            if &found.to_hex() != expected {
-                return Err(VerifyError::DigestMismatch {
-                    file: (*name).to_string(),
-                    found: found.to_hex(),
-                    expected: expected.clone(),
-                });
-            }
+        let expected = manifest
+            .content_digests
+            .get(*name)
+            .expect("presence checked above");
+        if &found.to_hex() != expected {
+            return Err(VerifyError::DigestMismatch {
+                file: (*name).to_string(),
+                found: found.to_hex(),
+                expected: expected.clone(),
+            });
         }
         content_digests.push((name.to_string(), found));
     }
@@ -488,6 +561,7 @@ mod tests {
             evidence: Vec::new(),
             generator_raw: None,
             operator_raw: None,
+            controller_logged: None,
         }
     }
 
@@ -495,11 +569,13 @@ mod tests {
         let spec = spec_for_families(&["calibrated".to_string()]);
         let dim = spec.names.len();
         let mut rows = Vec::new();
-        for i in 0..30u64 {
+        // §B8's minimum data: 150 mature tasks, ≥ 30 in the family. 160 distinct tasks, 120 fit and
+        // 40 calibrate, all `calibrated`, so `write_bundle` does not refuse.
+        for i in 0..160u64 {
             let mut v = vec![0.0; dim];
             v[0] = 1.0;
             v[dim - 1] = (i % 5) as f64;
-            let side = if i < 20 { Side::Fit } else { Side::Calibrate };
+            let side = if i < 120 { Side::Fit } else { Side::Calibrate };
             rows.push(row("calibrated", v, Some(i % 2 == 0), side, i));
         }
         Dataset {
@@ -579,5 +655,89 @@ mod tests {
         write_bundle(&ddir, &out, 12).unwrap();
         let b = load_bundle(&out).unwrap();
         assert_eq!(b.manifest.support_floor, 12);
+    }
+
+    /// Strip the `id` line and the `[content_digests]` table from a manifest, as an attacker
+    /// would to make `load_bundle` skip every digest and id check.
+    fn strip_digest_fields(dir: &Path) {
+        let text = std::fs::read_to_string(dir.join("manifest.toml")).unwrap();
+        let mut kept: Vec<&str> = Vec::new();
+        let mut in_table = false;
+        for line in text.lines() {
+            if line.trim_start().starts_with('[') {
+                in_table = true;
+            }
+            if in_table || line.trim_start().starts_with("id =") {
+                continue;
+            }
+            kept.push(line);
+        }
+        std::fs::write(dir.join("manifest.toml"), kept.join("\n")).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_without_digest_fields_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("ds6");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out6");
+        write_bundle(&ddir, &out, 30).unwrap();
+        // Tamper head.json so a fail-open would be observable, then strip the fields that would
+        // have caught it.
+        let mut bytes = std::fs::read(out.join("head.json")).unwrap();
+        bytes[0] ^= 0x01;
+        std::fs::write(out.join("head.json"), &bytes).unwrap();
+        strip_digest_fields(&out);
+
+        let err = load_bundle(&out).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("missing bundle id") || msg.contains("missing content digest"),
+            "load_bundle must fail closed on a stripped manifest, got: {msg}"
+        );
+
+        let err = verify_bundle(&out, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("missing bundle id") || msg.contains("missing content digest"),
+            "verify_bundle must fail closed on a stripped manifest, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_manifest_with_only_the_id_stripped_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("ds7");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out7");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let text = std::fs::read_to_string(out.join("manifest.toml")).unwrap();
+        let kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("id ="))
+            .collect();
+        std::fs::write(out.join("manifest.toml"), kept.join("\n")).unwrap();
+        let msg = load_bundle(&out).unwrap_err().to_string();
+        assert!(msg.contains("missing bundle id"), "got: {msg}");
+    }
+
+    #[test]
+    fn a_manifest_with_one_digest_missing_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("ds8");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out8");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let text = std::fs::read_to_string(out.join("manifest.toml")).unwrap();
+        let kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("\"head.json\""))
+            .collect();
+        std::fs::write(out.join("manifest.toml"), kept.join("\n")).unwrap();
+        let msg = load_bundle(&out).unwrap_err().to_string();
+        assert!(
+            msg.contains("missing content digest") && msg.contains("head.json"),
+            "got: {msg}"
+        );
     }
 }

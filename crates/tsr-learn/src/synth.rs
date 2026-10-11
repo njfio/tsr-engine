@@ -128,6 +128,10 @@ pub const FAMILIES: [Family; 4] = [
 /// The number of lineages. At least eight, so the cluster bootstrap has clusters to resample.
 pub const LINEAGES: usize = 12;
 
+/// The number of consecutive task indices that share a clone group. A clone group is a contiguous
+/// block, so it never straddles a time boundary (the time split keeps it whole).
+pub const CLONE_BLOCK: usize = 6;
+
 /// The sigmoid.
 fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
@@ -260,15 +264,27 @@ struct TaskPlan {
     terminal: Terminal,
     /// The true acceptance of each decision, drawn from `p_true`.
     accepted: Vec<bool>,
+    /// The task-level acceptance: the common decision event `task_accepted_in_budget@v1`, a single
+    /// Bernoulli draw at the task's own inspection count (`p_true(family, inspections)`), per the
+    /// module header. This is the label every row of the task carries; it is NOT the last
+    /// decision's draw, which would sample the highest inspection count and inflate the rate.
+    task_accepted: bool,
 }
 
 /// Draw one task's plan from the stream.
-fn plan_task(rng: &mut SplitMix64, family: Family, index: usize) -> TaskPlan {
+///
+/// `task_index` is the task's global position, which fixes its timestamp (`stamp(task_index, 0)`).
+/// Clone groups are drawn from **contiguous blocks** of task indices, so a clone group never
+/// straddles a time boundary: the time split keeps a group whole and every held_out task is still
+/// later than every fit/calibrate task.
+fn plan_task(rng: &mut SplitMix64, family: Family, index: usize, task_index: usize) -> TaskPlan {
     let name = format!("m4-{}-{:03}", family.name, index);
     let lineage = format!("lineage-{:02}", rng.index(LINEAGES));
-    // A clone group on roughly a third of tasks, so the split's clone-group rule is exercised.
-    let clone_group = if rng.next_f64() < 0.33 {
-        Some(format!("clone-{:03}", rng.index(40)))
+    // A clone group on roughly a third of tasks, as a contiguous block of `CLONE_BLOCK` task
+    // indices, so the split's clone-group rule is exercised without interleaving groups in time.
+    let block = task_index / CLONE_BLOCK;
+    let clone_group = if block % 3 == 0 {
+        Some(format!("clone-{:03}", block))
     } else {
         None
     };
@@ -302,6 +318,8 @@ fn plan_task(rng: &mut SplitMix64, family: Family, index: usize) -> TaskPlan {
         let p = p_true(&family, insp);
         accepted.push(rng.next_f64() < p);
     }
+    // The task-level common decision event: one draw at the task's own inspection count.
+    let task_accepted = rng.next_f64() < p_true(&family, inspections);
     TaskPlan {
         name,
         family,
@@ -313,6 +331,7 @@ fn plan_task(rng: &mut SplitMix64, family: Family, index: usize) -> TaskPlan {
         operator_forecasts,
         terminal,
         accepted,
+        task_accepted,
     }
 }
 
@@ -348,16 +367,18 @@ fn placeholder_utility() -> Utility {
 /// first, and one transaction keeps the generator fast.
 fn push(
     out: &mut Vec<Event>,
+    global: &mut u64,
     task: &TaskId,
     parents: Vec<EventId>,
     source: Source,
     kind: EventKind,
-    task_index: usize,
-    step: usize,
+    at: (usize, usize),
 ) -> EventId {
+    let (task_index, step) = at;
     let ev = Event::new(*task, parents, source, kind, stamp(task_index, step));
     let id = ev.id;
     out.push(ev);
+    *global += 1;
     id
 }
 
@@ -371,13 +392,27 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
     let mut labels: Vec<LabelRecord> = Vec::new();
     // Every event, built in memory and appended in one transaction at the end.
     let mut events: Vec<Event> = Vec::new();
+
     // The global event count, so a forecast can name the version its commitment will occupy.
     let mut global: u64 = 0;
 
-    let mut task_index = 0usize;
-    for family in FAMILIES {
-        for i in 0..family.tasks {
-            let plan = plan_task(&mut rng, family, i);
+    // The families are interleaved in time, not laid out in contiguous blocks: `stamp` makes a
+    // task's timestamp a pure function of its global position, so a block layout would put only
+    // the last family on the late side of a forward-time split. Round-robin the (family, i) pairs
+    // so every side of a `--by time` split sees all four families.
+    let mut plan_order: Vec<(Family, usize)> = Vec::new();
+    let max_tasks = FAMILIES.iter().map(|f| f.tasks).max().unwrap_or(0);
+    for i in 0..max_tasks {
+        for family in FAMILIES {
+            if i < family.tasks {
+                plan_order.push((family, i));
+            }
+        }
+    }
+
+    for (task_index, (family, i)) in plan_order.into_iter().enumerate() {
+        {
+            let plan = plan_task(&mut rng, family, i, task_index);
             let task = task_id(&plan.name);
             let mut parents: Vec<EventId> = Vec::new();
             let mut step = 0usize;
@@ -385,37 +420,36 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
             // TaskOpened.
             let id = push(
                 &mut events,
+                &mut global,
                 &task,
                 parents.clone(),
                 Source::Operator,
                 EventKind::TaskOpened { task },
-                task_index,
-                step,
+                (task_index, step),
             );
             parents = vec![id];
             step += 1;
-            global += 1;
 
             // The inspections before the first decision.
             for k in 0..plan.inspections {
                 let cand = mint(ActionKind::Inspect, &format!("src/file_{k}.rs"));
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
                     EventKind::Proposed {
                         candidate: cand.clone(),
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
                 // The inspection is dispatched and executed (in the sandbox), so it is reconciled.
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -423,14 +457,13 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         candidate: cand.id,
                         in_sandbox: true,
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -440,12 +473,10 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         log_digest: None,
                         duration_ms: 1_000,
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
             }
 
             // The gated decisions.
@@ -460,22 +491,23 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 let cand = mint(kind, &format!("step_{d}"));
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
                     EventKind::Proposed {
                         candidate: cand.clone(),
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
 
                 // The forecast, at the version the commitment will occupy. The commitment is
                 // pushed after the generator forecast (and the operator forecast, when present),
-                // so its 0-based index is `global` plus those events.
+                // so its 0-based index in the session log is `global` plus those events.
+                // `reconstruct`'s M0 invariant compares this against the commitment's index in
+                // the session's event list, so the version is the session-global index.
                 let commit_version = global + 1 + u64::from(plan.operator_forecasts);
                 let f = Forecast::new(
                     crate::decision_event_id(),
@@ -486,6 +518,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 );
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Generator,
@@ -493,12 +526,10 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         forecast: f,
                         candidate: cand.id,
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
 
                 if plan.operator_forecasts {
                     let f = Forecast::new(
@@ -510,6 +541,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     );
                     let id = push(
                         &mut events,
+                        &mut global,
                         &task,
                         parents.clone(),
                         Source::Operator,
@@ -517,17 +549,16 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                             forecast: f,
                             candidate: cand.id,
                         },
-                        task_index,
-                        step,
+                        (task_index, step),
                     );
                     parents = vec![id];
                     step += 1;
-                    global += 1;
                 }
 
                 // The commitment.
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -540,16 +571,15 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                             evidence: vec![],
                         },
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
 
                 // Dispatch (in the sandbox) and execute.
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -557,15 +587,14 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         candidate: cand.id,
                         in_sandbox: true,
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
                 let exit = if plan.accepted[d] { 0 } else { 1 };
                 let id = push(
                     &mut events,
+                    &mut global,
                     &task,
                     parents.clone(),
                     Source::Rules,
@@ -575,12 +604,10 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         log_digest: None,
                         duration_ms: 2_000,
                     },
-                    task_index,
-                    step,
+                    (task_index, step),
                 );
                 parents = vec![id];
                 step += 1;
-                global += 1;
             }
 
             // The terminal state.
@@ -588,6 +615,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 Terminal::ClosedReviewed | Terminal::ClosedUnreviewed => {
                     let _ = push(
                         &mut events,
+                        &mut global,
                         &task,
                         parents.clone(),
                         Source::Operator,
@@ -595,24 +623,21 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                             task,
                             reason: "done".to_string(),
                         },
-                        task_index,
-                        step,
+                        (task_index, step),
                     );
-                    global += 1;
                 }
                 Terminal::OperatorStop => {
                     let _ = push(
                         &mut events,
+                        &mut global,
                         &task,
                         parents.clone(),
                         Source::Operator,
                         EventKind::Stop {
                             reason: "operator".to_string(),
                         },
-                        task_index,
-                        step,
+                        (task_index, step),
                     );
-                    global += 1;
                 }
                 Terminal::Open => {}
             }
@@ -632,8 +657,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 // The task closed with criteria met and the diff accepted, unless the last decision
                 // failed — then the diff is rejected. A disputed diff resolves false, as lane 04
                 // resolves `diff_accepted`.
-                let last_ok = *plan.accepted.last().unwrap_or(&true);
-                let (criteria_met, diff_label) = if last_ok {
+                let (criteria_met, diff_label) = if plan.task_accepted {
                     (true, DiffLabel::Accepted)
                 } else {
                     (false, DiffLabel::Rejected)
@@ -646,8 +670,6 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                     recorded_at: stamp(task_index, step + 1),
                 });
             }
-
-            task_index += 1;
         }
     }
 

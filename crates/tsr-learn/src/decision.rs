@@ -80,14 +80,14 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
     // Per task: the candidate kinds proposed, and the forecasts recorded, in log order.
     let mut kinds: HashMap<CandidateId, ActionKind> = HashMap::new();
     let mut forecasts: HashMap<CandidateId, Vec<Forecast>> = HashMap::new();
-    // The 0-based index of each event within its own task's log.
-    let mut task_index: HashMap<EventId, u64> = HashMap::new();
-    let mut task_seen: HashMap<TaskId, u64> = HashMap::new();
+    // The 0-based index of each event in the session's log. `reconstruct`'s M0 invariant
+    // (`every_gated_action_has_prior_forecast_at_same_state_version`) compares a forecast's
+    // `state_version` against the commitment's index in the session's event list, so the pairing
+    // rule uses the session-global index, not the task-local one.
+    let mut event_index: HashMap<EventId, u64> = HashMap::new();
 
-    for (_, e) in events {
-        let idx = task_seen.entry(e.task).or_insert(0);
-        task_index.insert(e.id, *idx);
-        *idx += 1;
+    for (i, (_, e)) in events.iter().enumerate() {
+        event_index.insert(e.id, i as u64);
         match &e.kind {
             EventKind::Proposed { candidate } => {
                 kinds.insert(candidate.id, candidate.kind);
@@ -130,7 +130,7 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
         if !is_gated(kind) {
             continue;
         }
-        let index = task_index.get(&e.id).copied().unwrap_or(0);
+        let index = event_index.get(&e.id).copied().unwrap_or(0);
         let paired: Vec<Forecast> = forecasts
             .get(candidate)
             .map(|fs| {
