@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tsr-domain", "crates/tsr-store", "crates/tsr-cli"]
+members = ["crates/tsr-domain", "crates/tsr-store", "crates/tsr-cli", "crates/tsr-policy"]
 
 [workspace.package]
 version = "0.0.1"
@@ -18,6 +18,8 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+# RATCHET protection profiles are TOML (PRD B5); tsr-policy parses them with `toml`.
+toml = "0.8"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
