@@ -17,10 +17,16 @@
 
 #![forbid(unsafe_code)]
 
+pub mod action;
 pub mod approval;
 pub mod budget;
+pub mod gate;
 pub mod profile;
 
+pub use action::{action_kind_for_tool, is_gated};
 pub use approval::{Approval, ApprovalError};
 pub use budget::{BudgetCost, BudgetError, BudgetLedger, Reservation};
+pub use gate::{
+    evaluate, evaluate_dispatch, ActionArgs, BoundaryAction, Decision, GateInput, Grant, Verdict,
+};
 pub use profile::{ApprovalPolicy, Budgets, Profile, ProfileError, ReadScope, TestCommand};
