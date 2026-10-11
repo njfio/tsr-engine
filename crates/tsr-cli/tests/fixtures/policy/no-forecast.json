@@ -1,0 +1,25 @@
+{
+  "_comment": "Adversarial case: a gated action with no forecast at the current state version. RunApprovedTest is gated (PRD B5, forecast-gated execution): it is DENIED until a Forecast event exists for this candidate at state_version 1. The log is empty, so no forecast is on record. Expected: decision=deny, exit 1, reason names what to record (a forecast for RunApprovedTest at state version 1).",
+  "task": "1111111111111111111111111111111111111111111111111111111111111111",
+  "candidate": "3333333333333333333333333333333333333333333333333333333333333333",
+  "kind": "run_approved_test",
+  "args": {
+    "test_id": "cargo-test-workspace"
+  },
+  "state_version": 1,
+  "grant": {
+    "task": "1111111111111111111111111111111111111111111111111111111111111111",
+    "allowed_kinds": ["inspect", "run_approved_test", "generate", "propose_patch", "request_approval", "stop"],
+    "read_scope_paths": ["src/", "tests/", "docs/", "Cargo.toml", "crates/"],
+    "read_scope_rts_tools": ["search", "callers", "definition", "references"],
+    "allowed_test_ids": ["cargo-test-parser", "cargo-test-workspace", "cargo-clippy"],
+    "budgets": {
+      "generator_tokens": 200000,
+      "tool_minutes": 30,
+      "wall_clock_secs": 3600,
+      "generator_calls": 40,
+      "patch_bytes": 262144
+    }
+  },
+  "log": []
+}

@@ -9,6 +9,8 @@
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
+mod policy_cmd;
+
 #[derive(Parser)]
 #[command(
     name = "tsr",
@@ -136,7 +138,9 @@ fn main() -> ExitCode {
         ),
         Cmd::Hook { .. } => not_yet("hook", "B4 path A — tsr-hook records every tool call (M0)"),
         Cmd::Exec { .. } => not_yet("exec", "B4 — the sealed sibling sandbox (M0)"),
-        Cmd::Policy { .. } => not_yet("policy check", "B5 (M1, the RATCHET profile)"),
+        Cmd::Policy { cmd } => match cmd {
+            PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
+        },
         Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
