@@ -142,6 +142,129 @@ pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<Str
     v
 }
 
+/// What a [`Runner`] observed: the process exit code and the combined log bytes.
+///
+/// The log is the raw stdout+stderr the container produced; the caller hashes it into the
+/// `Executed` event's `log_digest`. Keeping the bytes (not a pre-computed digest) lets a fake runner
+/// script a log and lets the harness compare two runs structurally.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutput {
+    pub exit_code: i32,
+    pub log: Vec<u8>,
+}
+
+/// The thing that actually runs the sealed command. Factored out so `exec::run` is drivable without
+/// a container: the real runner builds the docker/podman argv and spawns it, a fake runner returns a
+/// scripted exit code and log.
+///
+/// Two methods, because the refusal must be decided *before* anything is recorded (B4: no runtime →
+/// refuse, never fall back to the host) while a container that is present but fails to *start* is a
+/// recorded `Unresolved`, not a refusal:
+/// - [`Runner::available`] is called first; `Err` here means "cannot run at all" and `run_with`
+///   records nothing.
+/// - [`Runner::run`] is called after `Dispatched` is recorded; `Err` here means the runtime was
+///   present but the container could not be started, and the dispatch is recorded `Unresolved`.
+pub trait Runner {
+    /// Whether this runner can run at all. Called before any event is appended, so a refusal here
+    /// leaves the log untouched.
+    fn available(&self) -> Result<(), ExecRefusal>;
+
+    /// Run `argv` in `workspace`, returning the exit code and the combined log bytes. `Err` means
+    /// the runtime was present but the container could not be started.
+    fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal>;
+}
+
+/// The real runner: a sibling container via Podman or Docker, sealed exactly as [`container_argv`]
+/// builds it. Constructed only once a runtime has been detected, so [`Runner::available`] is a
+/// no-op and the refusal is decided at construction ([`RealRunner::detect`]).
+#[derive(Debug, Clone, Copy)]
+pub struct RealRunner {
+    runtime: Runtime,
+}
+
+impl RealRunner {
+    /// Detect a reachable runtime, or refuse. This is the refusal decision: it happens before
+    /// `run_with` records anything.
+    pub fn detect() -> Result<RealRunner, ExecRefusal> {
+        Runtime::detect()
+            .map(|runtime| RealRunner { runtime })
+            .ok_or(ExecRefusal::NoRuntime)
+    }
+
+    /// The runtime this runner will use.
+    pub fn runtime(&self) -> Runtime {
+        self.runtime
+    }
+}
+
+impl Runner for RealRunner {
+    fn available(&self) -> Result<(), ExecRefusal> {
+        // A `RealRunner` only exists once a runtime was detected.
+        Ok(())
+    }
+
+    fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal> {
+        let args = container_argv(self.runtime, workspace, argv);
+        let out = Command::new(&args[0])
+            .args(&args[1..])
+            .output()
+            .map_err(|e| ExecRefusal::StartFailed(e.to_string()))?;
+        let mut log = out.stdout;
+        log.extend_from_slice(&out.stderr);
+        Ok(RunOutput {
+            exit_code: out.status.code().unwrap_or(-1),
+            log,
+        })
+    }
+}
+
+/// A runner that returns a scripted exit code and log instead of running a container. Exported (not
+/// `#[cfg(test)]`) so the integration harness in `tests/m0_harness.rs` can inject it into
+/// [`run_with`] and drive the whole dispatch lifecycle without a container runtime.
+#[derive(Debug, Clone)]
+pub struct FakeRunner {
+    exit_code: i32,
+    log: Vec<u8>,
+    /// When set, [`Runner::run`] refuses as if the container could not be started.
+    start_error: Option<String>,
+}
+
+impl FakeRunner {
+    /// A fake that "runs" and returns `exit_code` with `log` as the combined output.
+    pub fn new(exit_code: i32, log: impl Into<Vec<u8>>) -> FakeRunner {
+        FakeRunner {
+            exit_code,
+            log: log.into(),
+            start_error: None,
+        }
+    }
+
+    /// A fake whose container cannot be started: the dispatch is recorded `Unresolved`.
+    pub fn failing_to_start(reason: impl Into<String>) -> FakeRunner {
+        FakeRunner {
+            exit_code: -1,
+            log: Vec::new(),
+            start_error: Some(reason.into()),
+        }
+    }
+}
+
+impl Runner for FakeRunner {
+    fn available(&self) -> Result<(), ExecRefusal> {
+        Ok(())
+    }
+
+    fn run(&self, _workspace: &Path, _argv: &[String]) -> Result<RunOutput, ExecRefusal> {
+        match &self.start_error {
+            Some(reason) => Err(ExecRefusal::StartFailed(reason.clone())),
+            None => Ok(RunOutput {
+                exit_code: self.exit_code,
+                log: self.log.clone(),
+            }),
+        }
+    }
+}
+
 /// The outcome of a dispatch.
 #[derive(Debug, Clone)]
 pub struct ExecOutcome {
@@ -165,13 +288,36 @@ pub fn run(
     workspace: &Path,
     argv: &[String],
 ) -> Result<ExecOutcome, ExecRefusal> {
-    let rt = match Runtime::detect() {
-        Some(rt) => rt,
-        None => return Err(ExecRefusal::NoRuntime),
-    };
+    // The refusal is decided here, before `run_with` records anything: no runtime → exit 3 and an
+    // untouched log.
+    let runner = RealRunner::detect()?;
+    run_with(store, task, workspace, argv, &runner)
+}
 
-    // Record the dispatch only once a runtime is known to exist.
-    let cid = match committed_candidate_for(store, task, argv)? {
+/// [`run`] with the container invocation injected. The harness drives this with a [`FakeRunner`] to
+/// exercise the whole dispatch lifecycle without a container runtime; production calls it with a
+/// [`RealRunner`].
+///
+/// Refusal semantics are unchanged: if `runner.available()` refuses, **nothing is recorded** and the
+/// refusal is returned. Otherwise it records `Dispatched { in_sandbox: true }` then `Executed` (or
+/// `Unresolved` if the runner could not start the container).
+pub fn run_with(
+    store: &Store,
+    task: &TaskId,
+    workspace: &Path,
+    argv: &[String],
+    runner: &dyn Runner,
+) -> Result<ExecOutcome, ExecRefusal> {
+    // Refuse before recording anything.
+    runner.available()?;
+
+    // Record the dispatch only once the runner is known to be able to run.
+    let cid = match pending_commitment(
+        store,
+        task,
+        ActionKind::RunApprovedTest,
+        crate::hook::args_digest(ActionKind::RunApprovedTest, &argv.join(" ")),
+    ) {
         // The hook committed this candidate for the same argv: dispatch it, do not mint a second.
         Some(cid) => cid,
         None => {
@@ -219,14 +365,13 @@ pub fn run(
     let _ = dispatched;
 
     let started = std::time::Instant::now();
-    let args = container_argv(rt, workspace, argv);
-    let output = Command::new(&args[0]).args(&args[1..]).output();
+    let output = runner.run(workspace, argv);
     let duration_ms = started.elapsed().as_millis() as u64;
 
     match output {
         Ok(out) => {
-            let exit_code = out.status.code().unwrap_or(-1);
-            let log_digest = Hash::of(&[&out.stdout, &out.stderr]);
+            let exit_code = out.exit_code;
+            let log_digest = Hash::of(&[&out.log]);
             append(
                 store,
                 task,
@@ -240,10 +385,8 @@ pub fn run(
             )?;
             // Pass the container's output through to the caller, so an agent running
             // `tsr exec -- cargo test …` sees the result. Best-effort: a closed pipe is not an error.
-            let _ = std::io::stdout().write_all(&out.stdout);
+            let _ = std::io::stdout().write_all(&out.log);
             let _ = std::io::stdout().flush();
-            let _ = std::io::stderr().write_all(&out.stderr);
-            let _ = std::io::stderr().flush();
             Ok(ExecOutcome {
                 exit_code,
                 log_digest: Some(log_digest),
@@ -274,6 +417,10 @@ pub fn run(
 pub enum ExecRefusal {
     #[error("no container runtime reachable (podman/docker): refusing to run on the host")]
     NoRuntime,
+    /// The runtime was present but the container could not be started. This is *not* a refusal to
+    /// run at all: the dispatch is recorded `Unresolved`.
+    #[error("container runtime failed to start: {0}")]
+    StartFailed(String),
 }
 
 /// The candidate id an argv would produce: the same identity the hook mints for the equivalent
@@ -291,42 +438,55 @@ fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
         .map_err(|_| ExecRefusal::NoRuntime)
 }
 
-/// The id of a `Committed`-but-not-`Dispatched` `RunApprovedTest` candidate whose args digest
-/// matches this argv, if one exists. This is the candidate the hook committed for the same command
-/// a moment ago; dispatching it keeps one run to one candidate.
-fn committed_candidate_for(
+/// The candidate of the most recent `Committed` for `(kind, args_digest)` that has no `Dispatched`
+/// after it — the commitment this dispatch is meant to fulfil, if any.
+///
+/// The walk is per *occurrence*, in sequence order, not per id. A candidate id is content-addressed
+/// by `(kind, args, parents)`, so the second run of the same command mints the same id as the first:
+/// treating "this id has a `Dispatched`" as "dispatched" would make the second run mint a fresh
+/// candidate with no forecast (the defect the operator's real record shows at events 19–20). A
+/// `Committed` is pending again once a later `Committed` for the same digest follows the
+/// `Dispatched`, exactly as a re-`Proposed` candidate is pending again.
+///
+/// Matching is on the committed candidate's `(kind, args digest)`, not on the id alone: the id also
+/// commits to the parents, which differ between the hook's mint and a fresh one.
+pub fn pending_commitment(
     store: &Store,
     task: &TaskId,
-    argv: &[String],
-) -> Result<Option<CandidateId>, ExecRefusal> {
-    use std::collections::HashSet;
-    let want = crate::hook::args_digest(ActionKind::RunApprovedTest, &argv.join(" "));
-    let events = store.by_task(task).map_err(|_| ExecRefusal::NoRuntime)?;
-    let mut committed: Vec<CandidateId> = Vec::new();
-    let mut dispatched: HashSet<CandidateId> = HashSet::new();
+    kind: ActionKind,
+    args_digest: Hash,
+) -> Option<CandidateId> {
+    let events = store.by_task(task).ok()?;
+    let mut pending: Option<CandidateId> = None;
     for (_, e) in &events {
         match &e.kind {
-            EventKind::Committed { candidate, .. } => committed.push(*candidate),
+            EventKind::Proposed { candidate } => {
+                if candidate.kind == kind && candidate.args == args_digest {
+                    // A re-proposal of the same candidate is pending again.
+                    pending = Some(candidate.id);
+                }
+            }
+            EventKind::Committed { candidate, .. } => {
+                if pending == Some(*candidate) {
+                    // Already pending: the commitment does not change which occurrence is pending.
+                } else if let Some(c) = events.iter().find_map(|(_, p)| match &p.kind {
+                    EventKind::Proposed { candidate: p } if p.id == *candidate => Some(p),
+                    _ => None,
+                }) {
+                    if c.kind == kind && c.args == args_digest {
+                        pending = Some(*candidate);
+                    }
+                }
+            }
             EventKind::Dispatched { candidate, .. } => {
-                dispatched.insert(*candidate);
+                if pending == Some(*candidate) {
+                    pending = None;
+                }
             }
             _ => {}
         }
     }
-    // Match on the args digest of the committed candidate, not just its id: the id also commits to
-    // the parents, which differ between the hook's mint and a fresh one.
-    for (_, e) in &events {
-        if let EventKind::Proposed { candidate } = &e.kind {
-            if candidate.kind == ActionKind::RunApprovedTest
-                && candidate.args == want
-                && committed.contains(&candidate.id)
-                && !dispatched.contains(&candidate.id)
-            {
-                return Ok(Some(candidate.id));
-            }
-        }
-    }
-    Ok(None)
+    pending
 }
 
 fn last_parent(store: &Store, task: &TaskId) -> Vec<tsr_domain::EventId> {
@@ -431,6 +591,194 @@ mod tests {
             crate::hook::candidate_for_action(ActionKind::RunApprovedTest, cmd)
                 .expect("hook candidate"),
             "tsr exec and the hook must mint the same candidate for the same command"
+        );
+    }
+
+    /// The operator's real `tsr hook --selftest` record (fixtures/m0/session.events.jsonl), events
+    /// 1–18: two `Read`s, then a `tsr forecast` + PreToolUse Bash for `tsr exec -- cargo test
+    /// --offline -p parser` (6–8), the dispatch and execution (9–10), the PostToolUse the hook
+    /// wrongly proposed and committed (11–12), an Edit (13–15), and the *second* run of the same
+    /// command (16–18). The candidate id is content-addressed, so events 6–8 and 16–18 name the
+    /// same id `e07bad41…`; the first occurrence was dispatched at 9, the second was not.
+    const REAL_LISTING_EVENTS_1_TO_18: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/m0/session.events.jsonl"
+    ));
+
+    /// Build a store holding the operator's real record, truncated to the first `n` events.
+    fn store_with_real_listing(n: usize) -> (Store, TaskId) {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let mut task = None;
+        for line in REAL_LISTING_EVENTS_1_TO_18.lines().take(n) {
+            let row: serde_json::Value = serde_json::from_str(line).expect("fixture line is JSON");
+            let seq = row["seq"].as_i64().expect("seq");
+            let ev: Event = serde_json::from_value(row["event"].clone()).expect("event");
+            assert_eq!(store.append(&ev).expect("append"), seq, "seq preserved");
+            task = Some(ev.task);
+        }
+        (store, task.expect("at least one event"))
+    }
+
+    #[test]
+    fn pending_commitment_over_the_real_listing_returns_the_candidate_committed_at_18() {
+        let (store, task) = store_with_real_listing(18);
+        let digest = crate::hook::args_digest(
+            ActionKind::RunApprovedTest,
+            "cargo test --offline -p parser",
+        );
+        let got = pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest);
+        let want = CandidateId(
+            Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
+                .expect("hex"),
+        );
+        assert_eq!(
+            got,
+            Some(want),
+            "after events 1-18 the pending commitment is the one committed at event 18"
+        );
+    }
+
+    #[test]
+    fn pending_commitment_is_none_before_any_commitment_and_after_a_dispatch() {
+        let digest = crate::hook::args_digest(
+            ActionKind::RunApprovedTest,
+            "cargo test --offline -p parser",
+        );
+        // Events 1–5: the two Reads; the run_approved_test candidate is not proposed yet.
+        let (store, task) = store_with_real_listing(5);
+        assert_eq!(
+            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
+            None,
+            "no commitment exists before event 6"
+        );
+        // Events 1–6: proposed but not committed — a `Proposed` is pending (01b's rule), so the
+        // lookup already names it; the commitment at 8 does not change which occurrence is pending.
+        let (store, task) = store_with_real_listing(6);
+        assert_eq!(
+            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
+            Some(CandidateId(
+                Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
+                    .expect("hex")
+            )),
+            "a Proposed is pending before it is committed"
+        );
+        // Events 1–10: the first occurrence was committed at 8 and dispatched at 9.
+        let (store, task) = store_with_real_listing(10);
+        assert_eq!(
+            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
+            None,
+            "the only commitment was dispatched at event 9"
+        );
+        // Events 1–12: the hook's spurious PostToolUse commitment (11–12) is for the same digest,
+        // so it is pending again — the second run must dispatch it, not mint a third candidate.
+        let (store, task) = store_with_real_listing(12);
+        assert_eq!(
+            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
+            Some(CandidateId(
+                Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
+                    .expect("hex")
+            )),
+            "the commitment at 12 is pending again after the dispatch at 9"
+        );
+        // A different digest never matches.
+        let other = crate::hook::args_digest(ActionKind::RunApprovedTest, "cargo test -p other");
+        let (store, task) = store_with_real_listing(18);
+        assert_eq!(
+            pending_commitment(&store, &task, ActionKind::RunApprovedTest, other),
+            None,
+            "a different args digest has no commitment"
+        );
+    }
+
+    /// `run_with` with a `FakeRunner` records the whole dispatch lifecycle without a container:
+    /// `Dispatched { in_sandbox: true }` then `Executed` with the scripted exit code and log digest.
+    #[test]
+    fn run_with_a_fake_runner_records_dispatched_then_executed() {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let task = TaskId(Hash::of(&[b"fake-runner-task"]));
+        let argv: Vec<String> = ["cargo", "test", "--offline", "-p", "parser"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let fake = FakeRunner::new(0, b"ok\n".to_vec());
+
+        let outcome = run_with(&store, &task, Path::new("/work"), &argv, &fake)
+            .expect("a fake runner never refuses");
+
+        assert_eq!(outcome.exit_code, 0);
+        assert_eq!(
+            outcome.log_digest,
+            Some(Hash::of(&[b"ok\n".as_slice()])),
+            "the log digest is the hash of the scripted log bytes"
+        );
+
+        let kinds: Vec<&'static str> = store
+            .by_task(&task)
+            .expect("by_task")
+            .into_iter()
+            .map(|(_, e)| match e.kind {
+                EventKind::Proposed { .. } => "proposed",
+                EventKind::Committed { .. } => "committed",
+                EventKind::Dispatched { .. } => "dispatched",
+                EventKind::Executed { .. } => "executed",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec!["proposed", "committed", "dispatched", "executed"],
+            "a fresh argv mints a candidate, commits it, dispatches it and records the execution"
+        );
+    }
+
+    /// A fake runner whose container cannot be started records `Unresolved`, not `Executed`.
+    #[test]
+    fn run_with_a_fake_runner_that_cannot_start_records_unresolved() {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let task = TaskId(Hash::of(&[b"fake-runner-unresolved"]));
+        let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
+        let fake = FakeRunner::failing_to_start("boom");
+
+        let outcome = run_with(&store, &task, Path::new("/work"), &argv, &fake)
+            .expect("a start failure is recorded, not refused");
+
+        assert_eq!(outcome.exit_code, -1);
+        assert_eq!(outcome.log_digest, None);
+        let has_unresolved = store
+            .by_task(&task)
+            .expect("by_task")
+            .into_iter()
+            .any(|(_, e)| matches!(e.kind, EventKind::Unresolved { .. }));
+        assert!(
+            has_unresolved,
+            "a container that cannot start is Unresolved"
+        );
+    }
+
+    /// A runner that refuses before running records **nothing** — the B4 refusal path.
+    #[test]
+    fn run_with_a_refusing_runner_records_nothing() {
+        struct RefusingRunner;
+        impl Runner for RefusingRunner {
+            fn available(&self) -> Result<(), ExecRefusal> {
+                Err(ExecRefusal::NoRuntime)
+            }
+            fn run(&self, _w: &Path, _a: &[String]) -> Result<RunOutput, ExecRefusal> {
+                unreachable!("available() refuses first")
+            }
+        }
+
+        let store = Store::open_in_memory().expect("in-memory store");
+        let task = TaskId(Hash::of(&[b"refusing-runner"]));
+        let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
+
+        let err = run_with(&store, &task, Path::new("/work"), &argv, &RefusingRunner)
+            .expect_err("a refusing runner refuses");
+        assert!(matches!(err, ExecRefusal::NoRuntime));
+        assert_eq!(
+            store.by_task(&task).expect("by_task").len(),
+            0,
+            "a refusal records nothing"
         );
     }
 }

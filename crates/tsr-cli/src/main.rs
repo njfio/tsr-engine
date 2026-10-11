@@ -384,5 +384,11 @@ fn run_exec(argv: &[String]) -> ExitCode {
             );
             ExitCode::from(exec::EXIT_NO_RUNTIME as u8)
         }
+        // `run` records a container that fails to start as `Unresolved` and returns `Ok`, so this
+        // arm is unreachable from the CLI; it exists so the match stays exhaustive.
+        Err(exec::ExecRefusal::StartFailed(reason)) => {
+            eprintln!("tsr: container runtime failed to start: {reason}");
+            ExitCode::from(exec::EXIT_NO_RUNTIME as u8)
+        }
     }
 }
