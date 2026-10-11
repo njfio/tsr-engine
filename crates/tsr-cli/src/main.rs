@@ -12,6 +12,7 @@ use std::process::ExitCode;
 mod policy_cmd;
 use tsr_cli::note_cmd;
 use tsr_cli::reconcile_cmd;
+use tsr_cli::review_cmd;
 
 #[derive(Parser)]
 #[command(
@@ -70,7 +71,32 @@ enum Cmd {
         store: String,
     },
     /// Label outcomes after close (M2, B5, B7).
-    Review { task: String },
+    Review {
+        task: String,
+        /// accepted | rejected | disputed; omit to list the returns awaiting a label.
+        label: Option<String>,
+        /// The reason for a rejection; stored apart from tool results.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Name the return to label; a correction supersedes its standing label.
+        #[arg(long = "return")]
+        return_id: Option<String>,
+        /// Sample greens for review at this rate (0, 1].
+        #[arg(long)]
+        sample: Option<f64>,
+        /// Fix the sampling draw.
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Restrict --stats to one task family.
+        #[arg(long)]
+        family: Option<String>,
+        /// Print the false-accept rate (green but rejected), weighted and unweighted.
+        #[arg(long)]
+        stats: bool,
+        /// The store holding the task's log.
+        #[arg(long, default_value = "tsr.db")]
+        store: String,
+    },
     /// The Mirror view: one closed episode, in the book's order (M2, B7).
     Reflect { task: String },
     /// Corpus tooling: mine, mutants (M3, B9).
@@ -162,7 +188,27 @@ fn main() -> ExitCode {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
         Cmd::Note { task, text, store } => note_cmd::run(&task, &text, &store),
-        Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
+        Cmd::Review {
+            task,
+            label,
+            reason,
+            return_id,
+            sample,
+            seed,
+            family,
+            stats,
+            store,
+        } => review_cmd::run(&review_cmd::ReviewArgs {
+            task,
+            label,
+            reason,
+            return_id,
+            sample,
+            seed,
+            family,
+            stats,
+            store,
+        }),
         Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),

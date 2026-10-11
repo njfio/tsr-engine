@@ -20,6 +20,7 @@ path = "src/lib.rs"
 tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
 tsr-policy = { path = "../tsr-policy" }
+tsr-ledger = { path = "../tsr-ledger" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true

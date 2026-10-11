@@ -8,6 +8,7 @@
 
 pub mod note_cmd;
 pub mod reconcile_cmd;
+pub mod review_cmd;
 
 pub mod reconstruct {
     //! Rebuild a session from its event log and check the M0 invariants.
