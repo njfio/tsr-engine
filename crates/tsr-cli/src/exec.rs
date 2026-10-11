@@ -8,7 +8,14 @@
 //! With no container runtime reachable the command refuses with exit code 3 and records **nothing**
 //! (B4: "no runtime → refuse, never fall back to the host"). The refusal is decided in
 //! [`Runtime::detect`] and acted on in [`run`] before any event is appended.
+//!
+//! The dispatch is honest about *which* candidate ran. When the hook has just committed a
+//! `RunApprovedTest` candidate for this argv (the agent forecast first, then called
+//! `tsr exec -- …`), `tsr exec` dispatches **that** candidate rather than minting a second one, so
+//! one run is one candidate: `Proposed` → `Forecast` → `Committed` → `Dispatched` → `Executed`.
+//! Only when no such committed candidate exists does it mint one as before.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tsr_domain::{
@@ -18,6 +25,17 @@ use tsr_store::Store;
 
 /// The exit code for "no container runtime reachable" (B4).
 pub const EXIT_NO_RUNTIME: i32 = 3;
+
+/// The default container image, used when `TSR_EXEC_IMAGE` is unset.
+pub const DEFAULT_IMAGE: &str = "docker.io/library/debian:stable-slim";
+
+/// The container image to run in: `TSR_EXEC_IMAGE` if set and non-empty, else [`DEFAULT_IMAGE`].
+pub fn image() -> String {
+    match std::env::var("TSR_EXEC_IMAGE") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => DEFAULT_IMAGE.to_string(),
+    }
+}
 
 /// A reachable container runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +90,7 @@ fn probe(rt: Runtime) -> bool {
 /// and never runs anything, so it can be asserted on without a runtime present.
 ///
 /// The container is a *sibling*: the workspace is bind-mounted at the same path, the root is
-/// read-only, the network is off, and the cgroup limits are fixed.
+/// read-only, the network is off, and the cgroup limits are fixed. The image is [`image`].
 pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<String> {
     let ws = workspace.display().to_string();
     let mut v: Vec<String> = vec![
@@ -98,7 +116,7 @@ pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<Str
         "no-new-privileges".to_string(),
         "--cap-drop".to_string(),
         "ALL".to_string(),
-        "docker.io/library/debian:stable-slim".to_string(),
+        image(),
     ];
     v.extend(argv.iter().cloned());
     v
@@ -117,6 +135,10 @@ pub struct ExecOutcome {
 /// Returns `Err(EXIT_NO_RUNTIME)`-shaped refusal via [`ExecRefusal`] when no runtime is reachable:
 /// in that case **nothing is recorded**. Otherwise it records `Dispatched { in_sandbox: true }`
 /// then `Executed` (or `Unresolved` if the runtime itself failed to produce an exit code).
+///
+/// If the task already holds a `Committed`-but-not-`Dispatched` `RunApprovedTest` candidate whose
+/// args digest matches this argv (the hook committed it a moment ago), that candidate is dispatched
+/// instead of a freshly minted one.
 pub fn run(
     store: &Store,
     task: &TaskId,
@@ -129,34 +151,42 @@ pub fn run(
     };
 
     // Record the dispatch only once a runtime is known to exist.
-    let candidate = mint_candidate(store, task, argv)?;
-    let cid = candidate.id;
-    let proposed = append(
-        store,
-        task,
-        Source::Rules,
-        EventKind::Proposed { candidate },
-    )?;
-    let committed = append(
-        store,
-        task,
-        Source::Rules,
-        EventKind::Committed {
-            candidate: cid,
-            decision: Decision::Selected {
-                value: cid,
-                utility: Utility {
-                    p_success: 0.5,
-                    value: 0.0,
-                    cost: 0.0,
-                    ev: 0.0,
+    let cid = match committed_candidate_for(store, task, argv)? {
+        // The hook committed this candidate for the same argv: dispatch it, do not mint a second.
+        Some(cid) => cid,
+        None => {
+            let candidate = mint_candidate(argv)?;
+            let cid = candidate.id;
+            let proposed = append(
+                store,
+                task,
+                Source::Rules,
+                EventKind::Proposed { candidate },
+            )?;
+            let committed = append(
+                store,
+                task,
+                Source::Rules,
+                EventKind::Committed {
+                    candidate: cid,
+                    decision: Decision::Selected {
+                        value: cid,
+                        utility: Utility {
+                            p_success: 0.5,
+                            value: 0.0,
+                            cost: 0.0,
+                            ev: 0.0,
+                        },
+                        propensity: 1.0,
+                        evidence: vec![proposed],
+                    },
                 },
-                propensity: 1.0,
-                evidence: vec![proposed],
-            },
-        },
-    )?;
-    let _ = committed;
+            )?;
+            let _ = committed;
+            cid
+        }
+    };
+
     let dispatched = append(
         store,
         task,
@@ -188,6 +218,12 @@ pub fn run(
                     duration_ms,
                 },
             )?;
+            // Pass the container's output through to the caller, so an agent running
+            // `tsr exec -- cargo test …` sees the result. Best-effort: a closed pipe is not an error.
+            let _ = std::io::stdout().write_all(&out.stdout);
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().write_all(&out.stderr);
+            let _ = std::io::stderr().flush();
             Ok(ExecOutcome {
                 exit_code,
                 log_digest: Some(log_digest),
@@ -220,18 +256,57 @@ pub enum ExecRefusal {
     NoRuntime,
 }
 
-/// Mint the candidate for an argv: its identity commits to the argv and the action kind.
-fn mint_candidate(store: &Store, task: &TaskId, argv: &[String]) -> Result<Candidate, ExecRefusal> {
-    let args = Hash::of(&[argv.join("\u{0}").as_bytes()]);
-    let parents = last_parent(store, task);
-    Candidate::new(
-        ActionKind::RunApprovedTest,
-        Source::Rules,
-        args,
-        parents,
-        vec![],
-    )
-    .map_err(|_| ExecRefusal::NoRuntime)
+/// The candidate id an argv would produce: the same identity the hook mints for the equivalent
+/// `Bash` tool call, because both go through [`crate::hook::mint_candidate`] with the same
+/// `(kind, args)` pair. For `Bash` the args string is the command, so the argv is joined by spaces.
+pub fn candidate_for(argv: &[String]) -> CandidateId {
+    mint_candidate(argv).expect("no conflicts").id
+}
+
+/// Mint the candidate for an argv through the shared hook path, so `tsr exec` and the hook agree on
+/// identity for the same command. The args string is the argv joined by spaces — the command string
+/// the hook digests for a `Bash` call.
+fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
+    crate::hook::mint_candidate(ActionKind::RunApprovedTest, &argv.join(" "))
+        .map_err(|_| ExecRefusal::NoRuntime)
+}
+
+/// The id of a `Committed`-but-not-`Dispatched` `RunApprovedTest` candidate whose args digest
+/// matches this argv, if one exists. This is the candidate the hook committed for the same command
+/// a moment ago; dispatching it keeps one run to one candidate.
+fn committed_candidate_for(
+    store: &Store,
+    task: &TaskId,
+    argv: &[String],
+) -> Result<Option<CandidateId>, ExecRefusal> {
+    use std::collections::HashSet;
+    let want = crate::hook::args_digest(ActionKind::RunApprovedTest, &argv.join(" "));
+    let events = store.by_task(task).map_err(|_| ExecRefusal::NoRuntime)?;
+    let mut committed: Vec<CandidateId> = Vec::new();
+    let mut dispatched: HashSet<CandidateId> = HashSet::new();
+    for (_, e) in &events {
+        match &e.kind {
+            EventKind::Committed { candidate, .. } => committed.push(*candidate),
+            EventKind::Dispatched { candidate, .. } => {
+                dispatched.insert(*candidate);
+            }
+            _ => {}
+        }
+    }
+    // Match on the args digest of the committed candidate, not just its id: the id also commits to
+    // the parents, which differ between the hook's mint and a fresh one.
+    for (_, e) in &events {
+        if let EventKind::Proposed { candidate } = &e.kind {
+            if candidate.kind == ActionKind::RunApprovedTest
+                && candidate.args == want
+                && committed.contains(&candidate.id)
+                && !dispatched.contains(&candidate.id)
+            {
+                return Ok(Some(candidate.id));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn last_parent(store: &Store, task: &TaskId) -> Vec<tsr_domain::EventId> {
@@ -255,16 +330,40 @@ fn append(
     Ok(id)
 }
 
-/// The candidate id an argv would produce (used by tests).
-pub fn candidate_for(argv: &[String]) -> CandidateId {
-    let args = Hash::of(&[argv.join("\u{0}").as_bytes()]);
-    Candidate::new(
-        ActionKind::RunApprovedTest,
-        Source::Rules,
-        args,
-        vec![],
-        vec![],
-    )
-    .expect("no conflicts")
-    .id
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_image_when_unset() {
+        // The default is a constant, so this holds regardless of the ambient environment.
+        assert_eq!(DEFAULT_IMAGE, "docker.io/library/debian:stable-slim");
+    }
+
+    #[test]
+    fn container_argv_uses_the_image_and_passes_argv_verbatim() {
+        let argv = vec!["cargo".to_string(), "test".to_string()];
+        let v = container_argv(Runtime::Docker, Path::new("/work"), &argv);
+        assert_eq!(v[0], "docker");
+        assert_eq!(v[1], "run");
+        // The image sits immediately before the argv, and the argv is passed verbatim.
+        let img_at = v.len() - argv.len() - 1;
+        assert_eq!(v[img_at], image());
+        assert_eq!(&v[img_at + 1..], &argv[..]);
+    }
+
+    #[test]
+    fn candidate_for_matches_the_hook_for_the_same_command() {
+        let argv: Vec<String> = ["cargo", "test", "--offline", "-p", "parser"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cmd = "cargo test --offline -p parser";
+        assert_eq!(
+            candidate_for(&argv),
+            crate::hook::candidate_for_action(ActionKind::RunApprovedTest, cmd)
+                .expect("hook candidate"),
+            "tsr exec and the hook must mint the same candidate for the same command"
+        );
+    }
 }
