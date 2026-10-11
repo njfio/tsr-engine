@@ -862,6 +862,8 @@ pub enum LabelStatus {
     Missing,
     /// The reviewer disputed the return.
     Disputed,
+    /// The reviewer rejected the return: it was green but the reviewer refused it (B7).
+    Rejected,
     /// The return is invalid: it cannot be scored.
     Invalid,
 }
@@ -875,6 +877,7 @@ impl LabelStatus {
             LabelStatus::Censored => "censored",
             LabelStatus::Missing => "missing",
             LabelStatus::Disputed => "disputed",
+            LabelStatus::Rejected => "rejected",
             LabelStatus::Invalid => "invalid",
         }
     }
@@ -887,6 +890,7 @@ impl LabelStatus {
             "censored" => LabelStatus::Censored,
             "missing" => LabelStatus::Missing,
             "disputed" => LabelStatus::Disputed,
+            "rejected" => LabelStatus::Rejected,
             "invalid" => LabelStatus::Invalid,
             _ => return None,
         })
@@ -1226,12 +1230,4 @@ mod tests {
             Probability::new(0.7).unwrap(),
             5,
         );
-        assert_ne!(f.id, g.id);
-    }
-
-    #[test]
-    fn proxy_prints_the_engineering_name_never_the_term() {
-        let ev = Proxy::new("ev", 0.42);
-        assert_eq!(ev.to_string(), "ev=0.42");
-    }
-}
+      
