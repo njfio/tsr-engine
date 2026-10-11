@@ -1,7 +1,10 @@
-# M0 evidence — the recorder, the executor, and reconstruction from the log alone
+# M0 evidence — the honest record: forecast, hook, exec, selftest
 
-Milestone M0 (PRD §B11). Every command below was run from the workspace root with the sandbox's
-cargo environment:
+Milestone M0 (PRD §B11), repaired by `specs/lanes/01b-honest-record.md`. The hook records **only
+what happened**: a forecast enters the log through `tsr forecast` *before* the tool call, the hook
+never fabricates one, and a command that ran on the host is recorded as having run on the host.
+
+Every command below was run from the workspace root with the sandbox's cargo environment:
 
 ```bash
 export CARGO_HOME="$PWD/.cargo-home"
@@ -12,12 +15,35 @@ export PATH="/usr/local/cargo/bin:$PATH"
 
 | Deliverable | Where |
 | --- | --- |
+| `tsr forecast --kind <…> --args <…> --p <…> --source <…>` (and `--event <id>`) | `crates/tsr-cli/src/main.rs::run_forecast`, `crates/tsr-cli/src/hook.rs::record_forecast_for_action` / `record_forecast_for_candidate` |
+| The one shared args digest both paths use | `crates/tsr-cli/src/hook.rs::args_digest` |
 | `tsr hook --stage <PreToolUse\|PostToolUse\|SessionStart\|Stop>` | `crates/tsr-cli/src/hook.rs`, wired in `crates/tsr-cli/src/main.rs` |
-| `tsr exec -- <argv>` (sealed sibling container) | `crates/tsr-cli/src/exec.rs` |
+| `tsr exec -- <argv>` (sealed sibling container, stdout/stderr passthrough) | `crates/tsr-cli/src/exec.rs` |
 | `tsr task open \| status \| export <id>` | `crates/tsr-cli/src/task.rs` |
-| `tsr forecast --event <id> --p <0..1> --source <…>` | `crates/tsr-cli/src/hook.rs::record_forecast` |
 | `tsr_cli::reconstruct::from_events` | `crates/tsr-cli/src/lib.rs` |
 | Hook self-test harness + fixture | `crates/tsr-cli/src/hook.rs::selftest`, `fixtures/m0/session.events.jsonl` |
+
+## The honest flow
+
+A gated action (`run_approved_test`, `propose_patch`, `request_approval`) is forecast **before** the
+tool call, and the forecast is what makes the commitment legitimate:
+
+1. **`tsr forecast`** mints the candidate exactly as the hook would for the same tool call — same
+   `ActionKind`, same args digest (`args_digest`: for `Bash` the digest is over the command string,
+   for `Edit`/`Write` over the file path). It appends `Proposed { candidate }` unless a pending
+   `Proposed` with that id already exists, then appends `Forecast { candidate, state_version }`
+   where `state_version` is the index the next event will occupy — the number of events in the task
+   after the forecast itself is appended.
+2. **`tsr hook --stage PreToolUse`** for a gated action computes the candidate. If a pending
+   `Proposed` with the same candidate id exists (proposed, not yet committed) it records `Committed`
+   only. Otherwise it records `Proposed` + `Committed` with **no forecast** — such a session fails
+   the M0 invariant, which is the truth.
+3. **Dispatch.** If the `Bash` command is a `tsr exec -- …` invocation (first token's basename `tsr`,
+   optionally with a path prefix, second token `exec`) the hook records nothing further: `tsr exec`
+   records the dispatch itself. Any other `Bash` test run records `Dispatched { in_sandbox: false }`
+   — a host run was observed — and `PostToolUse` records `Executed` / `Unresolved` as before.
+
+After this repair the only `in_sandbox: true` in `crates/tsr-cli/src` is in `exec.rs`.
 
 ## The commands and their captured output
 
@@ -25,25 +51,32 @@ export PATH="/usr/local/cargo/bin:$PATH"
 
 ```
 $ cargo build --workspace
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.03s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.89s
 
-$ cargo fmt --check
+$ cargo fmt --check && echo "fmt OK"
 fmt OK
 
 $ cargo clippy --workspace --all-targets -- -D warnings
-    Checking tsr-cli v0.0.1 (/work/crates/tsr-cli)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.34s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.70s
 ```
 
-### The whole test suite, including the M0 exit test
+### The whole test suite
 
 ```
 $ cargo test --workspace --no-fail-fast
+     Running unittests src/lib.rs (tsr_cli)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
      Running tests/m0_harness.rs
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 8 tests
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
      Running tests/m0_reconstruct.rs
+running 1 test
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests/policy_check.rs
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
      Running unittests src/lib.rs (tsr_domain)
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
@@ -52,39 +85,106 @@ test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-`crates/tsr-cli/tests/m0_reconstruct.rs` is green **with its assertions unchanged**.
+### `tsr forecast` — how a forecast enters the log
 
-### No container runtime is present in this sandbox
-
-```
-$ command -v podman docker ; echo "exit=$?"
-exit=127
-```
-
-Neither `podman` nor `docker` exists here, so the exec path exercised in this workspace is the
-refusal path (exit 3, nothing recorded). The container invocation itself is covered by
-`exec.rs::container_argv` and is not runnable in this sandbox.
-
-### `tsr exec` refuses with exit 3 when no runtime is reachable
+`tsr forecast` names the action and its arguments; it mints the candidate the hook would mint for the
+same tool call, appends `Proposed` (unless one is already pending), then `Forecast`:
 
 ```
-$ ./target/debug/tsr exec -- true ; echo "exit=$?"
-tsr: no container runtime reachable (podman/docker); refusing to run on the host
-exit=3
+$ export TSR_DB="$PWD/.tsr-verify/tsr.db"; rm -rf .tsr-verify
+$ ID=$(./target/debug/tsr task open --name demo --workspace /w --intent "test the cli"); echo "$ID"
+e7a3404c4b49c4ed80bb0dae5703fe45d450bb2a01292103d4934315bbce6212
+
+$ ./target/debug/tsr forecast --kind run_approved_test --args "cargo test --offline -p parser" \
+    --p 0.7 --source generator --task "$ID"
+52bc63a8bea5a85ebc7281d5faf69dde8c6b6c3e9ae9cb49754755a2368bc910
+
+$ ./target/debug/tsr task export "$ID" | wc -l
+4
 ```
 
-The decision is made in `crates/tsr-cli/src/exec.rs`:
+The `--event <proposed-event-id>` alternative records a forecast for an already-proposed candidate.
+A gated tool call with no prior forecast records `Proposed` + `Committed`; the forecast is then
+appended for that same candidate:
 
-- `Runtime::detect()` (exec.rs:40) returns `None` when neither `podman` nor `docker` is on `PATH`
-  and answers `--version`;
-- `run()` (exec.rs:120) returns `Err(ExecRefusal::NoRuntime)` (exec.rs:128) **before** any event is
-  appended, so nothing is recorded;
-- `main.rs::run_exec` (main.rs:288) maps that refusal to `ExitCode::from(EXIT_NO_RUNTIME)` = 3
-  (main.rs:300-304, `EXIT_NO_RUNTIME` defined at exec.rs:20).
+```
+$ ./target/debug/tsr forecast --event e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3 \
+    --p 0.7 --source generator --task event-session
+34387cb3b3466fe25e7698319f894e9aa5428a4bbb23f9d00723e7d8aafe9ec7
+```
 
-The agent's argv is never handed to the host: the only `Command` built is the container runtime
-invocation (`container_argv`, exec.rs:76), and the argv is passed as arguments to it, never
-interpolated into a shell string.
+### The honest hook flow
+
+A forecast before the tool call, then the `PreToolUse` for the same command: the hook records
+`Committed` only — no second `Proposed`, no second `Forecast` — and a host `Bash` run is dispatched
+with `in_sandbox: false`:
+
+```
+$ export TSR_DB="$PWD/.tsr-happy/tsr.db"; rm -rf .tsr-happy
+$ S=happy-session
+$ echo '{"session_id":"'"$S"'","hook_event_name":"SessionStart","cwd":"/w"}' \
+    | ./target/debug/tsr hook --stage SessionStart
+$ ./target/debug/tsr forecast --kind run_approved_test --args "cargo test --offline -p parser" \
+    --p 0.7 --source generator --task "$S"
+$ echo '{"session_id":"'"$S"'","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test --offline -p parser"}}' \
+    | ./target/debug/tsr hook --stage PreToolUse
+$ ./target/debug/tsr task export "$S" | python3 -c '...'   # print seq + kind
+1 task_opened
+2 proposed
+3 forecast state_version=3
+4 committed
+5 dispatched in_sandbox=False
+```
+
+The `Committed` at seq 4 has a prior `Forecast` at `state_version = 3` — the index the `Committed`
+event occupies (0-based) — so `every_gated_action_has_prior_forecast_at_same_state_version()` holds.
+
+A raw `cargo test` `Bash` with **no** prior forecast records `Proposed` + `Committed` and no
+forecast — the truth, and the frozen test rejects it:
+
+```
+$ export TSR_DB="$PWD/.tsr-host/tsr.db"; rm -rf .tsr-host
+$ S=host-session
+$ echo '{"session_id":"'"$S"'","hook_event_name":"SessionStart","cwd":"/w"}' \
+    | ./target/debug/tsr hook --stage SessionStart
+$ echo '{"session_id":"'"$S"'","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test --offline -p parser"}}' \
+    | ./target/debug/tsr hook --stage PreToolUse
+$ ./target/debug/tsr task export "$S" | python3 -c '...'
+1 task_opened
+2 proposed
+3 committed
+4 dispatched in_sandbox=False
+```
+
+A `tsr exec -- …` `Bash` records `Committed` and **no** `Dispatched` from the hook — `tsr exec`
+records the dispatch itself:
+
+```
+$ export TSR_DB="$PWD/.tsr-repro/tsr.db"; rm -rf .tsr-repro
+$ S=repro-session
+$ echo '{"session_id":"'"$S"'","hook_event_name":"SessionStart","cwd":"/w"}' \
+    | ./target/debug/tsr hook --stage SessionStart
+$ ./target/debug/tsr forecast --kind run_approved_test --args "cargo test --offline -p parser" \
+    --p 0.7 --source generator --task "$S"
+$ echo '{"session_id":"'"$S"'","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tsr exec -- cargo test --offline -p parser"}}' \
+    | ./target/debug/tsr hook --stage PreToolUse
+$ ./target/debug/tsr task export "$S" | python3 -c '...'
+1 task_opened
+2 proposed candidate=e07bad41b1e4
+3 forecast state_version=3
+4 proposed candidate=846b7fac29f2
+5 committed candidate=846b7fac29f2
+```
+
+> **Known defect (open).** The last block is the honest record of a real bug: the hook digests the
+> full `tsr exec -- …` command string, so its candidate (`846b7fac…`) differs from the forecast's
+> candidate for the bare command (`e07bad41…`), and the hook records a second `Proposed`. The
+> self-test harness forecasts the bare command but sends the full `tsr exec -- …` command to the
+> hook, so the fixture it writes would fail
+> `every_gated_action_has_prior_forecast_at_same_state_version`. The fix is to make the two agree —
+> either the harness forecasts the full command string, or the hook strips the `tsr exec --` prefix
+> when it digests a `tsr exec` call. Reported to the implementer; this section is updated when it
+> lands.
 
 ### The hook records and never blocks
 
@@ -96,95 +196,67 @@ exit=0
 
 Every hook path exits 0 and emits no `deny`/`block` decision (M0 records and never blocks).
 
-### The self-test harness writes the fixture
+### The only `in_sandbox: true` is in `exec.rs`
 
 ```
-$ ./target/debug/tsr hook --selftest
-wrote fixtures/m0/session.events.jsonl
+$ grep -rn "in_sandbox: true" crates/tsr-cli/src
+crates/tsr-cli/src/hook.rs:18://! observed; only `tsr exec` records `in_sandbox: true`.
+crates/tsr-cli/src/exec.rs:136:/// in that case **nothing is recorded**. Otherwise it records `Dispatched { in_sandbox: true }`
+crates/tsr-cli/src/exec.rs:196:            in_sandbox: true,
+crates/tsr-cli/src/lib.rs:22:    //! - every command ran in the sealed sandbox (`Dispatched { in_sandbox: true }`), never on the
 ```
 
-The harness drives realistic Claude Code payloads through the hook — a task opened, two
-inspections, a forecast, a sandboxed test run, a patch proposal, a forecast, a second run, a stop —
-and writes the trace as `events.jsonl`. The recorded sequence:
+The only non-comment occurrence is `exec.rs:196`.
+
+### `tsr exec` refuses with exit 3 when no runtime is reachable
 
 ```
-seq  kind
-1    task_opened
-2    proposed          (inspect)
-3    committed         (inspect)
-4    proposed          (inspect)
-5    committed         (inspect)
-6    forecast          sv=6
-7    proposed          (run_approved_test)
-8    forecast          sv=8
-9    committed         (run_approved_test)
-10   dispatched        in_sandbox=true
-11   executed
-12   proposed          (propose_patch)
-13   forecast          sv=13
-14   committed         (propose_patch)
-15   forecast          sv=15
-16   proposed          (run_approved_test)
-17   forecast          sv=17
-18   committed         (run_approved_test)
-19   dispatched        in_sandbox=true
-20   executed
-21   stop
+$ command -v podman docker ; echo "exit=$?"
+exit=127
+
+$ ./target/debug/tsr exec -- true ; echo "exit=$?"
+tsr: no container runtime reachable (podman/docker); refusing to run on the host
+exit=3
 ```
 
-Each gated commitment (seq 9, 14, 18) has a forecast whose `state_version` equals the commitment's
-0-based index in the file (8, 13, 17) — the B5 invariant, checked by the exit test.
+The refusal is decided in `Runtime::detect()` and acted on in `run()` **before** any event is
+appended, so nothing is recorded. The container image is read from `TSR_EXEC_IMAGE` (default
+`docker.io/library/debian:stable-slim`). After the container run, `tsr exec` copies the captured
+stdout and stderr to the caller's stdout and stderr and exits with the child's exit code, so an
+agent running `tsr exec -- cargo test …` sees the result.
 
-### `tsr task` and `tsr forecast`
-
-```
-$ export TSR_DB="$PWD/.tsr-verify/tsr.db"; rm -rf .tsr-verify
-$ ID=$(./target/debug/tsr task open --name demo --workspace /w --intent "test the cli"); echo "$ID"
-e7a3404c4b49c4ed80bb0dae5703fe45d450bb2a01292103d4934315bbce6212
-
-$ ./target/debug/tsr task status "$ID"
-task e7a3404c4b49c4ed80bb0dae5703fe45d450bb2a01292103d4934315bbce6212: 2 events
-
-$ ./target/debug/tsr forecast --event task_accepted_in_budget@v1 --p 0.7 --source generator --task "$ID"
-4dae43ed3b4bd2938f1c98302b873f2451da57b5c145a3bae71880fbca2da4e1
-
-$ ./target/debug/tsr task export "$ID" | head -1
-{"event":{"id":"a70c9c31…","kind":{"kind":"task_opened",…},"seq":1}
-
-$ ./target/debug/tsr task export "$ID" | wc -l
-2
-
-$ ./target/debug/tsr task export demo | wc -l
-2
-```
-
-`status`, `export` and `forecast --task` accept the 64-hex id that `open` prints, the task name, and
-the session id the hook uses (`store_path::resolve_task` tries a raw 64-hex id, then the
-session-hash id, then the name-hash id). The session trace exports in seq order:
+### The self-test harness refuses rather than fabricate
 
 ```
-$ TSR_DB="$PWD/fixtures/m0/session.db" ./target/debug/tsr task export m0-selftest-session | wc -l
-21
+$ ./target/debug/tsr hook --selftest ; echo "exit=$?"
+tsr: hook selftest: no container runtime reachable (podman/docker); refusing to fabricate the fixture
+exit=3
 ```
+
+The harness drives realistic Claude Code payloads through the honest flow — a task opened, two
+inspections, a forecast before each gated action, a test run through `tsr exec` in the real
+container, a patch proposal, a second run, a stop — and writes the trace as `events.jsonl`. With no
+container runtime reachable it prints why, exits 3 and writes nothing (the fixture's sha256 is
+unchanged: `ec174a76…`).
+
+## The fixture — regenerated by the operator on a host with Docker
+
+`fixtures/m0/session.events.jsonl` is produced by the tool under test (`tsr hook --selftest`), never
+written by hand. It cannot be regenerated in this sandbox: no `podman`/`docker` binary exists here
+(`command -v podman docker` → exit 127), and the self-test refuses rather than fabricate. The
+operator regenerates it on a host with Docker:
+
+```bash
+./target/debug/tsr hook --selftest
+```
+
+`crates/tsr-cli/tests/m0_reconstruct.rs` is the frozen exit test: it asserts on that fixture
+byte-for-byte and **may be red until the operator regenerates it**. Its assertions are unchanged by
+this repair. The reproducibility test in `tests/m0_harness.rs` skips with a printed reason when
+`exec::Runtime::detect()` is `None`, so the suite is green in a sandbox with no runtime.
 
 ## Notes
 
-- `crates/tsr-domain` was not touched by this lane; the additive changes it needed
+- `crates/tsr-domain` was not touched by this repair; the additive changes M0 needed
   (`EventKind::Stop`, `Forecast::new`, `Event::state_version`) landed in commit `608cf64`.
-- `crates/tsr-store`'s `latest_seq` / `append_all` helpers landed in the store lane.
-- The fixture is produced by the tool under test (`tsr hook --selftest`), never written by hand.
-
-## The commits
-
-```
-$ git log --oneline -10
-80a8140 cli: resolve task export/status by session id, name, or raw id
-db6aa10 harness: pin the selftest clock so the M0 fixture is reproducible
-de68ce0 store: latest_seq and append_all helpers (additive)
-c3662fc docs: add no-runtime and git-log evidence to m0-evidence
-c5e3361 docs: M0 evidence page and README hook registration
-ad9d810 cli: tsr hook/exec/task/forecast + reconstruct::from_events (M0)
-608cf64 contract: EventKind::Stop, Forecast::new, Event::state_version (additive, M0 hook needs)
-a525758 docs: keep the cargo cache inside the workspace when sandboxed
-6bbfeca chore: M0 skeleton — contract crate, append-only store, red M0 test, lane briefs
-```
+- The fixture is produced by the tool under test, never written by hand.
