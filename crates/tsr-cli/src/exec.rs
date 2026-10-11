@@ -594,7 +594,9 @@ mod tests {
         );
     }
 
-    /// The operator's real `tsr hook --selftest` record (fixtures/m0/session.events.jsonl), events
+    /// The operator's real `tsr hook --selftest` record from 4d8d7b8 — pinned at
+    /// tests/fixtures/m0/real-record-4d8d7b8.events.jsonl because fixtures/m0/session.events.jsonl is
+    /// regenerated on a host after this repair and no longer holds the defective sequence — events
     /// 1–18: two `Read`s, then a `tsr forecast` + PreToolUse Bash for `tsr exec -- cargo test
     /// --offline -p parser` (6–8), the dispatch and execution (9–10), the PostToolUse the hook
     /// wrongly proposed and committed (11–12), an Edit (13–15), and the *second* run of the same
@@ -602,7 +604,7 @@ mod tests {
     /// same id `e07bad41…`; the first occurrence was dispatched at 9, the second was not.
     const REAL_LISTING_EVENTS_1_TO_18: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/m0/session.events.jsonl"
+        "/tests/fixtures/m0/real-record-4d8d7b8.events.jsonl"
     ));
 
     /// Build a store holding the operator's real record, truncated to the first `n` events.
