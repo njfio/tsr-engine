@@ -18,12 +18,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bundle;
 pub mod dataset;
 pub mod decision;
 pub mod features;
 pub mod head;
 pub mod isotonic;
 pub mod probes;
+pub mod report;
 pub mod rng;
 pub mod support;
 pub mod synth;
