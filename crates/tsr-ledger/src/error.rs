@@ -1,6 +1,6 @@
 //! Refusals. A refusal is a typed value with a process exit code, so the CLI never invents one.
 
-use tsr_domain::{PreferenceId, Source};
+use tsr_domain::{ContrastId, PreferenceId, Source};
 use tsr_store::StoreError;
 
 /// Why a ledger write was refused.
@@ -19,6 +19,12 @@ pub enum LedgerError {
     /// A status names a preference that is not in the active view. Exit 2.
     #[error("preference {0} is not in the active view")]
     NotActive(PreferenceId),
+    /// An expansion names a contrast the log does not hold. Exit 2.
+    #[error("contrast {0} is not in the log")]
+    UnknownContrast(ContrastId),
+    /// An expansion names a contrast with no unmet criterion: nothing crossed. Exit 2.
+    #[error("contrast {0} has no unmet criterion; nothing crosses")]
+    ContrastWithoutUnmet(ContrastId),
     /// An expansion whose produced preference is not the content address of its own text. Exit 2.
     #[error("expansion produced {produced} but its text, scope and parents address {expected}")]
     ProducedMismatch {

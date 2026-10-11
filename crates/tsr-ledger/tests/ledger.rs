@@ -1,8 +1,8 @@
 //! The ledger's required behaviours (PRD §B11 M2 item 1), each as a test over a real store.
 
 use tsr_domain::{
-    ContrastId, Event, EventKind, Hash, Observation, Preference, PreferenceId, PreferenceStatus,
-    Scope, Source, TaskId,
+    ContrastId, CriterionId, Event, EventId, EventKind, Hash, Observation, Preference,
+    PreferenceId, PreferenceStatus, Scope, Source, TaskId, UnmetKind,
 };
 use tsr_ledger::{fold, normalize_text, Ledger, LedgerError};
 use tsr_store::Store;
@@ -21,8 +21,24 @@ fn scope() -> Scope {
     Scope::Task(task())
 }
 
-fn contrast() -> ContrastId {
-    ContrastId(Hash::of(&[b"c-1"]))
+/// A Contrast the log holds: the Filter's write rule refuses an expansion that names anything
+/// else, so a test that expands must first record the contrast it expands from.
+fn contrast(store: &Store) -> ContrastId {
+    let c = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"c-1"])),
+        from_return: EventId(Hash::of(&[b"return-1"])),
+        unmet: vec![(
+            CriterionId(Hash::of(&[b"criterion-1"])),
+            UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: vec![],
+    };
+    Ledger::new(store)
+        .record_contrast(&task(), vec![], c.clone(), "2026-01-01T00:00:00Z")
+        .expect("record the contrast");
+    c.id
 }
 
 /// A generator-origin preference is in the structure but absent from the active view until an
@@ -36,7 +52,7 @@ fn generator_preference_waits_for_operator_open() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the retry budget is the dimension this contrast clarified",
             scope(),
             vec![],
@@ -81,7 +97,7 @@ fn operator_preference_is_open_on_arrival() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "rejected: the diff changed a public signature without a migration",
             scope(),
             vec![],
@@ -108,7 +124,7 @@ fn operator_only_statuses_are_refused_for_non_operator() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "a preference",
             scope(),
             vec![],
@@ -164,7 +180,7 @@ fn duplicate_normalized_text_in_same_scope_overlaps() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "The  Retry   Budget",
             scope(),
             vec![],
@@ -177,7 +193,7 @@ fn duplicate_normalized_text_in_same_scope_overlaps() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the retry budget",
             scope(),
             vec![],
@@ -227,7 +243,7 @@ fn a_later_return_meeting_the_criterion_fulfils() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the criterion: the suite passes on the merged head",
             scope(),
             vec![],
@@ -279,7 +295,7 @@ fn fold_is_deterministic_and_root_is_the_store_head() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "first",
             scope(),
             vec![],
@@ -292,7 +308,7 @@ fn fold_is_deterministic_and_root_is_the_store_head() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "second",
             scope(),
             vec![a],
@@ -368,7 +384,7 @@ fn expanded_event_round_trips_and_rebuilds_the_preference() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the dimension this contrast clarified",
             scope(),
             vec![],
@@ -379,7 +395,10 @@ fn expanded_event_round_trips_and_rebuilds_the_preference() {
         .expect("expand");
 
     let events = store.all().expect("all");
-    let (_, ev) = events.first().expect("one event");
+    let (_, ev) = events
+        .iter()
+        .find(|(_, e)| matches!(e.kind, EventKind::Expanded { .. }))
+        .expect("an Expanded event");
     let payload = serde_json::to_string(ev).expect("serialize");
     let back: Event = serde_json::from_str(&payload).expect("deserialize");
     let EventKind::Expanded { expansion } = &back.kind else {
@@ -411,7 +430,7 @@ fn produced_mismatch_is_refused() {
 
     // A hand-built expansion whose `produced` does not address its content.
     let expansion = tsr_domain::Expansion {
-        from_contrast: contrast(),
+        from_contrast: ContrastId(Hash::of(&[b"c-1"])),
         produced: PreferenceId(Hash::of(&[b"not-the-address"])),
         catalyzed_by: vec![],
         text: "a preference".to_string(),

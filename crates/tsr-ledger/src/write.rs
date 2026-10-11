@@ -73,6 +73,13 @@ impl<'a> Ledger<'a> {
         origin: Source,
         recorded_at: impl Into<String>,
     ) -> Result<PreferenceId, LedgerError> {
+        // The Filter's write rule: only a Contrast the log holds, with at least one unmet
+        // criterion, may expand (PRD §B2.1). An expansion that names anything else is refused
+        // (exit 2), so the Filter is the only path from a return to a preference.
+        let contrast = self.contrast_in_log(&from_contrast)?;
+        if contrast.unmet.is_empty() {
+            return Err(LedgerError::ContrastWithoutUnmet(from_contrast));
+        }
         let preference = Preference::new(text, scope, preference_parents, origin)?;
         let expansion = Expansion {
             from_contrast,
@@ -102,6 +109,49 @@ impl<'a> Ledger<'a> {
         let ev = Event::new(*task, parents, origin, kind, recorded_at);
         self.store.append(&ev)?;
         Ok(expansion.produced)
+    }
+
+    /// Record a Contrast as an `Observed` event, so a later [`Ledger::expand`] may name it.
+    ///
+    /// The Filter's write rule (PRD §B2.1) admits an expansion only from a Contrast the log
+    /// holds; this is how a contrast enters the log. Returns the appended event's id.
+    pub fn record_contrast(
+        &self,
+        task: &TaskId,
+        parents: Vec<EventId>,
+        contrast: tsr_domain::Contrast,
+        recorded_at: impl Into<String>,
+    ) -> Result<EventId, LedgerError> {
+        let kind = EventKind::Observed {
+            observation: tsr_domain::Observation::Return {
+                surprise: Vec::new(),
+                contrast: Some(contrast),
+            },
+        };
+        let ev = Event::new(*task, parents, Source::Rules, kind, recorded_at);
+        self.store.append(&ev)?;
+        Ok(ev.id)
+    }
+
+    /// The Contrast the log holds under `id`, or a refusal (exit 2) when it holds none.
+    ///
+    /// A Contrast travels inside an `Observed` event as `Observation::Return { contrast }`; the
+    /// log is the only store, so the fold reads it back from there.
+    fn contrast_in_log(&self, id: &ContrastId) -> Result<tsr_domain::Contrast, LedgerError> {
+        for (_, ev) in self.store.all()? {
+            if let EventKind::Observed {
+                observation:
+                    tsr_domain::Observation::Return {
+                        contrast: Some(c), ..
+                    },
+            } = &ev.kind
+            {
+                if c.id == *id {
+                    return Ok(c.clone());
+                }
+            }
+        }
+        Err(LedgerError::UnknownContrast(*id))
     }
 
     /// Append a status. `withdrawn` and `out_of_scope` are operator-only: refused with exit 2 when

@@ -15,7 +15,7 @@ use tsr_cli::review_cmd::{
     Label, LabelRow, ReviewArgs,
 };
 use tsr_domain::{
-    Event, EventKind, Hash, LabelStatus, Observation, PreferenceStatus, Source, TaskId,
+    Event, EventKind, Hash, LabelStatus, Observation, PreferenceStatus, Source, TaskId, UnmetKind,
 };
 use tsr_ledger::Ledger;
 use tsr_store::Store;
@@ -47,12 +47,26 @@ fn append_return(store: &Store, task: &TaskId, seed: u8) -> tsr_domain::EventId 
 /// Open a preference on the task through an Expansion, so `catalyzed_by` has something to name.
 fn open_preference(store: &Store, task: &TaskId, text: &str) -> tsr_domain::PreferenceId {
     let ledger = Ledger::new(store);
-    let contrast = tsr_domain::ContrastId(Hash::of(&[b"contrast", text.as_bytes()]));
+    // The Filter's write rule admits an expansion only from a Contrast the log holds.
+    let contrast = tsr_domain::Contrast {
+        id: tsr_domain::ContrastId(Hash::of(&[b"contrast", text.as_bytes()])),
+        from_return: tsr_domain::EventId(Hash::of(&[b"return", text.as_bytes()])),
+        unmet: vec![(
+            tsr_domain::CriterionId(Hash::of(&[b"criterion", text.as_bytes()])),
+            tsr_domain::UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: Vec::new(),
+    };
+    ledger
+        .record_contrast(task, Vec::new(), contrast.clone(), "unix:1")
+        .unwrap();
     ledger
         .expand(
             task,
             Vec::new(),
-            contrast,
+            contrast.id,
             text,
             tsr_domain::Scope::Task(*task),
             Vec::new(),
@@ -102,14 +116,42 @@ fn rejection_appends_record_and_operator_preference() {
         other => panic!("expected an outcome record, got {other:?}"),
     }
 
-    // 2. The rejection reason entered the ledger as an Operator preference through an Expansion.
+    // 2. The rejection reason entered the ledger as a Contrast (Rejected(reason)) recorded in an
+    //    Observed event, and the Filter expanded it into an Operator preference that names the
+    //    dimension ("rejection"), never the failed strategy's content (PRD §B2.1, lane 04 item 2).
+    let after = store.by_task(&t).unwrap();
+    let contrast = after
+        .iter()
+        .find_map(|(_, e)| match &e.kind {
+            EventKind::Observed {
+                observation: Observation::Return { contrast, .. },
+            } => contrast.as_ref().filter(|c| {
+                c.unmet.iter().any(|(_, kind)| {
+                    matches!(kind, UnmetKind::Rejected { reason } if reason == "touched the schema")
+                })
+            }),
+            _ => None,
+        })
+        .expect("the rejection wrote a Contrast through the Filter");
+    assert!(
+        contrast.unmet.iter().any(|(_, kind)| matches!(
+            kind,
+            UnmetKind::Rejected { reason } if reason == "touched the schema"
+        )),
+        "the Contrast carries the rejection reason as Rejected(reason)"
+    );
+
     let ledger = Ledger::new(&store);
     let view = ledger.active_for_task(&t).unwrap();
     let rejection = view
         .entries
         .iter()
-        .find(|e| e.preference.text.contains("touched the schema"))
+        .find(|e| e.preference.text.contains("rejection"))
         .expect("the rejection reason is a preference");
+    assert!(
+        !rejection.preference.text.contains("touched the schema"),
+        "the produced preference names the dimension, never the strategy's content"
+    );
     assert_eq!(rejection.preference.origin, Source::Operator);
     assert_eq!(rejection.status, Some(PreferenceStatus::Open));
     assert!(
@@ -386,11 +428,25 @@ fn family_filter_matches_the_tasks_family_scope() {
     let t = task(11);
     let subject = append_return(&store, &t, 11);
     let ledger = Ledger::new(&store);
+    let contrast = tsr_domain::Contrast {
+        id: tsr_domain::ContrastId(Hash::of(&[b"family-contrast"])),
+        from_return: subject,
+        unmet: vec![(
+            tsr_domain::CriterionId(Hash::of(&[b"family-criterion"])),
+            tsr_domain::UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: Vec::new(),
+    };
+    ledger
+        .record_contrast(&t, Vec::new(), contrast.clone(), "unix:11")
+        .unwrap();
     ledger
         .expand(
             &t,
             Vec::new(),
-            tsr_domain::ContrastId(Hash::of(&[b"family-contrast"])),
+            contrast.id,
             "prefer small diffs",
             tsr_domain::Scope::Family("refactor".to_string()),
             Vec::new(),
@@ -414,4 +470,159 @@ fn family_filter_matches_the_tasks_family_scope() {
     let rows = label_rows(&store, &t).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].family.as_deref(), Some("refactor"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// D3 — the review rejection path: a rejection writes a Contrast through the Filter and expands
+// from it; `Ledger::expand` refuses a ContrastId with no Contrast event in the log, and refuses a
+// Contrast with no unmet criterion.
+// ---------------------------------------------------------------------------------------------
+
+/// D3: `Ledger::expand` refuses a ContrastId the log does not hold (exit 2 at the CLI).
+#[test]
+fn d3_expand_refuses_unknown_contrast_id() {
+    let store = Store::open_in_memory().unwrap();
+    let t = task(20);
+    let ledger = Ledger::new(&store);
+    let unknown = tsr_domain::ContrastId(Hash::of(&[b"no-such-contrast"]));
+    let err = ledger
+        .expand(
+            &t,
+            Vec::new(),
+            unknown,
+            "a preference from nowhere",
+            tsr_domain::Scope::Task(t),
+            Vec::new(),
+            Vec::new(),
+            Source::Operator,
+            "unix:20",
+        )
+        .expect_err("an unknown contrast id is refused");
+    assert!(
+        matches!(err, tsr_ledger::LedgerError::UnknownContrast(id) if id == unknown),
+        "the refusal names the unknown contrast: {err:?}"
+    );
+    assert_eq!(err.exit_code(), 2, "the refusal is exit 2");
+    // Nothing was appended: the log still holds no expansion.
+    let events = store.by_task(&t).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|(_, e)| matches!(e.kind, EventKind::Expanded { .. })),
+        "a refused expansion appends nothing"
+    );
+}
+
+/// D3: `Ledger::expand` refuses a Contrast that has no unmet criterion.
+#[test]
+fn d3_expand_refuses_contrast_without_unmet() {
+    let store = Store::open_in_memory().unwrap();
+    let t = task(21);
+    let subject = append_return(&store, &t, 21);
+    // A Contrast with an empty `unmet` list: nothing crossed, so nothing may expand.
+    let empty = tsr_domain::Contrast {
+        id: tsr_domain::ContrastId(Hash::of(&[b"empty-contrast"])),
+        from_return: subject,
+        unmet: Vec::new(),
+        evidence: vec![subject],
+    };
+    let observed = Event::new(
+        t,
+        Vec::new(),
+        Source::Rules,
+        EventKind::Observed {
+            observation: Observation::Return {
+                surprise: Vec::new(),
+                contrast: Some(empty.clone()),
+            },
+        },
+        "unix:21",
+    );
+    store.append(&observed).unwrap();
+
+    let ledger = Ledger::new(&store);
+    let err = ledger
+        .expand(
+            &t,
+            vec![observed.id],
+            empty.id,
+            "a preference from an empty contrast",
+            tsr_domain::Scope::Task(t),
+            Vec::new(),
+            Vec::new(),
+            Source::Operator,
+            "unix:21",
+        )
+        .expect_err("a contrast with no unmet criterion is refused");
+    assert!(
+        matches!(err, tsr_ledger::LedgerError::ContrastWithoutUnmet(id) if id == empty.id),
+        "the refusal names the empty contrast: {err:?}"
+    );
+    assert_eq!(err.exit_code(), 2, "the refusal is exit 2");
+}
+
+/// D3: a rejection writes the Contrast `{ unmet: Rejected(reason) }` through the Filter, expands
+/// from it, and the Mirror's Contrast section shows the rejection.
+#[test]
+fn d3_rejection_writes_contrast_and_mirror_shows_it() {
+    let store = Store::open_in_memory().unwrap();
+    let t = task(22);
+    let subject = append_return(&store, &t, 22);
+    let reason = "regresses span offsets";
+
+    record_label(
+        &store,
+        &t,
+        subject,
+        Label::Rejected,
+        Some(reason.to_string()),
+        None,
+        None,
+        "unix:22",
+    )
+    .unwrap();
+
+    // 1. The log holds a Contrast event whose unmet criterion is Rejected(reason).
+    let events = store.by_task(&t).unwrap();
+    let contrast = events
+        .iter()
+        .find_map(|(_, e)| match &e.kind {
+            EventKind::Observed {
+                observation: Observation::Return { contrast, .. },
+            } => contrast.clone(),
+            _ => None,
+        })
+        .expect("the rejection wrote a Contrast event");
+    assert_eq!(contrast.from_return, subject);
+    assert_eq!(contrast.unmet.len(), 1, "one unmet criterion");
+    match &contrast.unmet[0].1 {
+        tsr_domain::UnmetKind::Rejected { reason: r } => assert_eq!(r, reason),
+        other => panic!("expected Rejected(reason), got {other:?}"),
+    }
+
+    // 2. The Expansion names that Contrast, so the Filter is the only path to expansion.
+    let expansion = events
+        .iter()
+        .find_map(|(_, e)| match &e.kind {
+            EventKind::Expanded { expansion } => Some(expansion.clone()),
+            _ => None,
+        })
+        .expect("the rejection expanded");
+    assert_eq!(
+        expansion.from_contrast, contrast.id,
+        "the expansion names the written contrast"
+    );
+
+    // 3. The Mirror's Contrast section shows the rejection.
+    let root = store.head_root().unwrap();
+    let mirror = tsr_cli::reflect_cmd::build_mirror(&t, &events, root);
+    assert!(
+        mirror
+            .residual
+            .contrast
+            .iter()
+            .any(|c| c.unmet == "rejected" && c.reason.as_deref() == Some(reason)),
+        "the Mirror's Contrast section shows the rejection: {:?}",
+        mirror.residual.contrast
+    );
 }

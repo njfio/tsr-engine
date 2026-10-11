@@ -56,6 +56,14 @@ fn a_return(store: &Store) -> EventId {
     ev.id
 }
 
+/// Record a Contrast through the Filter, so `Ledger::expand` finds it in the log (D3: expansion
+/// refuses a contrast id with no Contrast event). Returns the `Observed` event's id.
+fn record_contrast(store: &Store, contrast: &tsr_domain::Contrast, at: &str) -> EventId {
+    Filter::new(store)
+        .record_return(&task(), vec![], vec![], Some(contrast.clone()), at)
+        .expect("record the contrast")
+}
+
 fn expanded_count(store: &Store) -> usize {
     store
         .all()
@@ -130,6 +138,8 @@ fn contrast_with_an_unmet_criterion_expands_with_lineage() {
         vec![(criterion("c-reliability"), UnmetKind::WrongBehaviour)],
         evidence.clone(),
     );
+    // D3: the contrast must exist in the log before `expand` will accept its id.
+    record_contrast(&store, &contrast, "2026-01-01T00:00:20Z");
 
     // A preference that made the contrast matter (catalyzed_by) and a lineage parent.
     let parent = ledger
@@ -205,6 +215,8 @@ fn produced_preference_names_the_dimension_not_the_strategy() {
         ],
         vec![ret],
     );
+    // D3: the contrast must exist in the log before `expand` will accept its id.
+    record_contrast(&store, &contrast, "2026-01-01T00:02:30Z");
 
     let produced = filter
         .expand_from_contrast(
@@ -256,6 +268,8 @@ fn evidence_is_referenced_never_copied() {
         vec![(criterion("c-cost"), UnmetKind::Cost)],
         evidence.clone(),
     );
+    // D3: the contrast must exist in the log before `expand` will accept its id.
+    record_contrast(&store, &contrast, "2026-01-01T00:03:30Z");
 
     let produced = filter
         .expand_from_contrast(
