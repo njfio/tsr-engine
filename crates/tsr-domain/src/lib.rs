@@ -1230,4 +1230,12 @@ mod tests {
             Probability::new(0.7).unwrap(),
             5,
         );
-      
+        assert_ne!(f.id, g.id);
+    }
+
+    #[test]
+    fn proxy_prints_the_engineering_name_never_the_term() {
+        let ev = Proxy::new("ev", 0.42);
+        assert_eq!(ev.to_string(), "ev=0.42");
+    }
+}
