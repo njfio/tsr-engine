@@ -11,14 +11,51 @@ state, authority, history, evaluation and release; a generative model proposes a
 
 ## Status
 
-M0 skeleton. The contract crate (`tsr-domain`) compiles with its invariant tests; the store enforces
-append-only in the database; the CLI names every command group and exits 2 where a milestone has
-not landed. One test is red by design — `crates/tsr-cli/tests/m0_reconstruct.rs` — and M0 is done
-when it is green with its assertions unchanged.
+M0 landed. The contract crate (`tsr-domain`) compiles with its invariant tests; the store enforces
+append-only in the database; the CLI records hook payloads, runs commands in a sealed sibling
+container, opens/statuses/exports tasks, records forecasts, and reconstructs a session from the log
+alone. `crates/tsr-cli/tests/m0_reconstruct.rs` is green with its assertions unchanged.
 
 ```bash
 cargo build --workspace
-cargo test --workspace --no-fail-fast     # 10 pass, 1 red (M0)
+cargo test --workspace --no-fail-fast     # all green
+```
+
+Evidence for every M0 command, with captured output: [`docs/m0-evidence.md`](docs/m0-evidence.md).
+
+## Registering `tsr hook` in Claude Code
+
+`tsr hook` reads one Claude Code hook JSON payload on stdin and appends typed events to the store.
+In M0 it records and never blocks: it always exits 0 and never emits a `deny`/`block` decision.
+
+Add the hook to your Claude Code settings (`~/.claude/settings.json`, or a project
+`.claude/settings.json`). Point `command` at the built binary (or an installed `tsr` on `PATH`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "/path/to/tsr hook --stage PreToolUse" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "/path/to/tsr hook --stage PostToolUse" } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "/path/to/tsr hook --stage SessionStart" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "/path/to/tsr hook --stage Stop" } ] }
+    ]
+  }
+}
+```
+
+The store location is taken from `TSR_DB` (default `.tsr/tsr.db` under the working directory). To
+see the recorder work end to end without Claude Code, run the self-test harness, which drives
+realistic payloads through the hook and writes `fixtures/m0/session.events.jsonl`:
+
+```bash
+./target/debug/tsr hook --selftest
 ```
 
 ## Layout
