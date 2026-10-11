@@ -18,7 +18,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dataset;
 pub mod decision;
+pub mod features;
+pub mod probes;
 pub mod rng;
 
 pub use decision::{
