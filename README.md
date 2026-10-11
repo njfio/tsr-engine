@@ -42,6 +42,17 @@ Three rules follow:
    appends `Proposed` unless one is already pending, then `Forecast { candidate, state_version }`.
    Use `--event <proposed-event-id>` to forecast an already-proposed candidate instead.
 
+   **Which task a forecast lands in.** `tsr forecast` and `tsr exec` resolve the session with the
+   same rule the hook uses, in this order: an explicit `--task <id>`; then `--session <id>` or
+   `TSR_SESSION`; then the `.tsr/session` file the hook writes beside the store on every stage
+   (nearest ancestor, so a tool run from a subdirectory still finds it). With none of these it
+   refuses with exit 2 and records nothing — there is no "latest task" and no `hash("default")`
+   fallback, because guessing is what let a forecast land in another session's task.
+
+   The session file names the session of the **last hook stage**, so two sessions sharing one working
+   directory cannot be told apart by the file alone: each must name itself with `TSR_SESSION` (or
+   `--session`). The file is the single-session default.
+
 2. **Run every command through `tsr exec -- …`.** A `Bash` test run that is a `tsr exec -- …`
    invocation records its own dispatch inside `tsr exec` (`Dispatched { in_sandbox: true }` +
    `Executed`); the hook records nothing further for it. Any other `Bash` test run is recorded as

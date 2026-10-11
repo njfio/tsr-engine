@@ -116,6 +116,32 @@ $ ./target/debug/tsr task export "$ID" | wc -l
 ```
 
 The `--event <proposed-event-id>` alternative records a forecast for an already-proposed candidate.
+
+**Which task a forecast lands in.** `tsr forecast` and `tsr exec` resolve the session with the same
+rule the hook uses, in this order: an explicit `--task <id>`; then `--session <id>` or `TSR_SESSION`;
+then the `.tsr/session` file the hook writes beside the store on every stage (nearest ancestor). With
+none of these it refuses with exit 2 and records nothing — there is no "latest task" and no
+`hash("default")` fallback. The session file names the session of the **last hook stage**, so two
+sessions sharing one working directory must each name themselves with `TSR_SESSION` (or `--session`).
+
+Two sessions open, one forecast, one `PreToolUse` in session A — the forecast lands in A, and B holds
+only its own `task_opened`:
+
+```
+$ export TSR_DB=$PWD/target/rep17/tsr.db
+$ echo '{"session_id":"sess-A","hook_event_name":"SessionStart","cwd":"/work"}' | ./target/debug/tsr hook --stage SessionStart
+$ echo '{"session_id":"sess-B","hook_event_name":"SessionStart","cwd":"/work"}' | ./target/debug/tsr hook --stage SessionStart
+$ TSR_SESSION=sess-A ./target/debug/tsr forecast --kind run_approved_test --args "cargo test --offline -p parser" --p 0.7 --source generator
+$ echo '{"session_id":"sess-A","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tsr exec -- cargo test --offline -p parser"}}' | ./target/debug/tsr hook --stage PreToolUse
+$ ./target/debug/tsr task export sess-A
+0 task_opened
+1 proposed
+2 forecast  state_version=3
+3 committed
+$ ./target/debug/tsr task export sess-B
+0 task_opened
+```
+
 A gated tool call with no prior forecast records `Proposed` + `Committed`; the forecast is then
 appended for that same candidate:
 

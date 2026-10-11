@@ -35,10 +35,21 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// Run `tsr <args>` against `db`, feeding `stdin` if given. Returns (exit code, stdout, stderr).
-fn run_tsr(db: &PathBuf, args: &[&str], stdin: Option<&str>) -> (i32, String, String) {
+/// Run `tsr <args>` against `db` with `cwd` as the working directory, feeding `stdin` if given.
+/// Returns (exit code, stdout, stderr).
+///
+/// The working directory matters: the hook writes `<cwd>/.tsr/session` and `tsr forecast` /
+/// `tsr exec` read it, so each test runs in its own scratch directory to keep the session file
+/// private to that test.
+fn run_tsr_in(
+    db: &PathBuf,
+    cwd: &PathBuf,
+    args: &[&str],
+    stdin: Option<&str>,
+) -> (i32, String, String) {
     let mut cmd = Command::new(tsr_bin());
     cmd.args(args)
+        .current_dir(cwd)
         .env("TSR_DB", db)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -102,21 +113,24 @@ fn forecast_without_task_records_into_the_hook_session_task() {
     let db = dir.join("tsr.db");
     let session = "dod-session";
     let cmd = "cargo test --offline -p parser";
+    let cwd = dir.display().to_string();
 
-    // 1. SessionStart opens the session's task.
-    let (code, _, err) = run_tsr(
+    // 1. SessionStart opens the session's task and writes `<cwd>/.tsr/session`.
+    let (code, _, err) = run_tsr_in(
         &db,
+        &dir,
         &["hook", "--stage", "SessionStart"],
         Some(&format!(
-            r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"/work"}}"#
+            r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"{cwd}"}}"#
         )),
     );
     assert_eq!(code, 0, "SessionStart exits 0: stderr={err}");
 
     // 2. The forecast enters the log first, naming the action — with NO `--task`, exactly as the
-    //    DoD and README document it.
-    let (code, forecast_out, err) = run_tsr(
+    //    DoD and README document it. It resolves the session from the file SessionStart wrote.
+    let (code, forecast_out, err) = run_tsr_in(
         &db,
+        &dir,
         &[
             "forecast",
             "--kind",
@@ -137,8 +151,9 @@ fn forecast_without_task_records_into_the_hook_session_task() {
     );
 
     // 3. The gated tool call follows.
-    let (code, _, err) = run_tsr(
+    let (code, _, err) = run_tsr_in(
         &db,
+        &dir,
         &["hook", "--stage", "PreToolUse"],
         Some(&format!(
             r#"{{"session_id":"{session}","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"{cmd}"}}}}"#
@@ -207,18 +222,21 @@ fn forecast_with_an_explicit_task_still_records_into_that_task() {
     let db = dir.join("tsr.db");
     let session = "explicit-session";
     let cmd = "cargo test --offline -p parser";
+    let cwd = dir.display().to_string();
 
-    let (code, _, err) = run_tsr(
+    let (code, _, err) = run_tsr_in(
         &db,
+        &dir,
         &["hook", "--stage", "SessionStart"],
         Some(&format!(
-            r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"/work"}}"#
+            r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"{cwd}"}}"#
         )),
     );
     assert_eq!(code, 0, "SessionStart exits 0: stderr={err}");
 
-    let (code, _, err) = run_tsr(
+    let (code, _, err) = run_tsr_in(
         &db,
+        &dir,
         &[
             "forecast",
             "--kind",
@@ -236,8 +254,9 @@ fn forecast_with_an_explicit_task_still_records_into_that_task() {
     );
     assert_eq!(code, 0, "tsr forecast --task exits 0: stderr={err}");
 
-    let (code, _, err) = run_tsr(
+    let (code, _, err) = run_tsr_in(
         &db,
+        &dir,
         &["hook", "--stage", "PreToolUse"],
         Some(&format!(
             r#"{{"session_id":"{session}","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"{cmd}"}}}}"#
@@ -266,15 +285,17 @@ fn forecast_with_an_explicit_task_still_records_into_that_task() {
     );
 }
 
-/// With no task in the store at all, `tsr forecast` still records (into the `hash("default")`
-/// fallback) rather than erroring — the fallback is only for an empty store.
+/// With no session known — no `--task`, no `TSR_SESSION`, no `.tsr/session` file — `tsr forecast`
+/// refuses with exit 2 and records nothing. There is no "latest task" and no `hash("default")`
+/// fallback: guessing is exactly the ambiguity that let a forecast land in another session's task.
 #[test]
-fn forecast_without_task_on_an_empty_store_still_records() {
-    let dir = scratch("empty-store");
+fn forecast_without_a_session_refuses_and_records_nothing() {
+    let dir = scratch("no-session");
     let db = dir.join("tsr.db");
 
-    let (code, out, err) = run_tsr(
+    let (code, out, err) = run_tsr_in(
         &db,
+        &dir,
         &[
             "forecast",
             "--kind",
@@ -289,17 +310,253 @@ fn forecast_without_task_on_an_empty_store_still_records() {
         None,
     );
     assert_eq!(
-        code, 0,
-        "tsr forecast on an empty store exits 0: stderr={err}"
+        code, 2,
+        "tsr forecast with no session exits 2: stderr={err}"
     );
-    assert!(!out.trim().is_empty(), "it prints the forecast id");
+    assert!(out.trim().is_empty(), "it prints no forecast id");
+    assert!(
+        err.contains("no session"),
+        "the refusal names the reason: stderr={err}"
+    );
+
+    // Nothing was recorded anywhere: the store has no events at all.
+    let store = store_path::open_store_at(&db).expect("open store");
+    let default_task = store_path::task_for_session("default");
+    assert!(
+        kinds(&store, &default_task).is_empty(),
+        "no hash(\"default\") fallback task was written"
+    );
+}
+
+/// The architect's two-session repro: with two sessions open, a `--task`-less forecast must land in
+/// the *acting* session's task, not in whichever task the store opened most recently.
+///
+/// Before the fix, `tsr forecast` resolved its task with `latest_task` (the store's most recent
+/// `task_opened`) while the hook resolved with `hash(session_id)`. With session B opened after A, the
+/// forecast landed in B and A's log was `Proposed` + `Committed` with no `Forecast` — the M0
+/// invariant defeated by an ordinary situation. Now both paths read the session file SessionStart
+/// wrote, so the forecast lands in A.
+#[test]
+fn two_sessions_open_the_forecast_lands_in_the_acting_session() {
+    let dir = scratch("two-sessions");
+    let db = dir.join("tsr.db");
+    let cmd = "cargo test --offline -p parser";
+    let cwd = dir.display().to_string();
+
+    // Session A opens, then session B opens — B is the store's most recent task.
+    for session in ["sess-A", "sess-B"] {
+        let (code, _, err) = run_tsr_in(
+            &db,
+            &dir,
+            &["hook", "--stage", "SessionStart"],
+            Some(&format!(
+                r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"{cwd}"}}"#
+            )),
+        );
+        assert_eq!(code, 0, "SessionStart {session} exits 0: stderr={err}");
+    }
+
+    // The agent in session A forecasts, then acts. Two sessions share this cwd, so the session file
+    // names only the last SessionStart (B); A names itself with `TSR_SESSION`, the documented way a
+    // session disambiguates itself. The forecast must land in A, the acting session.
+    let mut forecast = Command::new(tsr_bin());
+    forecast
+        .args([
+            "forecast",
+            "--kind",
+            "run_approved_test",
+            "--args",
+            cmd,
+            "--p",
+            "0.7",
+            "--source",
+            "generator",
+        ])
+        .current_dir(&dir)
+        .env("TSR_DB", &db)
+        .env("TSR_SESSION", "sess-A")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = forecast.output().expect("run tsr forecast");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "tsr forecast exits 0: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let (code, _, err) = run_tsr_in(
+        &db,
+        &dir,
+        &["hook", "--stage", "PreToolUse"],
+        Some(&format!(
+            r#"{{"session_id":"sess-A","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"{cmd}"}}}}"#
+        )),
+    );
+    assert_eq!(code, 0, "PreToolUse exits 0: stderr={err}");
 
     let store = store_path::open_store_at(&db).expect("open store");
-    let task = store_path::task_for_session("default");
+    let task_a = store_path::task_for_session("sess-A");
+    let task_b = store_path::task_for_session("sess-B");
+
+    let tags_a: Vec<String> = kinds(&store, &task_a).into_iter().map(|(_, k)| k).collect();
+    assert_eq!(
+        tags_a,
+        vec![
+            "task_opened",
+            "proposed",
+            "forecast",
+            "committed",
+            "dispatched"
+        ],
+        "the forecast lands in the acting session A, before the commitment"
+    );
+    assert!(
+        reconstruct_task(&store, &task_a)
+            .every_gated_action_has_prior_forecast_at_same_state_version(),
+        "B5 holds for the acting session"
+    );
+
+    let tags_b: Vec<String> = kinds(&store, &task_b).into_iter().map(|(_, k)| k).collect();
+    assert_eq!(
+        tags_b,
+        vec!["task_opened"],
+        "session B, which did nothing, holds only its own task_opened"
+    );
+
+    // The limitation, asserted rather than hidden: the session file names the session of the *last
+    // hook stage*, so a `--task`-less forecast with no `TSR_SESSION` resolves to whatever session
+    // last ran a hook — here A (its PreToolUse ran last), not B. With two sessions sharing a cwd the
+    // file cannot tell them apart, which is why a session must name itself with `TSR_SESSION`; the
+    // file is the single-session default. (Documented in README's agent protocol.)
+    let (code, _, err) = run_tsr_in(
+        &db,
+        &dir,
+        &[
+            "forecast",
+            "--kind",
+            "run_approved_test",
+            "--args",
+            cmd,
+            "--p",
+            "0.7",
+            "--source",
+            "generator",
+        ],
+        None,
+    );
+    assert_eq!(code, 0, "file-only forecast exits 0: stderr={err}");
+    let tags_a_after: Vec<String> = kinds(&store, &task_a).into_iter().map(|(_, k)| k).collect();
+    assert_eq!(
+        tags_a_after,
+        vec![
+            "task_opened",
+            "proposed",
+            "forecast",
+            "committed",
+            "dispatched",
+            "proposed",
+            "forecast"
+        ],
+        "with no TSR_SESSION the file names the last hook stage's session (A)"
+    );
+    let tags_b_after: Vec<String> = kinds(&store, &task_b).into_iter().map(|(_, k)| k).collect();
+    assert_eq!(
+        tags_b_after,
+        vec!["task_opened"],
+        "session B never acted, so it stays task_opened only"
+    );
+}
+
+/// `tsr exec` resolves its task with the same session rule as the hook, so the committed-candidate
+/// reuse can fire. With no session known it refuses (exit 2) instead of falling back to
+/// `hash("default")`; with a session known it reaches the runtime check (exit 3 here, no runtime),
+/// which proves it resolved a task rather than refusing.
+#[test]
+fn exec_resolves_the_session_task_and_refuses_without_one() {
+    let dir = scratch("exec-session");
+    let db = dir.join("tsr.db");
+    let session = "exec-session-id";
+    let cwd = dir.display().to_string();
+
+    // No session yet: `tsr exec` refuses with exit 2 and records nothing.
+    let (code, _, err) = run_tsr_in(&db, &dir, &["exec", "--", "cargo", "test"], None);
+    assert_eq!(code, 2, "tsr exec with no session exits 2: stderr={err}");
+    assert!(
+        err.contains("no session"),
+        "the refusal names the reason: stderr={err}"
+    );
+
+    // SessionStart writes the session file; now `tsr exec` resolves the task and reaches the runtime
+    // check. No container runtime is reachable here, so it refuses with exit 3 and records nothing.
+    let (code, _, err) = run_tsr_in(
+        &db,
+        &dir,
+        &["hook", "--stage", "SessionStart"],
+        Some(&format!(
+            r#"{{"session_id":"{session}","hook_event_name":"SessionStart","cwd":"{cwd}"}}"#
+        )),
+    );
+    assert_eq!(code, 0, "SessionStart exits 0: stderr={err}");
+
+    let (code, _, err) = run_tsr_in(&db, &dir, &["exec", "--", "cargo", "test"], None);
+    assert_eq!(
+        code, 3,
+        "tsr exec with a session reaches the runtime check: stderr={err}"
+    );
+    assert!(
+        err.contains("no container runtime"),
+        "the refusal names the runtime: stderr={err}"
+    );
+
+    // Nothing was recorded: the task holds only its task_opened.
+    let store = store_path::open_store_at(&db).expect("open store");
+    let task = store_path::task_for_session(session);
+    let tags: Vec<String> = kinds(&store, &task).into_iter().map(|(_, k)| k).collect();
+    assert_eq!(tags, vec!["task_opened"], "a refused exec records nothing");
+}
+
+/// `TSR_SESSION` names the session explicitly, so `tsr forecast` resolves the same task the hook
+/// would for that session — the documented escape hatch when no session file is present.
+#[test]
+fn forecast_resolves_the_session_from_tsr_session_env() {
+    let dir = scratch("env-session");
+    let db = dir.join("tsr.db");
+    let session = "env-session-id";
+    let cmd = "cargo test --offline -p parser";
+
+    let mut cmd_proc = Command::new(tsr_bin());
+    cmd_proc
+        .args([
+            "forecast",
+            "--kind",
+            "run_approved_test",
+            "--args",
+            cmd,
+            "--p",
+            "0.7",
+            "--source",
+            "generator",
+        ])
+        .current_dir(&dir)
+        .env("TSR_DB", &db)
+        .env("TSR_SESSION", session)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = cmd_proc.output().expect("run tsr forecast");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "tsr forecast with TSR_SESSION exits 0: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let store = store_path::open_store_at(&db).expect("open store");
+    let task = store_path::task_for_session(session);
     let tags: Vec<String> = kinds(&store, &task).into_iter().map(|(_, k)| k).collect();
     assert_eq!(
         tags,
         vec!["proposed", "forecast"],
-        "an empty store falls back to hash(\"default\")"
+        "TSR_SESSION resolves to hash(session_id)"
     );
 }

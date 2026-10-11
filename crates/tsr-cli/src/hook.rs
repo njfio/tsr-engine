@@ -276,8 +276,13 @@ fn last_event(store: &Store, task: &TaskId) -> anyhow::Result<Option<Event>> {
 }
 
 /// The number of events in a task so far (its current state version).
+/// The number of events in `task` — the index the next event will occupy in this task's log.
+///
+/// This must be the task's own count, not the store's `latest_seq`: the store is shared by every
+/// session, so a global sequence number diverges from the per-task index as soon as a second task
+/// exists, and a forecast recorded against it would miss the commitment's state version.
 fn event_count(store: &Store, task: &TaskId) -> anyhow::Result<u64> {
-    Ok(store.latest_seq(task)?.unwrap_or(0) as u64)
+    Ok(store.by_task(task)?.len() as u64)
 }
 
 /// Append one event, chaining it to the task's last event.
@@ -295,9 +300,13 @@ fn append_chained(
     Ok(ev.id)
 }
 
-/// Record a `SessionStart`: the task is opened (B4: SessionStart opens the task).
+/// Record a `SessionStart`: the task is opened (B4: SessionStart opens the task), and the session
+/// identity is written to `<cwd>/.tsr/session` so `tsr forecast` / `tsr exec` resolve the same task.
 pub fn record_session_start(store: &Store, payload: &HookPayload) -> anyhow::Result<EventId> {
     let task = payload.task();
+    if payload.session_id.is_some() {
+        store_path::remember_session(&payload.session());
+    }
     append_chained(store, &task, Source::Rules, EventKind::TaskOpened { task })
 }
 
@@ -523,6 +532,13 @@ fn pending_dispatch(store: &Store, task: &TaskId) -> anyhow::Result<Option<Candi
 /// appended. Never returns an error for a malformed payload: M0 records and never blocks.
 pub fn run(store: &Store, stage: &str, input: &str) -> anyhow::Result<Vec<EventId>> {
     let payload = HookPayload::parse(input);
+    // Leave the session identity where `tsr forecast` and `tsr exec` can find it: the hook cannot
+    // set the environment of the tool call Claude Code spawns, so `<cwd>/.tsr/session` is the
+    // channel that makes the CLI resolve the same task the hook records into. Written on every
+    // stage so it tracks the live session. Best-effort, never blocking.
+    if payload.session_id.is_some() {
+        store_path::remember_session(&payload.session());
+    }
     match stage {
         "SessionStart" => Ok(vec![record_session_start(store, &payload)?]),
         "Stop" => Ok(vec![record_stop(store, &payload)?]),
@@ -687,10 +703,11 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     let store = crate::store_path::open_store_at(&db)?;
 
     let session = "m0-selftest-session";
-    let task = crate::store_path::task_for_session(session);
     let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    // 1. The task is opened.
+    // 1. The task is opened. SessionStart also writes `<cwd>/.tsr/session`, the same channel Claude
+    //    Code's tool calls will use; the selftest then resolves the task through that file, so the
+    //    fixture proves the real path rather than a shortcut.
     let start = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("SessionStart".to_string()),
@@ -698,6 +715,11 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         ..Default::default()
     };
     record_session_start(&store, &start)?;
+    let task = crate::store_path::resolve_session_task(None)
+        .map_err(|e| anyhow::anyhow!("selftest session file not readable: {e}"))?;
+    if task != crate::store_path::task_for_session(session) {
+        anyhow::bail!("selftest session file resolved to the wrong task");
+    }
 
     // 2. Two inspections.
     for path in ["crates/tsr-cli/src/lib.rs", "crates/tsr-store/src/lib.rs"] {
@@ -806,5 +828,11 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     let jsonl = crate::task::export(&store, &task)?;
     let out = fixture_dir.join("session.events.jsonl");
     std::fs::write(&out, jsonl)?;
+
+    // Leave no session file behind: the selftest wrote one to prove the path, but it is not the
+    // developer's live session.
+    let _ = std::fs::remove_file(crate::store_path::session_file_in(
+        &crate::store_path::session_dir(),
+    ));
     Ok(out)
 }

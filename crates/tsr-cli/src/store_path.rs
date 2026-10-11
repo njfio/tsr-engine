@@ -50,26 +50,111 @@ pub fn task_for_name(name: &str) -> TaskId {
     TaskId(Hash::of(&[b"task:", name.as_bytes()]))
 }
 
-/// The task a `tsr forecast` without `--task` should write into: the store's most recently opened
-/// task, i.e. the session the hook just opened.
+/// The environment variable a caller may set to name the session explicitly, so `tsr forecast` and
+/// `tsr exec` resolve the same task the hook would for that session.
+pub const SESSION_ENV: &str = "TSR_SESSION";
+
+/// The directory, under the working directory, that holds the store and the session file.
+pub const SESSION_DIR: &str = ".tsr";
+
+/// The file, under [`SESSION_DIR`], that holds the session the hook last saw.
 ///
-/// The hook names its task from the Claude Code `session_id` in the payload, so a `tsr forecast`
-/// that guessed a fixed name would record the forecast into a *different* task than the tool call
-/// it forecasts — the M0 failure the honest-record repair exists to prevent. The most recent
-/// `task_opened` event is the session the agent is in; when the store has no task at all we fall
-/// back to `hash("default")` so a bare `tsr forecast` still records somewhere.
-pub fn latest_task(store: &Store) -> TaskId {
-    let row: Option<String> = store
-        .connection()
-        .query_row(
-            "SELECT task_id FROM events WHERE kind = 'task_opened' ORDER BY seq DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .ok();
-    match row.and_then(|s| Hash::from_hex(&s).ok()) {
-        Some(h) => TaskId(h),
-        None => task_for_session("default"),
+/// The hook cannot set the environment of the tool call Claude Code spawns, so it leaves the session
+/// identity on disk instead: every hook stage writes the payload's `session_id` here, and
+/// `tsr forecast` / `tsr exec` read it. That is the one channel that makes the CLI and the hook
+/// agree on *which task a session is* without either guessing.
+pub const SESSION_FILE: &str = "session";
+
+/// The directory that holds the session file: the store's directory (`TSR_DB`'s parent, else
+/// `<cwd>/.tsr`). The session belongs to the store, so a store at a custom path keeps its session
+/// file beside it — which is also what makes the tests hermetic.
+pub fn session_dir() -> PathBuf {
+    let db = db_path();
+    match db.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => PathBuf::from(SESSION_DIR),
+    }
+}
+
+/// The session file in `dir`: `<dir>/session`.
+pub fn session_file_in(dir: &Path) -> PathBuf {
+    dir.join(SESSION_FILE)
+}
+
+/// Record `session_id` as the session the hook last saw, in the store's directory (mode 0600), so a
+/// later `tsr forecast` / `tsr exec` resolves the same task. Best-effort: a write failure must never
+/// fail the hook.
+pub fn remember_session(session_id: &str) {
+    let dir = session_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = write_private(&session_file_in(&dir), session_id);
+}
+
+/// Write `contents` to `path` with mode 0600 (owner read/write only) on Unix.
+fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(contents.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)
+    }
+}
+
+/// The session the hook last recorded, if any: `TSR_SESSION` first, then the session file in the
+/// store's directory (or its nearest ancestor, so a tool run from a subdirectory still finds it).
+pub fn current_session() -> Option<String> {
+    if let Some(s) = std::env::var_os(SESSION_ENV) {
+        let s = s.to_string_lossy().into_owned();
+        if !s.is_empty() {
+            return Some(s);
+        }
+    }
+    let start = session_dir();
+    let mut dir: Option<&Path> = Some(&start);
+    while let Some(d) = dir {
+        if let Ok(text) = std::fs::read_to_string(session_file_in(d)) {
+            let text = text.trim().to_string();
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// The one session-resolution rule shared by `tsr forecast` and `tsr exec`.
+///
+/// A session is named by its id, and its task is `task_for_session(id)` — the same id the hook
+/// derives from the payload's `session_id`. The id comes from, in order:
+/// 1. an explicit `--task <id>` (handled by the caller, which never reaches here);
+/// 2. `TSR_SESSION`;
+/// 3. the `.tsr/session` file in the current directory or its nearest ancestor.
+///
+/// There is no "latest task" and no `hash("default")` fallback: those are exactly the ambiguity that
+/// let a `--task`-less forecast land in another session's task when two sessions were open. When no
+/// session is known the caller must refuse (exit 2) rather than guess.
+pub fn resolve_session_task(explicit: Option<&str>) -> anyhow::Result<TaskId> {
+    if let Some(id) = explicit {
+        if !id.is_empty() {
+            return Ok(task_for_session(id));
+        }
+    }
+    match current_session() {
+        Some(id) => Ok(task_for_session(&id)),
+        None => anyhow::bail!(
+            "no session: pass --task, set TSR_SESSION, or run inside a hooked session"
+        ),
     }
 }
 

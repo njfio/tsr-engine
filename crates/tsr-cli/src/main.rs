@@ -50,6 +50,9 @@ enum Cmd {
         /// The task to record against (defaults to the session task)
         #[arg(long)]
         task: Option<String>,
+        /// The session to record against (defaults to the session the hook last saw)
+        #[arg(long)]
+        session: Option<String>,
     },
     /// The hook entry point: reads a Claude Code hook payload on stdin and records it (M0, B4).
     Hook {
@@ -158,6 +161,7 @@ fn main() -> ExitCode {
             p,
             source,
             task,
+            session,
         } => run_forecast(
             kind.as_deref(),
             args.as_deref(),
@@ -165,6 +169,7 @@ fn main() -> ExitCode {
             p,
             &source,
             task.as_deref(),
+            session.as_deref(),
         ),
         Cmd::Hook { stage, selftest } => run_hook(&stage, selftest),
         Cmd::Exec { argv } => run_exec(&argv),
@@ -252,6 +257,7 @@ fn run_forecast(
     p: f64,
     source: &str,
     task: Option<&str>,
+    session: Option<&str>,
 ) -> ExitCode {
     let store = match store_path::open_store() {
         Ok(s) => s,
@@ -260,9 +266,18 @@ fn run_forecast(
             return ExitCode::from(1);
         }
     };
+    // One session-resolution rule, shared with the hook and `tsr exec`: an explicit `--task` wins,
+    // then `--session`/`TSR_SESSION`/the `.tsr/session` file the hook wrote. No "latest task" and no
+    // `hash("default")` fallback — with no session we refuse rather than guess.
     let task_id = match task {
         Some(name) => store_path::resolve_task(&store, name),
-        None => store_path::latest_task(&store),
+        None => match store_path::resolve_session_task(session) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("tsr: {e}");
+                return ExitCode::from(2);
+            }
+        },
     };
     if !matches!(source, "generator" | "controller" | "operator") {
         eprintln!("tsr: unknown --source `{source}` (generator|controller|operator)");
@@ -352,7 +367,15 @@ fn run_exec(argv: &[String]) -> ExitCode {
         }
     };
     let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let task = store_path::task_for_session("default");
+    // The same session-resolution rule the hook used to commit the candidate: `TSR_SESSION` (set by
+    // the caller) or the `.tsr/session` file the hook wrote, so the committed-candidate reuse fires.
+    let task = match store_path::resolve_session_task(None) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("tsr: {e}");
+            return ExitCode::from(2);
+        }
+    };
     match exec::run(&store, &task, &workspace, argv) {
         Ok(outcome) => ExitCode::from(outcome.exit_code.clamp(0, 255) as u8),
         Err(exec::ExecRefusal::NoRuntime) => {
