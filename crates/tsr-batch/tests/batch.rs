@@ -4,6 +4,7 @@
 //! tests on the host, and nothing here needs a container runtime. The one test that would need
 //! Claude Code is `#[ignore]`d with its reason.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use tsr_batch::driver::{read_session, Mode, ScriptedDriver};
@@ -286,4 +287,65 @@ fn limits_and_run_result_are_the_corpus_contract() {
     let r = RunResult::exit_only(0);
     assert!(r.succeeded());
     assert_eq!(limits.wall_clock_ms, 1000);
+}
+
+// ---------------------------------------------------------------------------------------------
+// D1: the untrusted task id must not be joined into a path (security review F1)
+// ---------------------------------------------------------------------------------------------
+
+/// Write a one-line `tasks.jsonl` whose only task carries `id`, and return the manifest path.
+fn manifest_with_id(dir: &Path, id: &str) -> PathBuf {
+    let mut task = tasks().into_iter().next().expect("a fixture task");
+    task.id = id.to_string();
+    let path = dir.join("tasks.jsonl");
+    let line = serde_json::to_string(&task).expect("serializable");
+    fs::write(&path, format!("{line}\n")).expect("write manifest");
+    path
+}
+
+/// D1: an absolute task id must be refused where `tasks.jsonl` is parsed, not joined into
+/// `out/state/<id>` (an absolute id replaces the base and escapes `--out`).
+#[test]
+fn d1_absolute_task_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = manifest_with_id(dir.path(), "/etc/tsr-escape");
+    let err = read_tasks(&path).expect_err("an absolute task id must be refused");
+    assert!(
+        matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+        "expected InvalidId, got {err:?}"
+    );
+}
+
+/// D1: a `../` task id must be refused where `tasks.jsonl` is parsed.
+#[test]
+fn d1_parent_dir_task_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = manifest_with_id(dir.path(), "../escape");
+    let err = read_tasks(&path).expect_err("a `../` task id must be refused");
+    assert!(
+        matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+        "expected InvalidId, got {err:?}"
+    );
+}
+
+/// D1: `.` and `..` are refused, and a well-formed id is accepted.
+#[test]
+fn d1_dot_ids_are_refused_and_a_valid_id_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    for bad in [".", "..", "a/b", "a\\b", ""] {
+        let path = manifest_with_id(dir.path(), bad);
+        let err = read_tasks(&path)
+            .err()
+            .unwrap_or_else(|| panic!("id {bad:?} must be refused"));
+        assert!(
+            matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+            "id {bad:?}: expected InvalidId, got {err:?}"
+        );
+    }
+    // A well-formed id (the fixture's own blake3 hex) still reads.
+    let good = tasks()[0].id.clone();
+    let path = manifest_with_id(dir.path(), &good);
+    let read = read_tasks(&path).expect("a valid id reads");
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].id, good);
 }

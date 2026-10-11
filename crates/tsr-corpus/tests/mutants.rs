@@ -396,6 +396,57 @@ fn parent_dir_descriptor_file_does_not_leak_sibling_bytes() {
     let _ = fs::remove_file(&secret);
 }
 
+/// D1: a descriptor whose `file` is a committed symlink pointing outside the repo must not read the
+/// host file into the CAS.
+///
+/// Pre-fix, `is_safe_relative_path` accepted `src/x.rs` (relative, no `..`) and `read_source_line`
+/// followed the symlink, embedding the host file's first line in the reversal diff written to
+/// `out/cas`. The fix resolves every descriptor path against the repository root with symlinks
+/// resolved and refuses any path whose resolved form leaves the root or passes through a symlink.
+#[test]
+fn d1_symlinked_descriptor_file_does_not_leak_host_bytes() {
+    let repo = tmpdir("symlink-file");
+    // A secret outside the repo, and a committed symlink inside it pointing at the secret.
+    let secret = repo.parent().expect("parent").join(format!(
+        "D1-SECRET-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(&secret, "D1_TOP_SECRET_LINE\n").expect("write secret");
+    fs::create_dir_all(repo.join("src")).expect("mkdir src");
+    let link = repo.join("src/x.rs");
+    std::os::unix::fs::symlink(&secret, &link).expect("symlink");
+
+    let out = repo.join("out");
+    let runner = ReportRunner::new(
+        LIST_SAMPLE,
+        &outcomes_with_file("src/x.rs"),
+        report(&["t"], &["t"]),
+    );
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(report_out.tasks, 1, "the caught mutant still yields a task");
+    assert_eq!(
+        report_out.skipped_unsafe_descriptor, 1,
+        "the symlinked descriptor is flagged as skipped"
+    );
+
+    let cas = out.join("cas");
+    for entry in fs::read_dir(&cas).expect("cas dir") {
+        let entry = entry.expect("cas entry");
+        let bytes = fs::read(entry.path()).expect("cas object");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains("D1_TOP_SECRET_LINE"),
+            "host file content leaked through the symlink into CAS object {}: {text}",
+            entry.path().display()
+        );
+    }
+    let _ = fs::remove_file(&secret);
+}
+
 /// A legitimate relative descriptor `file` still reads the source line (the fix must not weaken it).
 #[test]
 fn relative_descriptor_file_still_reads_the_source_line() {

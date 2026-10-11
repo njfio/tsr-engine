@@ -362,11 +362,12 @@ pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
 /// Read the 1-based `line` of `file` under `repo`, if it exists.
 ///
 /// `file` comes from a mutant descriptor parsed out of the repository under test, so it is
-/// untrusted: an absolute path or one containing a `..` component would escape `repo` and read a
-/// host file (security review F1). Such a descriptor is rejected — the reversal diff then falls
-/// back to the descriptor's own text, which is still a stable content-addressed record.
+/// untrusted: an absolute path, one containing a `..` component, or one that passes through a
+/// symlink would escape `repo` and read a host file (security review F1, D1). Such a descriptor is
+/// rejected — the reversal diff then falls back to the descriptor's own text, which is still a
+/// stable content-addressed record.
 fn read_source_line(repo: &Path, file: &str, line: u64) -> Option<String> {
-    if !is_safe_relative_path(file) {
+    if !is_safe_descriptor_path(repo, file) {
         return None;
     }
     let text = fs::read_to_string(repo.join(file)).ok()?;
@@ -386,6 +387,49 @@ pub fn is_safe_relative_path(file: &str) -> bool {
     !path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+/// Whether `file` is a safe descriptor path under `repo`: the string check of
+/// [`is_safe_relative_path`], and then every component of the path resolved against `repo` with
+/// symlinks resolved must stay inside `repo` and must not itself be a symlink (D1).
+///
+/// A committed symlink `src/x.rs -> ~/.ssh/id_rsa` passes the string check (relative, no `..`) but
+/// would copy a host file into the CAS when joined onto `repo`. Resolving each component with
+/// [`std::fs::symlink_metadata`] refuses any path that passes through a symlink, and the final
+/// canonicalised form must still be under the canonicalised `repo`.
+pub fn is_safe_descriptor_path(repo: &Path, file: &str) -> bool {
+    if !is_safe_relative_path(file) {
+        return false;
+    }
+    let Ok(root) = repo.canonicalize() else {
+        return false;
+    };
+    // Walk the components, refusing any that is a symlink, and confirm the resolved path stays
+    // under the root.
+    let mut current = root.clone();
+    for component in Path::new(file).components() {
+        let std::path::Component::Normal(part) = component else {
+            // `CurDir` is harmless; `ParentDir`/`RootDir`/`Prefix` were already refused above.
+            if matches!(component, std::path::Component::CurDir) {
+                continue;
+            }
+            return false;
+        };
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            // A component that does not exist cannot be read; the caller's `read_to_string` will
+            // fail and the descriptor falls back to its own text.
+            Err(_) => return false,
+        }
+    }
+    // The resolved path must still be under the root (defence in depth against a symlinked parent
+    // that `symlink_metadata` did not see because it was replaced between the two calls).
+    match current.canonicalize() {
+        Ok(resolved) => resolved.starts_with(&root),
+        Err(_) => false,
+    }
 }
 
 /// The digest of the mutated snapshot: blake3 of the mutant's own descriptor (its diff, file, span
@@ -465,9 +509,10 @@ pub fn mutants(
             report_out.skipped_not_caught += 1;
             continue;
         }
-        // A descriptor whose `file` is absolute or contains `..` is untrusted: it is not read, and
-        // the skip is recorded rather than silently producing a diff (security review F1).
-        if !is_safe_relative_path(&mutant.file) {
+        // A descriptor whose `file` is absolute, contains `..`, or passes through a symlink is
+        // untrusted: it is not read, and the skip is recorded rather than silently producing a diff
+        // (security review F1, D1).
+        if !is_safe_descriptor_path(repo, &mutant.file) {
             report_out.skipped_unsafe_descriptor += 1;
         }
         let failing: Vec<String> = report.failed().into_iter().collect();

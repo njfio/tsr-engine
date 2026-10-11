@@ -20,6 +20,10 @@ pub enum TaskError {
         line: usize,
         source: serde_json::Error,
     },
+    /// The task id is not a safe path component (D1): it must match `[A-Za-z0-9._-]{1,128}` and not
+    /// be `.` or `..`, because the batch runner joins it into `out/state/<id>` and `out/copies/<id>`.
+    #[error("bad task id {id:?} on line {line}: must match [A-Za-z0-9._-]{{1,128}} and not be `.` or `..`")]
+    InvalidId { line: usize, id: String },
 }
 
 /// Which corpus produced a task.
@@ -114,6 +118,10 @@ impl CorpusTask {
 }
 
 /// Read a `tasks.jsonl` manifest.
+///
+/// The task id is untrusted: the batch runner joins it into `out/state/<id>` and `out/copies/<id>`,
+/// so an absolute id would replace the base and a `..` id would escape `--out` (D1). Every id is
+/// validated here, where the manifest is parsed, before any path is built from it.
 pub fn read_tasks(path: &Path) -> Result<Vec<CorpusTask>, TaskError> {
     let text = std::fs::read_to_string(path)?;
     let mut out = Vec::new();
@@ -125,9 +133,28 @@ pub fn read_tasks(path: &Path) -> Result<Vec<CorpusTask>, TaskError> {
             line: i + 1,
             source,
         })?;
+        if !is_safe_task_id(&task.id) {
+            return Err(TaskError::InvalidId {
+                line: i + 1,
+                id: task.id,
+            });
+        }
         out.push(task);
     }
     Ok(out)
+}
+
+/// Whether `id` is a safe path component: `[A-Za-z0-9._-]{1,128}`, and not `.` or `..`.
+///
+/// The batch runner builds `out/state/<id>` and `out/copies/<id>` from this id, so anything that
+/// could name a path outside `--out` — an absolute path, a separator, a `..` component — is
+/// refused (D1).
+pub fn is_safe_task_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 || id == "." || id == ".." {
+        return false;
+    }
+    id.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 /// Write a `tasks.jsonl` manifest.
