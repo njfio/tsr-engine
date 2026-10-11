@@ -26,7 +26,8 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 use tsr_domain::{
-    Candidate, CandidateId, Event, EventKind, Hash, Observation, PreferenceStatus, Source, TaskId,
+    Candidate, CandidateId, Decision, Event, EventKind, ForecastId, Hash, Observation,
+    PreferenceStatus, Source, TaskId,
 };
 use tsr_forecast::resolve::{forecaster_name, resolve, TaskFacts};
 use tsr_forecast::score::{calibration_label, reliability_bins, Score, ScoredForecast};
@@ -151,6 +152,15 @@ pub struct Mirror {
 pub struct Desire {
     pub intent: Option<String>,
     pub criteria: Vec<CriterionRow>,
+    /// The operator's experience notes on the task, in sequence order (through `notes_for`).
+    pub notes: Vec<NoteRow>,
+}
+
+/// One operator experience note: the event that carries it and its text.
+#[derive(Clone, Debug, Serialize)]
+pub struct NoteRow {
+    pub event: String,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -258,23 +268,18 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     let evs: Vec<&Event> = events.iter().map(|(_, e)| e).collect();
 
     // --- Desire: the intent and the criteria, with their open/closed state. -------------------
-    // The intent is the operator's experience note on the task, when one exists.
+    // The intent is the task's own intent: the task-scoped preference recorded when the task was
+    // opened (the desired condition). It is *not* an operator experience note — those are notes,
+    // listed separately below, and a note is an observation, never the task's intent.
     let mut intent: Option<String> = None;
     let mut criteria: Vec<CriterionRow> = Vec::new();
-    for ev in &evs {
-        if let EventKind::Observed {
-            observation: Observation::Experience { note },
-        } = &ev.kind
-        {
-            if intent.is_none() {
-                intent = Some(note.clone());
-            }
-        }
-    }
-    // Criteria are the task's open preferences in the task scope: each is a named condition.
+    // Criteria are the task's preferences in the task scope: each is a named condition.
     let collective = tsr_ledger::fold(events, root);
     for entry in &collective.entries {
         if matches!(entry.preference.scope, tsr_domain::Scope::Task(t) if t == *task) {
+            if intent.is_none() {
+                intent = Some(entry.preference.text.clone());
+            }
             criteria.push(CriterionRow {
                 id: short(&entry.preference.id.0),
                 text: entry.preference.text.clone(),
@@ -286,6 +291,14 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
             });
         }
     }
+    // The operator's notes, through the same helper `tsr note` writes through.
+    let notes: Vec<NoteRow> = crate::note_cmd::notes_in(events)
+        .into_iter()
+        .map(|(id, text)| NoteRow {
+            event: id.to_string(),
+            text,
+        })
+        .collect();
 
     // --- Imagination: every candidate considered, its source, and conflict exclusions. --------
     let mut candidates: Vec<Candidate> = Vec::new();
@@ -317,10 +330,26 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     }
 
     // --- Belief: the committed candidate with each forecaster's number. -----------------------
+    // Belief is about the *committed* candidate: only its forecasts are listed. The propensity is
+    // the committed decision's propensity (the commit record), not a per-forecaster guess.
     let facts = TaskFacts::from_events(&evs.iter().map(|e| (*e).clone()).collect::<Vec<_>>());
+    let committed_propensity: Option<f64> = evs.iter().find_map(|ev| match &ev.kind {
+        EventKind::Committed {
+            decision: Decision::Selected { propensity, .. },
+            ..
+        } => Some(*propensity),
+        _ => None,
+    });
     let mut belief_rows: Vec<BeliefRow> = Vec::new();
     for ev in &evs {
-        if let EventKind::Forecast { forecast, .. } = &ev.kind {
+        if let EventKind::Forecast {
+            forecast,
+            candidate,
+        } = &ev.kind
+        {
+            if committed != Some(*candidate) {
+                continue;
+            }
             let resolved = resolve(forecast, &facts);
             let _ = resolved;
             let calibrated = forecast.calibrated.as_ref();
@@ -331,7 +360,7 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
                 calibrator: calibrated.map(|c| c.calibrator.clone()),
                 calibration: calibration_label(forecast),
                 support_episodes: forecast.support.episodes,
-                propensity: None,
+                propensity: committed_propensity,
             });
         }
     }
@@ -376,6 +405,13 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     }
 
     // --- Residual: Surprise per forecaster and Contrast per criterion, side by side. ----------
+    // A Surprise row names the forecaster that made the forecast it is a residual of.
+    let mut forecaster_of: BTreeMap<ForecastId, String> = BTreeMap::new();
+    for ev in &evs {
+        if let EventKind::Forecast { forecast, .. } = &ev.kind {
+            forecaster_of.insert(forecast.id, forecaster_name(&forecast.source));
+        }
+    }
     let mut surprise: Vec<SurpriseRow> = Vec::new();
     let mut contrast: Vec<ContrastRow> = Vec::new();
     for ev in &evs {
@@ -389,7 +425,10 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
         {
             for one in s {
                 surprise.push(SurpriseRow {
-                    forecaster: String::new(),
+                    forecaster: forecaster_of
+                        .get(&one.forecast)
+                        .cloned()
+                        .unwrap_or_else(|| "(unknown)".to_string()),
                     forecast: short(&one.forecast.0),
                     residual: one.residual,
                 });
@@ -413,7 +452,11 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     Mirror {
         task: task.to_string(),
         ledger_root: root.to_hex(),
-        desire: Desire { intent, criteria },
+        desire: Desire {
+            intent,
+            criteria,
+            notes,
+        },
         imagination: Imagination {
             candidates: candidate_rows,
         },
@@ -446,6 +489,13 @@ pub fn render_mirror(m: &Mirror) -> String {
     } else {
         for c in &m.desire.criteria {
             out.push_str(&format!("  criterion {} [{}] {}\n", c.id, c.state, c.text));
+        }
+    }
+    if m.desire.notes.is_empty() {
+        out.push_str("  notes: none\n");
+    } else {
+        for n in &m.desire.notes {
+            out.push_str(&format!("  note {} {}\n", n.event, n.text));
         }
     }
 

@@ -106,8 +106,16 @@ fn head_parents(store: &Store, task: &TaskId) -> Result<Vec<EventId>, StoreError
 /// This is the read side the Mirror uses: the operator's own words, with the event that carries
 /// them, so the screen can show the note beside the system's numbers and cite it by id.
 pub fn notes_for(store: &Store, task: &TaskId) -> Result<Vec<(EventId, String)>, StoreError> {
+    Ok(notes_in(&store.by_task(task)?))
+}
+
+/// Every operator experience note in a task's events, in sequence order, as `(event id, text)`.
+///
+/// This is the read side the Mirror uses, and [`notes_for`] is its store-backed wrapper: the two
+/// share one implementation so the Mirror and `tsr note` can never disagree about what a note is.
+pub fn notes_in(events: &[(i64, Event)]) -> Vec<(EventId, String)> {
     let mut out = Vec::new();
-    for (_, e) in store.by_task(task)? {
+    for (_, e) in events {
         if e.source != Source::Operator {
             continue;
         }
@@ -118,7 +126,7 @@ pub fn notes_for(store: &Store, task: &TaskId) -> Result<Vec<(EventId, String)>,
             out.push((e.id, note.clone()));
         }
     }
-    Ok(out)
+    out
 }
 
 /// Run `tsr note <task> --text <short>`.
@@ -148,6 +156,19 @@ pub fn run(task_hex: &str, text: &str, store_path: &str) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // A note is an observation *on a task*: a task the log does not hold has nothing to comment
+    // on, and appending a note to it would invent a task. Refuse it (exit 2), like an unknown id.
+    match store.by_task(&task) {
+        Ok(events) if events.is_empty() => {
+            eprintln!("tsr: no task {task_hex} in the log; a note comments on an existing task");
+            return ExitCode::from(2);
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("tsr: cannot read the log for {task_hex}: {e}");
+            return ExitCode::from(2);
+        }
+    }
     let recorded_at = now_iso8601();
     match record_note(&store, &task, text, &recorded_at) {
         Ok(id) => {
