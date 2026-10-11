@@ -154,8 +154,25 @@ pub fn fold(events: &[(i64, Event)], root: tsr_domain::Hash) -> CollectiveRealit
                     // A status for a preference the log never carried is not a view.
                     continue;
                 };
+                // Every status is recorded in the history, in sequence order.
                 entry.history.push((status.clone(), *by));
-                entry.status = Some(status.clone());
+                // Admission by source (PRD §B2.1): only an Operator `Open` admits a preference
+                // that is not already in the active view. A non-operator `Open` is recorded and
+                // ignored for admission. A mechanical status (`Fulfilled`, `Overlapping`) and the
+                // operator-only statuses apply only to a preference already admitted.
+                let admitted = entry.status.is_some();
+                match status {
+                    PreferenceStatus::Open => {
+                        if *by == Source::Operator {
+                            entry.status = Some(PreferenceStatus::Open);
+                        }
+                    }
+                    _ => {
+                        if admitted {
+                            entry.status = Some(status.clone());
+                        }
+                    }
+                }
             }
             _ => {}
         }

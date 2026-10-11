@@ -123,8 +123,14 @@ impl<'a> Ledger<'a> {
             });
         }
         let view = self.collective()?;
-        if view.get(&preference).is_none() {
+        let Some(entry) = view.get(&preference) else {
             return Err(LedgerError::UnknownPreference(preference));
+        };
+        // Admission by source (PRD §B2.1): a status other than `Open` applies only to a preference
+        // already in the active view. `Open` is the admission act itself, so it is always recorded
+        // (a non-operator `Open` is recorded and ignored for admission by the fold).
+        if status != PreferenceStatus::Open && !entry.is_active() {
+            return Err(LedgerError::NotActive(preference));
         }
         let kind = EventKind::StatusSet {
             preference,
