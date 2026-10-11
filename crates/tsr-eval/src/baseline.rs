@@ -152,10 +152,7 @@ impl Report {
                         // D5: fewer than two lineages — every resample is the
                         // same lineage, so the interval is degenerate and must
                         // not be reported as a zero-width "clear".
-                        s.push_str(&format!(
-                            "  90% interval: n/a — {} lineage\n",
-                            d.clusters
-                        ));
+                        s.push_str(&format!("  90% interval n/a — {} lineage\n", d.clusters));
                     }
                     if m.inconclusive() {
                         if d.is_defined() {
