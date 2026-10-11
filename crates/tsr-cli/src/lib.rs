@@ -1,10 +1,15 @@
 //! # tsr-cli — library side of the `tsr` binary
 //!
 //! M0 (PRD §B11) is done when `reconstruct::from_events` rebuilds a real session from the log alone
-//! and `tests/m0_reconstruct.rs` passes. Everything here is scaffolding that names the contract;
-//! the lane that owns M0 fills it in.
+//! and `tests/m0_reconstruct.rs` passes. The hook, the executor and the task/forecast commands live
+//! in the sibling modules; this module is the reconstruction and the shared plumbing.
 
 #![forbid(unsafe_code)]
+
+pub mod exec;
+pub mod hook;
+pub mod store_path;
+pub mod task;
 
 pub mod reconstruct {
     //! Rebuild a session from its event log and check the M0 invariants.
@@ -14,7 +19,7 @@ pub mod reconstruct {
     //! - every gated action (`RunApprovedTest`, `ProposePatch`, `RequestApproval`) has a forecast
     //!   recorded at the *same state version* before it was committed (B5, forecast-gated execution);
     //! - every dispatch is reconciled — `Executed` or an explicit `Unresolved` — never silent (B6);
-    //! - every command ran in the sealed sandbox (`Dispatched { in_sandbox: true }`), never on the
+    //! - every command ran in the sealed sandbox (`Dispatched` with `in_sandbox` set), never on the
     //!   host (B4).
 
     use std::path::Path;
@@ -137,10 +142,40 @@ pub mod reconstruct {
     /// Rebuild a session from an `events.jsonl` file: one JSON object per line, in sequence order,
     /// each either a bare `Event` or `{"seq": n, "event": Event}`.
     ///
-    /// M0 replaces this body. Until then it says so, and the M0 test is red by design.
-    pub fn from_events(_path: &Path) -> Result<Session, ReconstructError> {
-        Err(ReconstructError::NotImplemented(
-            "reconstruct::from_events — M0 lane: parse events.jsonl, order by seq, build Session",
-        ))
+    /// Blank lines are skipped. When a line carries no `seq`, the 1-based line order is used, so a
+    /// file written by `tsr task export` (bare events, in seq order) reconstructs identically to
+    /// one written with explicit seqs.
+    pub fn from_events(path: &Path) -> Result<Session, ReconstructError> {
+        let text = std::fs::read_to_string(path)?;
+        let mut events: Vec<(i64, Event)> = Vec::new();
+        for (idx, raw) in text.lines().enumerate() {
+            let line = raw.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let line_no = idx + 1;
+            let value: serde_json::Value =
+                serde_json::from_str(line).map_err(|source| ReconstructError::Json {
+                    line: line_no,
+                    source,
+                })?;
+            // Two shapes: a bare Event, or {"seq": n, "event": Event}.
+            let (seq, event_value) = match value.get("event") {
+                Some(ev) => {
+                    let seq = value.get("seq").and_then(|s| s.as_i64());
+                    (seq, ev.clone())
+                }
+                None => (None, value),
+            };
+            let event: Event =
+                serde_json::from_value(event_value).map_err(|source| ReconstructError::Json {
+                    line: line_no,
+                    source,
+                })?;
+            let seq = seq.unwrap_or_else(|| events.len() as i64 + 1);
+            events.push((seq, event));
+        }
+        events.sort_by_key(|(seq, _)| *seq);
+        Ok(Session { events })
     }
 }

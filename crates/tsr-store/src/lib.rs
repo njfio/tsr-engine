@@ -120,6 +120,35 @@ impl Store {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// The seq of the newest event of a task, or `None` if the task has no events.
+    /// This is the current state version: the number of events in the task so far.
+    pub fn latest_seq(&self, task: &TaskId) -> Result<Option<i64>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT MAX(seq) FROM events WHERE task_id = ?1",
+                params![task.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Append a batch of events in one transaction, preserving order. Each event is appended with
+    /// the same semantics as [`Store::append`] (idempotent by identity, parents must already be in
+    /// the log — including earlier events of the same batch). Returns the assigned seqs, one per
+    /// input event, in input order. If any event fails, the whole batch is rolled back and the log
+    /// is left unchanged.
+    pub fn append_all(&self, evs: &[Event]) -> Result<Vec<i64>, StoreError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut seqs = Vec::with_capacity(evs.len());
+        for ev in evs {
+            seqs.push(self.append(ev)?);
+        }
+        tx.commit()?;
+        Ok(seqs)
+    }
+
     pub fn seq_of(&self, id: &EventId) -> Result<Option<i64>, StoreError> {
         Ok(self
             .conn
@@ -250,5 +279,57 @@ mod tests {
         let e2 = opened(vec![e1.id]);
         s.append(&e2).unwrap();
         assert_ne!(r1, s.head_root().unwrap());
+    }
+
+    #[test]
+    fn latest_seq_is_none_for_an_empty_task() {
+        let s = Store::open_in_memory().unwrap();
+        assert_eq!(s.latest_seq(&task()).unwrap(), None);
+    }
+
+    #[test]
+    fn latest_seq_is_the_newest_seq_of_the_task() {
+        let s = Store::open_in_memory().unwrap();
+        let e1 = opened(vec![]);
+        let e2 = opened(vec![e1.id]);
+        let e3 = opened(vec![e2.id]);
+        s.append(&e1).unwrap();
+        s.append(&e2).unwrap();
+        s.append(&e3).unwrap();
+        assert_eq!(s.latest_seq(&task()).unwrap(), Some(3));
+        // A different task with no events is still None.
+        let other = TaskId(Hash::of(&["other".as_bytes()]));
+        assert_eq!(s.latest_seq(&other).unwrap(), None);
+    }
+
+    #[test]
+    fn append_all_preserves_order_and_returns_seqs() {
+        let s = Store::open_in_memory().unwrap();
+        let e1 = opened(vec![]);
+        let e2 = opened(vec![e1.id]);
+        let e3 = opened(vec![e2.id]);
+        let seqs = s.append_all(&[e1.clone(), e2.clone(), e3.clone()]).unwrap();
+        assert_eq!(seqs, vec![1, 2, 3]);
+        let all = s.all().unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].1.id, e1.id);
+        assert_eq!(all[1].1.id, e2.id);
+        assert_eq!(all[2].1.id, e3.id);
+    }
+
+    #[test]
+    fn append_all_is_atomic_when_a_parent_is_missing() {
+        let s = Store::open_in_memory().unwrap();
+        let e1 = opened(vec![]);
+        let ghost = EventId(Hash::of(&["never-recorded".as_bytes()]));
+        let bad = opened(vec![ghost]);
+        let err = s.append_all(&[e1.clone(), bad]);
+        assert!(err.is_err(), "a batch with a bogus parent must fail");
+        assert_eq!(
+            s.all().unwrap().len(),
+            0,
+            "the whole batch is rolled back: the log is unchanged"
+        );
+        assert_eq!(s.latest_seq(&task()).unwrap(), None);
     }
 }

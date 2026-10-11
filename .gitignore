@@ -10,3 +10,4 @@
 /.check-wt
 /.evidence
 /mutants.out.old
+.tsr/
