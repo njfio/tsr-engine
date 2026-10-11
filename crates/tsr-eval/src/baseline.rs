@@ -291,6 +291,24 @@ pub fn baseline(
     resamples: usize,
 ) -> Result<Report, EvalError> {
     let rd = ResultsDir::read(dir)?;
+    Ok(report_from(&rd, pair_by, seed, resamples))
+}
+
+/// Compute the baseline report from two separate results directories, one per
+/// system (`--record <dir> --rules <dir>`).
+pub fn baseline_pair(
+    record_dir: &Path,
+    rules_dir: &Path,
+    pair_by: PairBy,
+    seed: u64,
+    resamples: usize,
+) -> Result<Report, EvalError> {
+    let rd = ResultsDir::read_pair(record_dir, rules_dir)?;
+    Ok(report_from(&rd, pair_by, seed, resamples))
+}
+
+/// Compute the report from an already-read pair of systems.
+fn report_from(rd: &ResultsDir, pair_by: PairBy, seed: u64, resamples: usize) -> Report {
     let paired = rd.paired_task_ids();
     let unpaired = rd.unpaired_task_ids();
 
@@ -300,10 +318,10 @@ pub fn baseline(
         let (record, rules, diff) = match spec.key {
             k if k == crate::metrics::COMPLETION_RATE.key => {
                 let v = |r: &tsr_batch::results::TaskResult| if is_accepted(r) { 1.0 } else { 0.0 };
-                let clusters = paired_clusters(&rd, &paired, v);
+                let clusters = paired_clusters(rd, &paired, v);
                 (
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RECORD, v)),
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RULES, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RECORD, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RULES, v)),
                     Some(cluster_bootstrap(&clusters, seed, resamples)),
                 )
             }
@@ -314,25 +332,25 @@ pub fn baseline(
                 // ratios, and the cluster bootstrap resamples lineages and
                 // recomputes BOTH ratios per resample. A system with no accepted
                 // task has an undefined metric ("n/a"), never 0.
-                let clusters = ratio_clusters(&rd, &paired, normalized_cost);
+                let clusters = ratio_clusters(rd, &paired, normalized_cost);
                 let ri = ratio_cluster_bootstrap(&clusters, seed, resamples);
                 (ri.record, ri.rules, ri.diff)
             }
             k if k == UNSAFE_ATTEMPTS_BLOCKED.key => {
                 let v = |r: &tsr_batch::results::TaskResult| r.denials.len() as f64;
-                let clusters = paired_clusters(&rd, &paired, v);
+                let clusters = paired_clusters(rd, &paired, v);
                 (
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RECORD, v)),
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RULES, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RECORD, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RULES, v)),
                     Some(cluster_bootstrap(&clusters, seed, resamples)),
                 )
             }
             k if k == GENERATOR_CALLS_PER_TASK.key => {
                 let v = estimated_calls;
-                let clusters = paired_clusters(&rd, &paired, v);
+                let clusters = paired_clusters(rd, &paired, v);
                 (
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RECORD, v)),
-                    Some(mean_over(&rd, &paired, crate::results::SYSTEM_RULES, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RECORD, v)),
+                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RULES, v)),
                     Some(cluster_bootstrap(&clusters, seed, resamples)),
                 )
             }
@@ -347,8 +365,8 @@ pub fn baseline(
         });
     }
 
-    Ok(Report {
-        dir: dir.display().to_string(),
+    Report {
+        dir: rd.dir.display().to_string(),
         pair_by,
         seed,
         resamples,
@@ -363,7 +381,7 @@ pub fn baseline(
             .len(),
         unpaired,
         metrics: metrics_out,
-    })
+    }
 }
 
 #[cfg(test)]

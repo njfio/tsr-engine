@@ -83,9 +83,10 @@ impl ResultsDir {
                 }
             };
             if slot.by_task.insert(row.task.clone(), row).is_some() {
+                // D10: name the duplicate row's task, not the last key in the map.
                 return Err(EvalError::DuplicateTask {
                     system: slot.system.clone(),
-                    task: slot.by_task.keys().next_back().cloned().unwrap_or_default(),
+                    task: row.task.clone(),
                     path: path.clone(),
                 });
             }
@@ -93,6 +94,23 @@ impl ResultsDir {
 
         Ok(Self {
             dir: dir.to_path_buf(),
+            record,
+            rules,
+        })
+    }
+
+    /// Read the two systems from two separate results directories.
+    ///
+    /// Each directory holds one system's `results.jsonl` (the shape
+    /// `tsr task run --out <dir>` writes). `record_dir` supplies system 1 and
+    /// `rules_dir` supplies system 2; a row whose `system` does not match the
+    /// directory it was read from is an error, so a swapped pair is caught
+    /// rather than silently compared against itself.
+    pub fn read_pair(record_dir: &Path, rules_dir: &Path) -> Result<Self, EvalError> {
+        let record = read_one_system(record_dir, SYSTEM_RECORD)?;
+        let rules = read_one_system(rules_dir, SYSTEM_RULES)?;
+        Ok(Self {
+            dir: record_dir.to_path_buf(),
             record,
             rules,
         })
@@ -125,6 +143,40 @@ impl ResultsDir {
         out.sort();
         out
     }
+}
+
+/// Read one system's `results.jsonl` from a directory, requiring every row to
+/// name `system`.
+fn read_one_system(dir: &Path, system: &str) -> Result<SystemResults, EvalError> {
+    let path = dir.join("results.jsonl");
+    if !path.exists() {
+        return Err(EvalError::MissingResults(path));
+    }
+    let rows = read_results(&path).map_err(|e| EvalError::Io {
+        path: path.clone(),
+        detail: e.to_string(),
+    })?;
+    let mut out = SystemResults {
+        system: system.to_string(),
+        by_task: BTreeMap::new(),
+    };
+    for row in rows {
+        if row.system != system {
+            return Err(EvalError::UnknownSystem {
+                system: row.system.clone(),
+                path: path.clone(),
+            });
+        }
+        if out.by_task.insert(row.task.clone(), row).is_some() {
+            // D10: name the duplicate row's task, not the last key in the map.
+            return Err(EvalError::DuplicateTask {
+                system: system.to_string(),
+                task: row.task.clone(),
+                path: path.clone(),
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Whether a result counts as a completion: the oracle accepted it.

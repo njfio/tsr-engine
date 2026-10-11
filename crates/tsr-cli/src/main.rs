@@ -201,8 +201,17 @@ enum EvalCmd {
     /// The first numbers with intervals: paired by task, cluster bootstrap by
     /// lineage, 90% intervals, INCONCLUSIVE when an interval spans zero (B9).
     Baseline {
-        /// The results directory: `results.jsonl` is read here.
-        results_dir: PathBuf,
+        /// The results directory: `results.jsonl` is read here. Use this when
+        /// one file holds both systems; use `--record`/`--rules` when each run
+        /// wrote its own directory.
+        #[arg(conflicts_with_all = ["record", "rules"])]
+        results_dir: Option<PathBuf>,
+        /// The record system's results directory (`results.jsonl` is read here).
+        #[arg(long, requires = "rules")]
+        record: Option<PathBuf>,
+        /// The rules system's results directory (`results.jsonl` is read here).
+        #[arg(long, requires = "record")]
+        rules: Option<PathBuf>,
         /// The pairing rule (only `task` is defined).
         #[arg(long, default_value = "task")]
         pair_by: String,
@@ -272,9 +281,17 @@ fn main() -> ExitCode {
         Cmd::Eval { cmd } => match cmd {
             EvalCmd::Baseline {
                 results_dir,
+                record,
+                rules,
                 pair_by,
                 seed,
-            } => eval_cmd::baseline_cmd(&results_dir, &pair_by, seed),
+            } => eval_cmd::baseline_cmd(
+                results_dir.as_deref(),
+                record.as_deref(),
+                rules.as_deref(),
+                &pair_by,
+                seed,
+            ),
         },
         Cmd::Model { .. } => not_yet("model", "B8 bundles (M5)"),
     }

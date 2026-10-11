@@ -16,7 +16,7 @@ pub mod metrics;
 pub mod proxy;
 pub mod results;
 
-pub use baseline::{baseline, MetricResult, PairBy, Report};
+pub use baseline::{baseline, baseline_pair, MetricResult, PairBy, Report};
 pub use bootstrap::{cluster_bootstrap, Cluster, Interval, SplitMix64};
 pub use metrics::{
     MetricSpec, ALL_METRICS, COMPLETION_RATE, COST_PER_ACCEPTED, DEFAULT_SEED,
