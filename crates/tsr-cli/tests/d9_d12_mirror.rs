@@ -291,11 +291,31 @@ fn d9_surprise_rows_name_their_forecaster() {
             "every surprise row names its forecaster"
         );
     }
-    // The rendered screen shows the name too.
+    // The rendered screen shows the name too. Scope the assertion to the Residual section: the
+    // names also appear under Imagination, so a whole-screen `contains` cannot fail on this defect.
     let text = render_mirror(&m);
+    let residual = text
+        .split("Surprise (forecast residual per forecaster)")
+        .nth(1)
+        .expect("the Residual section is rendered");
+    let residual = residual
+        .split("Contrast (desired minus actual, per criterion)")
+        .next()
+        .expect("the Contrast header follows the Surprise rows");
+    // Each Surprise row must name its forecaster, in the row itself.
     assert!(
-        text.contains("generator") && text.contains("controller"),
-        "the rendered Residual names the forecasters:\n{text}"
+        residual.contains("by generator"),
+        "the rendered Surprise row names the generator:\n{residual}"
+    );
+    assert!(
+        residual.contains("by controller"),
+        "the rendered Surprise row names the controller:\n{residual}"
+    );
+    // And the exact row format carries the forecaster between the forecast id and the residual.
+    let first = m.residual.surprise[0].forecast.clone();
+    assert!(
+        residual.contains(&format!("forecast {first} by generator residual")),
+        "the Surprise row is `forecast <id> by <forecaster> residual <r>`:\n{residual}"
     );
 }
 

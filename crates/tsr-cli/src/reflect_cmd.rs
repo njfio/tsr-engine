@@ -332,7 +332,6 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     // --- Belief: the committed candidate with each forecaster's number. -----------------------
     // Belief is about the *committed* candidate: only its forecasts are listed. The propensity is
     // the committed decision's propensity (the commit record), not a per-forecaster guess.
-    let facts = TaskFacts::from_events(&evs.iter().map(|e| (*e).clone()).collect::<Vec<_>>());
     let committed_propensity: Option<f64> = evs.iter().find_map(|ev| match &ev.kind {
         EventKind::Committed {
             decision: Decision::Selected { propensity, .. },
@@ -350,8 +349,6 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
             if committed != Some(*candidate) {
                 continue;
             }
-            let resolved = resolve(forecast, &facts);
-            let _ = resolved;
             let calibrated = forecast.calibrated.as_ref();
             belief_rows.push(BeliefRow {
                 forecaster: forecaster_name(&forecast.source),
@@ -590,8 +587,8 @@ pub fn render_mirror(m: &Mirror) -> String {
     } else {
         for s in &m.residual.surprise {
             out.push_str(&format!(
-                "    forecast {} residual {:.4}\n",
-                s.forecast, s.residual
+                "    forecast {} by {} residual {:.4}\n",
+                s.forecast, s.forecaster, s.residual
             ));
         }
     }
