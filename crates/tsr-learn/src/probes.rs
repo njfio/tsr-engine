@@ -108,7 +108,18 @@ pub fn probe_post_action(
         let Some(index_row) = index_of.get(&row.task) else {
             continue;
         };
-        let task_events = &by_task[&row.task];
+        // F9/B3: a row whose task has no events in the log is an inconsistency, not a panic. The
+        // log was truncated or replaced under the dataset; catch it as a leak naming the row.
+        let Some(task_events) = by_task.get(&row.task) else {
+            leaks.push(Leak {
+                probe: Probe::PostAction,
+                row: row.id.to_hex(),
+                detail: "the row's task has no events in the log (the log is truncated or does \
+                         not belong to this dataset)"
+                    .to_string(),
+            });
+            continue;
+        };
         let before: Vec<(i64, Event)> = task_events
             .iter()
             .take_while(|(_, e)| e.id != row.commitment)
@@ -119,17 +130,26 @@ pub fn probe_post_action(
         // caught, not just a leak in the features. `decision_rows` needs the commitment event to
         // form a row, so we pass the task's log up to and including it; the pairing is task-local,
         // so events after the commitment cannot change the result.
+        // F9/B3: a row whose commitment is not in the task's log is an inconsistency, not a panic.
+        let Some(commitment_event) = task_events
+            .iter()
+            .find(|(_, e)| e.id == row.commitment)
+            .cloned()
+        else {
+            leaks.push(Leak {
+                probe: Probe::PostAction,
+                row: row.id.to_hex(),
+                detail: "the row's commitment is not in the task's log (the log is truncated or \
+                         does not belong to this dataset)"
+                    .to_string(),
+            });
+            continue;
+        };
         let upto: Vec<(i64, Event)> = task_events
             .iter()
             .take_while(|(_, e)| e.id != row.commitment)
             .cloned()
-            .chain(std::iter::once(
-                task_events
-                    .iter()
-                    .find(|(_, e)| e.id == row.commitment)
-                    .cloned()
-                    .expect("the commitment is in the task's log"),
-            ))
+            .chain(std::iter::once(commitment_event))
             .collect();
         let raw = crate::decision::decision_rows(&upto)
             .into_iter()

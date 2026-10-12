@@ -1,0 +1,14 @@
+{
+  "calibrate": 286,
+  "data_root": "1b7f90dceab02c0735c8fe8265e64cc8f478328e60eadc00895631f2101f211f",
+  "feature_schema": "features@v1",
+  "fit": 572,
+  "held_out": 271,
+  "resolved": 796,
+  "rows": 1129,
+  "source_root": "3f8827349aef6a03ee282c96308089689aeee9136b3e2ba7c25f551d9747a9a1",
+  "split_digest": "45e946be71284287df4fd8898a193c77e82c692c5a4c3c3f3dec3096f19bc0be",
+  "training_root": "bc75f43535124b0205797f64b0294f0dd3844ffdb26dec272866626f0b15259f",
+  "uncommitted_tasks": 0,
+  "unindexed_tasks": 0
+}

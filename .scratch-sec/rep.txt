@@ -1,0 +1,192 @@
+bundle 745d941876fedc13be9b11394f85dc5b8755e428afcb577fc1a36c6b89296fff
+split_digest 45e946be71284287df4fd8898a193c77e82c692c5a4c3c3f3dec3096f19bc0be
+calibrator 745d941876fe features@v1
+code_commit (recorded, not verified)=unknown
+seed 7
+scored 199
+excluded 72
+uncalibrated 10
+unindexed_tasks 0
+uncommitted_tasks 0
+log_loss_clip 0.000000000001
+support_floor 30
+
+forecasters
+  controller n=189 brier=0.142277 log_loss=0.450463
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=87 mean_forecast=0.676056 observed_frequency=0.678161
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=102 mean_forecast=0.849558 observed_frequency=0.921569
+    bin [0.9,1.0) n=0
+  generator n=189 brier=0.183927 log_loss=0.603120
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=11 mean_forecast=0.299433 observed_frequency=1.000000
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=38 mean_forecast=0.505262 observed_frequency=0.631579
+    bin [0.6,0.7) n=0
+    bin [0.7,0.8) n=35 mean_forecast=0.715887 observed_frequency=0.800000
+    bin [0.8,0.9) n=38 mean_forecast=0.861925 observed_frequency=0.921053
+    bin [0.9,1.0) n=67 mean_forecast=0.956724 observed_frequency=0.820896
+  operator n=98 brier=0.178308 log_loss=0.556329
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=21 mean_forecast=0.500000 observed_frequency=0.714286
+    bin [0.6,0.7) n=12 mean_forecast=0.674364 observed_frequency=1.000000
+    bin [0.7,0.8) n=24 mean_forecast=0.750313 observed_frequency=0.625000
+    bin [0.8,0.9) n=26 mean_forecast=0.852255 observed_frequency=1.000000
+    bin [0.9,1.0) n=15 mean_forecast=0.924978 observed_frequency=0.666667
+
+families
+family calibrated
+  controller n=69 brier=0.183476 log_loss=0.535933
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=45 mean_forecast=0.676056 observed_frequency=0.533333
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=24 mean_forecast=0.849558 observed_frequency=1.000000
+    bin [0.9,1.0) n=0
+  generator n=69 brier=0.149252 log_loss=0.446483
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=22 mean_forecast=0.500000 observed_frequency=0.363636
+    bin [0.6,0.7) n=0
+    bin [0.7,0.8) n=18 mean_forecast=0.710950 observed_frequency=0.611111
+    bin [0.8,0.9) n=14 mean_forecast=0.858149 observed_frequency=1.000000
+    bin [0.9,1.0) n=15 mean_forecast=0.937027 observed_frequency=1.000000
+  operator n=26 brier=0.217703 log_loss=0.613898
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=10 mean_forecast=0.500000 observed_frequency=0.400000
+    bin [0.6,0.7) n=0
+    bin [0.7,0.8) n=12 mean_forecast=0.710950 observed_frequency=0.583333
+    bin [0.8,0.9) n=2 mean_forecast=0.858149 observed_frequency=1.000000
+    bin [0.9,1.0) n=2 mean_forecast=0.937027 observed_frequency=1.000000
+family overconfident
+  controller n=52 brier=0.181574 log_loss=0.551538
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=28 mean_forecast=0.676056 observed_frequency=0.750000
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=24 mean_forecast=0.849558 observed_frequency=0.791667
+    bin [0.9,1.0) n=0
+  generator n=52 brier=0.217549 log_loss=0.857871
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=0
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=0
+    bin [0.9,1.0) n=52 mean_forecast=0.962406 observed_frequency=0.769231
+  operator n=26 brier=0.197181 log_loss=0.633201
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=3 mean_forecast=0.650781 observed_frequency=1.000000
+    bin [0.7,0.8) n=12 mean_forecast=0.789676 observed_frequency=0.666667
+    bin [0.8,0.9) n=9 mean_forecast=0.892099 observed_frequency=1.000000
+    bin [0.9,1.0) n=2 mean_forecast=0.950743 observed_frequency=0.000000
+family underconfident
+  controller n=68 brier=0.070422 log_loss=0.286445
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=0
+    bin [0.6,0.7) n=14 mean_forecast=0.676056 observed_frequency=1.000000
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=54 mean_forecast=0.849558 observed_frequency=0.944444
+    bin [0.9,1.0) n=0
+  generator n=68 brier=0.193402 log_loss=0.567250
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=11 mean_forecast=0.299433 observed_frequency=1.000000
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=16 mean_forecast=0.512497 observed_frequency=1.000000
+    bin [0.6,0.7) n=0
+    bin [0.7,0.8) n=17 mean_forecast=0.721115 observed_frequency=1.000000
+    bin [0.8,0.9) n=24 mean_forecast=0.864127 observed_frequency=0.875000
+    bin [0.9,1.0) n=0
+  operator n=46 brier=0.145375 log_loss=0.480340
+    bin [0.0,0.1) n=0
+    bin [0.1,0.2) n=0
+    bin [0.2,0.3) n=0
+    bin [0.3,0.4) n=0
+    bin [0.4,0.5) n=0
+    bin [0.5,0.6) n=11 mean_forecast=0.500000 observed_frequency=1.000000
+    bin [0.6,0.7) n=9 mean_forecast=0.682225 observed_frequency=1.000000
+    bin [0.7,0.8) n=0
+    bin [0.8,0.9) n=15 mean_forecast=0.827563 observed_frequency=1.000000
+    bin [0.9,1.0) n=11 mean_forecast=0.918102 observed_frequency=0.727273
+
+paired controller minus generator
+  all n=64 clusters=12 mean_brier=-0.032939 [interval_lo=-0.055451, interval_hi=-0.004257] conclusive
+  calibrated n=23 clusters=9 mean_brier=0.032265 [interval_lo=0.013966, interval_hi=0.056489] conclusive
+  overconfident n=19 clusters=10 mean_brier=-0.020003 [interval_lo=-0.086208, interval_hi=0.036875] INCONCLUSIVE
+  underconfident n=22 clusters=11 mean_brier=-0.112280 [interval_lo=-0.171386, interval_hi=-0.056453] conclusive
+
+population
+family calibrated tasks=58
+family overconfident tasks=65
+family underconfident tasks=61
+
+floor sweep (calibrate slice)
+family calibrated
+  floor=0 coverage=64.000000 brier=0.135309
+  floor=5 coverage=64.000000 brier=0.135309
+  floor=10 coverage=60.000000 brier=0.142821
+  floor=20 coverage=41.000000 brier=0.150671
+  floor=30 coverage=15.000000 brier=0.223836
+  floor=50 coverage=0.000000 brier=n/a
+family overconfident
+  floor=0 coverage=60.000000 brier=0.177817
+  floor=5 coverage=60.000000 brier=0.177817
+  floor=10 coverage=58.000000 brier=0.171115
+  floor=20 coverage=36.000000 brier=0.146322
+  floor=30 coverage=11.000000 brier=0.139030
+  floor=50 coverage=0.000000 brier=n/a
+family rare
+  floor=0 coverage=0.000000 brier=n/a
+  floor=5 coverage=0.000000 brier=n/a
+  floor=10 coverage=0.000000 brier=n/a
+  floor=20 coverage=0.000000 brier=n/a
+  floor=30 coverage=0.000000 brier=n/a
+  floor=50 coverage=0.000000 brier=n/a
+family underconfident
+  floor=0 coverage=54.000000 brier=0.169054
+  floor=5 coverage=54.000000 brier=0.169054
+  floor=10 coverage=48.000000 brier=0.162027
+  floor=20 coverage=15.000000 brier=0.236840
+  floor=30 coverage=8.000000 brier=0.413983
+  floor=50 coverage=0.000000 brier=n/a

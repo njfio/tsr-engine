@@ -1,0 +1,1124 @@
+{
+  "bundle_id": "745d941876fedc13be9b11394f85dc5b8755e428afcb577fc1a36c6b89296fff",
+  "split_digest": "45e946be71284287df4fd8898a193c77e82c692c5a4c3c3f3dec3096f19bc0be",
+  "calibrator": "745d941876fe features@v1",
+  "seed": 7,
+  "scored": 199,
+  "excluded": 72,
+  "uncalibrated": 10,
+  "unindexed_tasks": 0,
+  "uncommitted_tasks": 0,
+  "controller": {
+    "n": 189,
+    "brier": 0.14227709650935813,
+    "log_loss": 0.45046334587960296,
+    "reliability": [
+      {
+        "lower": 0.0,
+        "upper": 0.1,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.1,
+        "upper": 0.2,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.2,
+        "upper": 0.3,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.3,
+        "upper": 0.4,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.4,
+        "upper": 0.5,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.5,
+        "upper": 0.6,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.6,
+        "upper": 0.7,
+        "n": 87,
+        "mean_forecast": 0.6760563380281682,
+        "observed_frequency": 0.6781609195402298
+      },
+      {
+        "lower": 0.7,
+        "upper": 0.8,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.8,
+        "upper": 0.9,
+        "n": 102,
+        "mean_forecast": 0.8495575221238929,
+        "observed_frequency": 0.9215686274509803
+      },
+      {
+        "lower": 0.9,
+        "upper": 1.0,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      }
+    ]
+  },
+  "generator": {
+    "n": 189,
+    "brier": 0.18392730829310136,
+    "log_loss": 0.603119741327013,
+    "reliability": [
+      {
+        "lower": 0.0,
+        "upper": 0.1,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.1,
+        "upper": 0.2,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.2,
+        "upper": 0.3,
+        "n": 11,
+        "mean_forecast": 0.29943285752602705,
+        "observed_frequency": 1.0
+      },
+      {
+        "lower": 0.3,
+        "upper": 0.4,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.4,
+        "upper": 0.5,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.5,
+        "upper": 0.6,
+        "n": 38,
+        "mean_forecast": 0.5052620616775624,
+        "observed_frequency": 0.631578947368421
+      },
+      {
+        "lower": 0.6,
+        "upper": 0.7,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.7,
+        "upper": 0.8,
+        "n": 35,
+        "mean_forecast": 0.7158871163896782,
+        "observed_frequency": 0.8
+      },
+      {
+        "lower": 0.8,
+        "upper": 0.9,
+        "n": 38,
+        "mean_forecast": 0.8619246200835504,
+        "observed_frequency": 0.9210526315789473
+      },
+      {
+        "lower": 0.9,
+        "upper": 1.0,
+        "n": 67,
+        "mean_forecast": 0.9567242813484439,
+        "observed_frequency": 0.8208955223880597
+      }
+    ]
+  },
+  "operator": {
+    "n": 98,
+    "brier": 0.17830839090520167,
+    "log_loss": 0.5563290532974663,
+    "reliability": [
+      {
+        "lower": 0.0,
+        "upper": 0.1,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.1,
+        "upper": 0.2,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.2,
+        "upper": 0.3,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.3,
+        "upper": 0.4,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.4,
+        "upper": 0.5,
+        "n": 0,
+        "mean_forecast": null,
+        "observed_frequency": null
+      },
+      {
+        "lower": 0.5,
+        "upper": 0.6,
+        "n": 21,
+        "mean_forecast": 0.5,
+        "observed_frequency": 0.7142857142857143
+      },
+      {
+        "lower": 0.6,
+        "upper": 0.7,
+        "n": 12,
+        "mean_forecast": 0.6743640557656781,
+        "observed_frequency": 1.0
+      },
+      {
+        "lower": 0.7,
+        "upper": 0.8,
+        "n": 24,
+        "mean_forecast": 0.7503127703776942,
+        "observed_frequency": 0.625
+      },
+      {
+        "lower": 0.8,
+        "upper": 0.9,
+        "n": 26,
+        "mean_forecast": 0.8522551418411756,
+        "observed_frequency": 1.0
+      },
+      {
+        "lower": 0.9,
+        "upper": 1.0,
+        "n": 15,
+        "mean_forecast": 0.9249775797442964,
+        "observed_frequency": 0.6666666666666666
+      }
+    ]
+  },
+  "controller_logged": null,
+  "families": {
+    "calibrated": {
+      "controller": {
+        "n": 69,
+        "brier": 0.1834758559811387,
+        "log_loss": 0.5359325032525472,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 45,
+            "mean_forecast": 0.6760563380281683,
+            "observed_frequency": 0.5333333333333333
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 24,
+            "mean_forecast": 0.8495575221238938,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          }
+        ]
+      },
+      "generator": {
+        "n": 69,
+        "brier": 0.14925196022497236,
+        "log_loss": 0.44648329987696,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 22,
+            "mean_forecast": 0.5,
+            "observed_frequency": 0.36363636363636365
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 18,
+            "mean_forecast": 0.710949502625004,
+            "observed_frequency": 0.6111111111111112
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 14,
+            "mean_forecast": 0.8581489350995123,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 15,
+            "mean_forecast": 0.9370266439430034,
+            "observed_frequency": 1.0
+          }
+        ]
+      },
+      "operator": {
+        "n": 26,
+        "brier": 0.217702770885223,
+        "log_loss": 0.6138984864226861,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 10,
+            "mean_forecast": 0.5,
+            "observed_frequency": 0.4
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 12,
+            "mean_forecast": 0.710949502625004,
+            "observed_frequency": 0.5833333333333334
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 2,
+            "mean_forecast": 0.8581489350995123,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 2,
+            "mean_forecast": 0.9370266439430035,
+            "observed_frequency": 1.0
+          }
+        ]
+      }
+    },
+    "overconfident": {
+      "controller": {
+        "n": 52,
+        "brier": 0.18157423817133705,
+        "log_loss": 0.5515380982214093,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 28,
+            "mean_forecast": 0.6760563380281684,
+            "observed_frequency": 0.75
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 24,
+            "mean_forecast": 0.8495575221238938,
+            "observed_frequency": 0.7916666666666666
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          }
+        ]
+      },
+      "generator": {
+        "n": 52,
+        "brier": 0.21754915270232777,
+        "log_loss": 0.8578712407008449,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 52,
+            "mean_forecast": 0.9624062921384742,
+            "observed_frequency": 0.7692307692307693
+          }
+        ]
+      },
+      "operator": {
+        "n": 26,
+        "brier": 0.19718121968095748,
+        "log_loss": 0.6332013134394299,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 3,
+            "mean_forecast": 0.6507809253839314,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 12,
+            "mean_forecast": 0.7896760381303842,
+            "observed_frequency": 0.6666666666666666
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 9,
+            "mean_forecast": 0.8920988392982451,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 2,
+            "mean_forecast": 0.950742748820431,
+            "observed_frequency": 0.0
+          }
+        ]
+      }
+    },
+    "underconfident": {
+      "controller": {
+        "n": 68,
+        "brier": 0.07042171753912634,
+        "log_loss": 0.28644483146038313,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 14,
+            "mean_forecast": 0.6760563380281689,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 54,
+            "mean_forecast": 0.8495575221238945,
+            "observed_frequency": 0.9444444444444444
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          }
+        ]
+      },
+      "generator": {
+        "n": 68,
+        "brier": 0.19340176575517676,
+        "log_loss": 0.5672496897478115,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 11,
+            "mean_forecast": 0.29943285752602705,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 16,
+            "mean_forecast": 0.5124973964842104,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 17,
+            "mean_forecast": 0.7211151780228632,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 24,
+            "mean_forecast": 0.864127102990906,
+            "observed_frequency": 0.875
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          }
+        ]
+      },
+      "operator": {
+        "n": 46,
+        "brier": 0.14537475117367518,
+        "log_loss": 0.48034027014644975,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "n": 11,
+            "mean_forecast": 0.5,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "n": 9,
+            "mean_forecast": 0.6822250992262604,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "observed_frequency": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "n": 15,
+            "mean_forecast": 0.8275630842658223,
+            "observed_frequency": 1.0
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "n": 11,
+            "mean_forecast": 0.9181022646034165,
+            "observed_frequency": 0.7272727272727273
+          }
+        ]
+      }
+    }
+  },
+  "floor_sweep": {
+    "calibrated": [
+      {
+        "floor": 0,
+        "coverage": 64,
+        "brier": 0.13530910496455498
+      },
+      {
+        "floor": 5,
+        "coverage": 64,
+        "brier": 0.13530910496455498
+      },
+      {
+        "floor": 10,
+        "coverage": 60,
+        "brier": 0.14282084935222508
+      },
+      {
+        "floor": 20,
+        "coverage": 41,
+        "brier": 0.15067109664194028
+      },
+      {
+        "floor": 30,
+        "coverage": 15,
+        "brier": 0.22383615135899723
+      },
+      {
+        "floor": 50,
+        "coverage": 0,
+        "brier": null
+      }
+    ],
+    "overconfident": [
+      {
+        "floor": 0,
+        "coverage": 60,
+        "brier": 0.1778173551757464
+      },
+      {
+        "floor": 5,
+        "coverage": 60,
+        "brier": 0.1778173551757464
+      },
+      {
+        "floor": 10,
+        "coverage": 58,
+        "brier": 0.17111483427582747
+      },
+      {
+        "floor": 20,
+        "coverage": 36,
+        "brier": 0.14632215949298247
+      },
+      {
+        "floor": 30,
+        "coverage": 11,
+        "brier": 0.13903032560297507
+      },
+      {
+        "floor": 50,
+        "coverage": 0,
+        "brier": null
+      }
+    ],
+    "rare": [
+      {
+        "floor": 0,
+        "coverage": 0,
+        "brier": null
+      },
+      {
+        "floor": 5,
+        "coverage": 0,
+        "brier": null
+      },
+      {
+        "floor": 10,
+        "coverage": 0,
+        "brier": null
+      },
+      {
+        "floor": 20,
+        "coverage": 0,
+        "brier": null
+      },
+      {
+        "floor": 30,
+        "coverage": 0,
+        "brier": null
+      },
+      {
+        "floor": 50,
+        "coverage": 0,
+        "brier": null
+      }
+    ],
+    "underconfident": [
+      {
+        "floor": 0,
+        "coverage": 54,
+        "brier": 0.16905410924231834
+      },
+      {
+        "floor": 5,
+        "coverage": 54,
+        "brier": 0.16905410924231834
+      },
+      {
+        "floor": 10,
+        "coverage": 48,
+        "brier": 0.16202673812332527
+      },
+      {
+        "floor": 20,
+        "coverage": 15,
+        "brier": 0.23683982380064442
+      },
+      {
+        "floor": 30,
+        "coverage": 8,
+        "brier": 0.4139825282476162
+      },
+      {
+        "floor": 50,
+        "coverage": 0,
+        "brier": null
+      }
+    ]
+  },
+  "paired": {
+    "tasks": 64,
+    "mean": -0.032939208381473024,
+    "interval": [
+      -0.05545054957045873,
+      -0.004257138421399516
+    ],
+    "inconclusive": false,
+    "clusters": 12
+  },
+  "paired_by_family": {
+    "calibrated": {
+      "tasks": 23,
+      "mean": 0.032265244387221656,
+      "interval": [
+        0.013965752005825064,
+        0.05648937954715399
+      ],
+      "inconclusive": false,
+      "clusters": 9
+    },
+    "overconfident": {
+      "tasks": 19,
+      "mean": -0.020002718017290318,
+      "interval": [
+        -0.0862083041164115,
+        0.03687501925557503
+      ],
+      "inconclusive": true,
+      "clusters": 10
+    },
+    "underconfident": {
+      "tasks": 22,
+      "mean": -0.11227992340872067,
+      "interval": [
+        -0.17138587554940632,
+        -0.05645272476278572
+      ],
+      "inconclusive": false,
+      "clusters": 11
+    }
+  },
+  "code_commit": "unknown",
+  "support_floor": 30,
+  "log_loss_clip": 1e-12,
+  "population": {
+    "calibrated": 58,
+    "overconfident": 65,
+    "underconfident": 61
+  }
+}

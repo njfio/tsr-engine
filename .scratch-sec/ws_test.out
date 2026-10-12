@@ -1,0 +1,417 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.86s
+     Running unittests src/lib.rs (target/debug/deps/tsr_cli-bce67e544bd1cb3a)
+
+running 18 tests
+test exec::tests::default_image_when_unset ... ok
+test exec::tests::container_argv_uses_the_image_and_passes_argv_verbatim ... ok
+test exec::tests::image_reference_validation_rejects_flags_and_junk ... ok
+test exec::tests::container_argv_image_slot_is_never_flag_looking ... ok
+test exec::tests::run_with_a_refusing_runner_records_nothing ... ok
+test exec::tests::candidate_for_matches_the_hook_for_the_same_command ... ok
+ok
+test exec::tests::run_with_a_fake_runner_that_cannot_start_records_unresolved ... ok
+test exec::tests::run_with_a_fake_runner_records_dispatched_then_executed ... ok
+test exec::tests::pending_commitment_over_the_real_listing_returns_the_candidate_committed_at_18 ... ok
+test exec::tests::pending_commitment_is_none_before_any_commitment_and_after_a_dispatch ... ok
+test hook::tests::forecast_call_appends_nothing_before_or_after ... ok
+test hook::tests::post_tool_for_path_prefixed_tsr_exec_appends_nothing ... ok
+test hook::tests::post_tool_for_read_edit_write_records_nothing ... ok
+test hook::tests::post_tool_for_tsr_exec_appends_nothing ... ok
+test hook::tests::post_tool_for_host_bash_records_executed_without_proposing ... ok
+test hook::tests::forecast_call_hooks_keep_the_state_version ... ok
+test hook::tests::post_tool_with_no_prior_commitment_records_unresolved ... ok
+test hook::tests::post_tool_reconciles_the_most_recent_unreconciled_commitment ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running unittests src/main.rs (target/debug/deps/tsr-8569f70ae62ee469)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/m0_forecast_default.rs (target/debug/deps/m0_forecast_default-9c67652a7ee035cd)
+
+running 6 tests
+test forecast_without_a_session_refuses_and_records_nothing ... ok
+test forecast_resolves_the_session_from_tsr_session_env ... ok
+test exec_resolves_the_session_task_and_refuses_without_one ... ok
+test forecast_without_task_records_into_the_hook_session_task ... ok
+test forecast_with_an_explicit_task_still_records_into_that_task ... ok
+test two_sessions_open_the_forecast_lands_in_the_acting_session ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/m0_harness.rs (target/debug/deps/m0_harness-b30139e0b1c55e38)
+
+running 13 tests
+test gated_tool_call_without_a_forecast_fails_the_b5_invariant ... ok
+test raw_cargo_test_bash_is_dispatched_on_the_host_and_fails_b4 ... ok
+test result: oktest host_bash_yields_a_host_dispatch_and_an_executed_post_tool_with_no_new_proposal ... ok
+test result: oktest forecast_then_tool_call_yields_proposed_forecast_committed_and_no_second_forecast ... ok
+test forecast_of_the_bare_command_matches_a_tsr_exec_bash_call ... ok
+test a_second_run_of_the_same_command_commits_without_a_second_proposal ... ok
+test result: oktest result: oktest result: oktest tsr_exec_bash_is_committed_and_not_dispatched_by_the_hook ... ok
+test selftest_without_a_runtime_exits_3_and_writes_nothing ... ok
+test result: oktest forecast_cli_and_hook_agree_on_the_candidate_id ... ok
+test tsr_exec_with_a_path_prefix_is_recognised ... ok
+test selftest_sequence_through_the_fake_runner_has_19_events_and_holds_every_invariant ... ok
+test result: oktest result: oktest no_proposal_after_a_tsr_exec_post_tool_and_the_second_run_reuses_its_commitment ... ok
+test result: oktest result: oktest selftest_is_reproducible_structurally_excluding_duration_ms_by_name ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/m0_real_session.rs (target/debug/deps/m0_real_session-12748bf19c69eb48)
+
+running 2 tests
+test the_real_session_exercises_the_whole_path ... ok
+test the_real_session_reconstructs_and_keeps_every_rule ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/m0_reconstruct.rs (target/debug/deps/m0_reconstruct-91bbaacb61a51a2e)
+
+running 1 test
+test m0_session_reconstructs_from_the_log_alone ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/m4_corpus.rs (target/debug/deps/m4_corpus-5e878acd500cc84f)
+
+running 8 tests
+test two_real_forecasts_pair_both_with_the_commitment ... ok
+test two_real_sessions_pair_each_commitment_with_its_own_generator_forecast ... ok
+test every_task_satisfies_the_m0_invariants_as_its_own_session ... ok
+test every_fixture_session_satisfies_the_m0_invariants ... ok
+test the_corpus_has_the_shape_the_brief_names ... ok
+test fixtures_regenerate_byte_identically ... ok
+test b7_train_apply_prints_raw_and_calibrated_p_and_support ... ok
+test by_repo_seeds_1_to_8_give_three_non_empty_sides ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.90s
+
+     Running tests/m4_probes.rs (target/debug/deps/m4_probes-33afa6b2ac97383b)
+
+running 4 tests
+test a12_dataset_refuses_a_leaking_split_before_writing ... ok
+test b3_fit_refuses_a_dataset_missing_events_jsonl ... ok
+test b3_fit_refuses_a_dataset_missing_tasks_jsonl ... ok
+test a6_fit_refuses_a_forged_split_json ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/m4_train.rs (target/debug/deps/m4_train-1e95793bc20dfb27)
+
+running 38 tests
+test a_non_operator_label_is_refused_with_exit_2 ... ok
+test a_family_below_30_tasks_is_uncalibrated ... ok
+test a8_unindexed_tasks_are_counted ... ok
+test a_paired_interval_that_spans_zero_is_inconclusive ... ok
+test b16_no_forbidden_strings_in_report_or_apply ... ok
+test a_one_byte_bundle_change_is_refused_naming_the_file ... ok
+test b16_a_different_seed_changes_the_bundle_id ... ok
+test apply_refuses_a_foreign_dataset ... ok
+test b16_tsr_code_commit_leaves_the_bundle_id_unchanged ... ok
+test f3_fit_refuses_an_empty_calibrate_slice ... ok
+test f14_a_bad_row_is_named_by_an_id_in_rows_jsonl ... ok
+test f14_report_and_apply_exit_2_on_tampered_inputs ... ok
+test f3_fit_refuses_an_empty_fit_slice ... ok
+test f15_a_different_seed_splits_differently_under_by_repo ... ok
+test f8_dataset_accepts_a_clone_group_spanning_time ... ok
+test f9_dataset_refuses_a_truncated_events_log_naming_the_line ... ok
+test f8_fit_accepts_a_dataset_whose_index_names_a_task_with_no_commitment ... ok
+test f9_dataset_refuses_a_newline_only_events_log ... ok
+test f9_dataset_refuses_a_newline_only_tasks_index ... ok
+test f9_dataset_refuses_a_truncated_tasks_index_naming_the_line ... ok
+test f9_dataset_refuses_an_empty_events_log ... ok
+test f8_uncommitted_tasks_are_counted ... ok
+test f9_dataset_refuses_an_empty_tasks_index ... ok
+test f9_fit_refuses_a_newline_only_events_log ... ok
+test f9_fit_refuses_a_newline_only_tasks_index ... ok
+test f9_fit_refuses_a_truncated_events_log_naming_the_line ... ok
+test f9_fit_refuses_a_truncated_tasks_index_naming_the_line ... ok
+test f9_fit_refuses_an_empty_events_log ... ok
+test fit_refuses_fewer_than_150_mature_tasks ... ok
+test f6_verify_report_and_apply_refuse_the_same_tampers ... ok
+test f9_fit_refuses_an_empty_tasks_index ... ok
+test r6_dataset_requires_tasks ... ok
+test held_out_reads_are_logged ... ok
+test p1_verify_ignores_the_code_commit_environment ... ok
+test p2_report_and_apply_refuse_a_dataset_with_another_data_root ... ok
+test the_controller_beats_the_generator_on_held_out ... ok
+test the_report_uses_engineering_names_and_a_calibrator_version ... ok
+test the_train_pipeline_runs_end_to_end ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 52.19s
+
+     Running tests/policy_check.rs (target/debug/deps/policy_check-4c8b320ea3af5431)
+
+running 3 tests
+test malformed_event_exits_three_with_json_error_on_stderr ... ok
+test injection_readme_does_not_widen_scope ... ok
+test gated_action_without_forecast_is_denied_naming_what_to_record ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/tsr_domain-8e6445c3fa41ebe6)
+
+running 9 tests
+test tests::hash_is_deterministic_and_length_prefixed ... ok
+test tests::preference_is_short_and_typed ... ok
+test tests::candidate_id_commits_to_parents_and_rejects_self_conflict ... ok
+test tests::proxy_prints_the_engineering_name_never_the_term ... ok
+test tests::probability_rejects_nonfinite_and_out_of_range ... ok
+test tests::forecast_new_pins_the_state_version_and_round_trips ... ok
+test tests::generate_kind_round_trips_and_state_version_counts_prior_events ... ok
+test tests::event_id_changes_with_parents_and_round_trips_json ... ok
+test tests::stop_kind_round_trips ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/tsr_learn-e1505fd5c8114c34)
+
+running 116 tests
+test bundle::tests::b2_a_forged_split_digest_is_refused_naming_the_manifest ... ok
+test bundle::tests::b2_a_flipped_label_is_refused_naming_rows_jsonl ... ok
+test bundle::tests::a7_a_caught_probe_in_fit_names_the_row_and_feature ... ok
+test bundle::tests::b2_a_forged_training_root_is_refused_naming_the_manifest ... ok
+test bundle::tests::a_manifest_with_only_the_id_stripped_is_refused ... ok
+test bundle::tests::a_one_byte_change_makes_verify_fail_naming_the_file ... ok
+test bundle::tests::a_manifest_without_digest_fields_is_refused ... ok
+test bundle::tests::a_manifest_with_one_digest_missing_is_refused ... ok
+test bundle::tests::b14_population_names_every_family_in_it ... ok
+test bundle::tests::b7_apply_refuses_a_feature_length_mismatch ... ok
+test bundle::tests::b7_apply_calibrates_only_a_family_in_the_population ... ok
+test bundle::tests::b8_a_forged_calibrator_is_refused_naming_manifest_toml ... ok
+test bundle::tests::b9_a_non_empty_out_is_refused ... ok
+test bundle::tests::b8_a_forged_state_is_refused_naming_manifest_toml ... ok
+test bundle::tests::f7_a_generator_raw_edit_is_refused ... ok
+test bundle::tests::f7_a_family_edit_is_refused_naming_the_row ... ok
+test bundle::tests::f6_a_missing_file_is_named ... ok
+test bundle::tests::f6_a_comment_in_the_manifest_is_refused ... ok
+test bundle::tests::f6_load_bundle_refuses_a_forged_calibrator ... ok
+test bundle::tests::support_floor_is_recorded ... ok
+test bundle::tests::b9_rebuild_leaves_no_temporary_directory ... ok
+test bundle::tests::f6_load_bundle_refuses_a_forged_state ... ok
+test dataset::tests::a5_tied_timestamps_go_to_the_same_side ... ok
+test dataset::tests::a_clone_group_never_crosses_a_boundary ... ok
+test dataset::tests::a_non_operator_label_is_refused ... ok
+test dataset::tests::a_task_never_crosses_a_boundary ... ok
+test dataset::tests::a_task_with_no_index_row_is_excluded ... ok
+test bundle::tests::p1_verify_ignores_the_code_commit_environment ... ok
+test dataset::tests::b15_standardization_stats_live_in_the_spec ... ok
+test dataset::tests::b15_support_index_counts_only_labelled_rows ... ok
+test bundle::tests::load_recomputes_the_id_and_verify_passes ... ok
+test dataset::tests::different_seed_gives_a_different_split_digest ... ok
+test decision::tests::a11_a_forecast_after_the_execute_never_pairs ... ok
+test decision::tests::a1_two_tasks_in_one_session_pair_by_task_local_index ... ok
+test decision::tests::a3_a_forecast_after_the_commitment_never_pairs ... ok
+test decision::tests::a_forecast_separated_by_a_non_forecast_event_is_not_paired ... ok
+test dataset::tests::under_time_held_out_is_later_than_train ... ok
+test decision::tests::abstain_is_not_a_row ... ok
+test decision::tests::label_censored_on_operator_stop_or_never_reviewed ... ok
+test decision::tests::changing_the_placeholder_utility_changes_no_feature ... ok
+test decision::tests::label_false_when_any_of_the_three_fails ... ok
+test decision::tests::label_true_when_all_three_hold ... ok
+test dataset::tests::dataset_twice_gives_the_same_roots_and_split_digest ... ok
+test decision::tests::non_operator_label_is_refused ... ok
+test decision::tests::non_gated_commitment_is_not_a_row ... ok
+test decision::tests::purity_same_events_same_rows_and_later_events_change_nothing ... ok
+test decision::tests::one_row_per_chosen_gated_commitment ... ok
+test decision::tests::label_unresolved_while_open ... ok
+test features::tests::a_missing_generator_forecast_sets_the_indicator_not_a_fake_logit ... ok
+test decision::tests::unchosen_proposed_candidate_is_never_a_row ... ok
+test features::tests::clipped_logit_is_finite_at_the_ends ... ok
+test features::tests::budget_fraction_and_missing_indicator ... ok
+test features::tests::extract_sets_family_one_hot_and_action_one_hot ... ok
+test features::tests::a8_patches_count_only_committed_patches_not_proposed_ones ... ok
+test features::tests::counts_read_only_pre_action_events ... ok
+test features::tests::spec_has_one_hot_and_numeric_features ... ok
+test features::tests::failed_test_runs_come_from_executed_exit_codes ... ok
+test head::tests::unlabelled_rows_are_ignored ... ok
+test isotonic::tests::a13_pav_pools_tied_inputs_so_row_order_does_not_matter ... ok
+test isotonic::tests::a_perfectly_calibrated_input_is_reproduced ... ok
+test isotonic::tests::empty_input_is_identity ... ok
+test head::tests::fit_twice_gives_the_same_head ... ok
+test isotonic::tests::isotonic_is_monotone ... ok
+test isotonic::tests::r1_f1_hand_worked_example_is_non_decreasing ... ok
+test isotonic::tests::fit_twice_gives_the_same_calibrator ... ok
+test isotonic::tests::r1_review_a_repro_is_non_decreasing ... ok
+test isotonic::tests::r1_f1_seeded_random_is_monotone_and_order_invariant ... ok
+test probes::tests::a4_probe_b_catches_a_multi_valued_threshold_separator ... ok
+test probes::tests::a4_probe_b_passes_an_overlapping_feature ... ok
+test probes::tests::a6_probe_c_catches_a_forged_split_json ... ok
+test dataset::tests::a2_repo_split_keeps_every_lineage_on_one_side ... ok
+test probes::tests::a6_probe_c_passes_a_faithful_split_json ... ok
+test head::tests::head_learns_a_separable_signal ... ok
+test probes::tests::a7_a_caught_probe_names_the_probe_row_and_feature ... ok
+test probes::tests::a6_probe_c_recomputes_the_split_digest ... ok
+test probes::tests::clean_fixture_passes_all_three_probes ... ok
+test probes::tests::held_out_reads_are_logged_and_do_not_change_the_split_digest ... ok
+test probes::tests::spec_for_families_is_used_by_the_default_extractor ... ok
+test report::tests::b10_reliability_bins_carry_n_mean_and_observed_frequency ... ok
+test report::tests::b1_predict_errors_on_a_length_mismatch ... ok
+test report::tests::b1_report_refuses_a_foreign_dataset ... ok
+test probes::tests::probe_a_catches_an_extractor_reading_the_decisions_own_executed_exit_code ... ok
+test probes::tests::probe_c_catches_a_forged_split_manifest ... ok
+test probes::tests::probe_b_catches_a_label_copied_into_a_feature ... ok
+test report::tests::b4_forecasters_share_the_comparison_set ... ok
+test report::tests::b5_paired_difference_is_the_per_task_mean ... ok
+test report::tests::b6_empty_set_prints_na_not_a_number ... ok
+test report::tests::f10_an_empty_bin_prints_n_zero_and_json_null ... ok
+test report::tests::controller_beats_generator_with_interval_below_zero ... ok
+test report::tests::f10_empty_pair_has_a_null_mean ... ok
+test report::tests::f10_paired_line_has_one_label ... ok
+test report::tests::f12_the_operator_is_scored_on_the_comparison_rows ... ok
+test report::tests::no_forbidden_strings_and_calibrator_version_printed ... ok
+test report::tests::fewer_than_two_clusters_prints_interval_na ... ok
+test report::tests::p2_report_refuses_a_dataset_whose_data_root_differs ... ok
+test report::tests::f13_interval_prints_once_and_json_carries_the_clip ... ok
+test report::tests::families_and_forecasters_are_in_name_order ... ok
+test report::tests::same_seed_gives_the_same_output ... ok
+test rng::tests::f64_is_in_the_unit_interval ... ok
+test rng::tests::same_seed_same_sequence_and_different_seeds_differ ... ok
+test rng::tests::shuffle_is_a_permutation ... ok
+test support::tests::binary_features_must_match_exactly ... ok
+test support::tests::default_floor_is_thirty ... ok
+test support::tests::support_counts_same_family_within_range ... ok
+test report::tests::uncalibrated_rows_are_excluded_and_counted ... ok
+test report::tests::straddling_input_prints_inconclusive ... ok
+test synth::tests::regen ... ok
+test synth::tests::the_overconfident_family_is_the_b8_example ... ok
+test tests::decision_event_id_matches_the_hook ... ok
+test dataset::tests::a2_repo_split_on_the_fixture_passes_the_boundary_probe ... ok
+test bundle::tests::verify_rebuild_gives_the_same_id ... ok
+test bundle::tests::write_twice_gives_the_same_id ... ok
+test bundle::tests::f6_load_bundle_refuses_every_tamper_verify_refuses ... ok
+test synth::tests::the_shape_is_the_briefs ... ok
+test synth::tests::a9_a10_b11_generator_and_label_share_one_state_per_decision ... ok
+test synth::tests::the_generator_is_deterministic ... ok
+
+test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.63s
+
+     Running unittests src/lib.rs (target/debug/deps/tsr_policy-ba3247ce7e46275e)
+
+running 52 tests
+test action::tests::bash_maps_to_run_approved_test ... ok
+test action::tests::inspect_tools_map_to_inspect ... ok
+test action::tests::edit_tools_map_to_propose_patch ... ok
+test action::tests::approval_and_stop_hooks_map_to_their_kinds ... ok
+test action::tests::generate_tools_map_to_generate ... ok
+test action::tests::unknown_tools_are_not_typed ... ok
+test action::tests::wait_is_a_state_not_an_action ... ok
+test approval::tests::altered_artifact_digest_invalidates ... ok
+test approval::tests::altered_snapshot_digest_invalidates ... ok
+test approval::tests::changed_scope_invalidates ... ok
+test approval::tests::expiry_is_inclusive ... ok
+test approval::tests::different_task_or_candidate_invalidates ... ok
+test approval::tests::from_event_ignores_other_kinds ... ok
+test approval::tests::scope_encoding_round_trips_through_an_event ... ok
+test approval::tests::from_event_rejects_a_scope_without_digests ... ok
+test approval::tests::valid_approval_passes ... ok
+test approval::tests::revoked_between_decision_and_dispatch ... ok
+test budget::tests::two_in_flight_reservations_cannot_jointly_overrun ... ok
+test budget::tests::a_zero_cost_reservation_always_fits ... ok
+test budget::tests::exhaustion_blocks_the_next_dispatch ... ok
+test budget::tests::commit_moves_the_hold_into_consumed ... ok
+test budget::tests::release_frees_the_budget ... ok
+test budget::tests::reservation_is_taken_before_dispatch ... ok
+test budget::tests::the_error_names_the_first_exhausted_budget ... ok
+test gate::tests::boundary_without_an_approval_asks ... ok
+test gate::tests::absolute_inspect_path_is_denied ... ok
+test gate::tests::allowlisted_test_id_is_allowed_with_a_forecast ... ok
+test gate::tests::candidate_id_is_used_for_the_forecast_match ... ok
+test gate::tests::dispatch_allows_when_the_approval_still_holds ... ok
+test gate::tests::dispatch_denies_when_the_approval_is_missing ... ok
+test gate::tests::decision_as_str_is_the_lowercase_word ... ok
+test gate::tests::exhausted_budget_blocks_dispatch ... ok
+test gate::tests::dispatch_denies_when_the_approval_was_revoked ... ok
+test gate::tests::dispatch_denies_when_the_snapshot_changed_since_approval ... ok
+test gate::tests::dispatch_recheck_uses_the_single_approval_predicate ... ok
+test gate::tests::inspect_path_escaping_with_dotdot_is_denied ... ok
+test gate::tests::inspect_path_inside_both_scopes_is_allowed ... ok
+test gate::tests::forecast_at_a_different_version_does_not_satisfy_the_gate ... ok
+test gate::tests::kind_outside_the_grant_is_denied ... ok
+test gate::tests::inspect_path_outside_the_grant_scope_is_denied ... ok
+test gate::tests::gated_action_without_a_forecast_is_denied_naming_what_to_record ... ok
+test gate::tests::generate_and_stop_are_allowed_when_in_the_grant ... ok
+test gate::tests::patch_within_both_ceilings_is_allowed ... ok
+test gate::tests::rts_tool_outside_the_grant_is_denied ... ok
+test gate::tests::test_id_outside_the_allowlist_is_denied ... ok
+test gate::tests::unused_imports_are_referenced ... ok
+test profile::tests::empty_test_id_is_rejected ... ok
+test action::tests::exactly_the_three_gated_kinds_are_gated ... ok
+test profile::tests::test_command_lookup_by_id ... ok
+test profile::tests::duplicate_test_id_is_rejected ... ok
+test gate::tests::patch_over_the_smaller_ceiling_is_denied ... ok
+test profile::tests::default_profile_parses_and_round_trips ... ok
+
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/adversarial.rs (target/debug/deps/adversarial-5198535eed886606)
+
+running 17 tests
+test altered_snapshot_invalidates_approval ... ok
+test approval_revoked_between_decision_and_dispatch_blocks ... ok
+test forecast_at_a_stale_version_does_not_satisfy_the_gate ... ok
+test altered_diff_invalidates_approval ... ok
+test budget_exhaustion_blocks_dispatch ... ok
+test candidate_without_forecast_at_current_version_is_denied_with_reason ... ok
+test injection_in_filename_cannot_widen_scope ... ok
+test expired_approval_is_invalid ... ok
+test injection_in_readme_text_cannot_widen_scope ... ok
+test injection_in_comment_cannot_self_approve ... ok
+test empty_path_prefix_is_rejected_or_matches_nothing ... ok
+test injection_in_stack_trace_cannot_widen_scope ... ok
+test wait_action_does_not_exist ... ok
+test scope_change_invalidates_approval ... ok
+test prefix_without_separator_does_not_match_siblings ... ok
+test unparseable_expiry_is_expired ... ok
+test model_proposed_command_outside_allowlist_is_denied ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/tsr_store-74283e01879948c3)
+
+running 8 tests
+test tests::append_is_idempotent_by_identity_and_ordered_by_seq ... ok
+test tests::append_all_is_atomic_when_a_parent_is_missing ... ok
+test tests::latest_seq_is_none_for_an_empty_task ... ok
+test tests::the_database_refuses_update_and_delete ... ok
+test tests::a_parent_must_already_be_in_the_log ... ok
+test tests::latest_seq_is_the_newest_seq_of_the_task ... ok
+test tests::append_all_preserves_order_and_returns_seqs ... ok
+test tests::head_root_changes_with_every_append ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests tsr_cli
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tsr_domain
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tsr_learn
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tsr_policy
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tsr_store
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
