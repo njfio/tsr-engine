@@ -795,3 +795,46 @@ fn d4_mutant_copy_applies_the_mutation_diff() {
     );
     assert_eq!(result.outcome, Outcome::Accepted);
 }
+
+/// D4: a real runner that materialised a copy but whose mutation diff is absent from the CAS is a
+/// hard error — the `dest.exists()` gate must not weaken it.
+///
+/// The regression fix (15c3015) skips the CAS read only when provisioning left no copy at `dest`
+/// (a stand-in runner). A runner that *did* create `dest` — the shape a real `ExecRunner` always
+/// has after exit 0 — must still refuse a missing digest, never drive a silently unmutated copy.
+#[test]
+fn d4_a_materialised_copy_with_a_missing_mutation_diff_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = None;
+    task.base_snapshot = Some("d4e5f6a7b8c9d4e5f6a7b8c9d4e5f6a7b8c9d4".to_string());
+    task.mutated_snapshot = Some("f6a7b8c9d0e1f6a7b8c9d0e1f6a7b8c9d0e1f6a7".to_string());
+    // A digest that names nothing in the CAS.
+    task.mutation_diff =
+        Some("1111111111111111111111111111111111111111111111111111111111111111".to_string());
+
+    // A runner that materialises a copy at `dest` (the way a real runner does after exit 0) but
+    // leaves the CAS empty, so the diff cannot be read.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if argv.iter().any(|a| a == "materialize") {
+                let out = argv[argv.iter().position(|a| a == "--out").unwrap() + 1].clone();
+                let _ = std::fs::create_dir_all(&out);
+                let _ = std::fs::write(Path::new(&out).join("lib.rs"), "pub fn add() {}\n");
+            }
+            RunResult::exit_only(0)
+        }
+    }
+
+    let err = run_one(&task, Mode::Rules, &driver, &MaterializingRunner, &config)
+        .expect_err("a materialised copy with a missing mutation diff must be refused");
+    assert!(
+        matches!(err, tsr_batch::run::RunError::MutationDiff { .. }),
+        "D4: expected MutationDiff, got {err:?}"
+    );
+}
