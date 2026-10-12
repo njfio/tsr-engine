@@ -459,7 +459,10 @@ fn d4_provisioning_failure_is_refused() {
     // The provisioning run exits non-zero: the copy was never materialised.
     let mut runner = ScriptedRunner::ok();
     let dest = dir.path().join("copies").join(&task.id).join("rules");
-    let provision = tsr_batch::run::provision_argv(Path::new(&task.repo), task.snapshot(), &dest);
+    // N2: `run_one` resolves the repository to an absolute path before building the argv, so the
+    // scripted provisioning run must be keyed on the same absolute argv.
+    let repo_abs = tsr_batch::run::absolute(Path::new(&task.repo)).unwrap();
+    let provision = tsr_batch::run::provision_argv(&repo_abs, task.snapshot(), &dest);
     runner.script(
         tsr_batch::run::copies_root(dir.path()),
         &provision,
@@ -644,10 +647,15 @@ fn d4_provisioning_runs_from_a_batch_owned_root_with_repo() {
         .iter()
         .position(|a| a == "--repo")
         .expect("D4: provision_argv must pass --repo");
+    // N2: the repository is resolved to an absolute path before use, so a relatively-mined repo is
+    // still materialisable from the copies root the provisioning run is given as its cwd.
     assert_eq!(
         argv[repo_idx + 1],
-        task.repo,
-        "D4: --repo must name the task's repository"
+        tsr_batch::run::absolute(Path::new(&task.repo))
+            .unwrap()
+            .display()
+            .to_string(),
+        "D4/N2: --repo must name the task's repository, made absolute"
     );
     // The snapshot is passed as an argument, never as a path the batch runs from.
     let snap_idx = argv.iter().position(|a| a == "--snapshot").unwrap();
@@ -968,8 +976,8 @@ fn d4_d9_mutant_tasks_provision_and_reverse_end_to_end() {
     // D9: every reversal applies to the mutated copy by construction.
     for task in &tasks {
         let base = task.base_snapshot.as_deref().unwrap();
-        let mutation = std::fs::read_to_string(cas.join(task.mutation_diff.as_deref().unwrap()))
-            .unwrap();
+        let mutation =
+            std::fs::read_to_string(cas.join(task.mutation_diff.as_deref().unwrap())).unwrap();
         let mutated = dir.path().join(format!("mutated-{}", task.id));
         tsr_corpus::mine::materialize(&repo, base, &mutated).expect("materialise base");
         let mutation_patch = dir.path().join(format!("mutation-{}.patch", task.id));
@@ -986,8 +994,8 @@ fn d4_d9_mutant_tasks_provision_and_reverse_end_to_end() {
             "the mutation diff must apply to the base tree: {}",
             String::from_utf8_lossy(&applied.stderr)
         );
-        let reversal = std::fs::read_to_string(cas.join(task.reversal_diff.as_deref().unwrap()))
-            .unwrap();
+        let reversal =
+            std::fs::read_to_string(cas.join(task.reversal_diff.as_deref().unwrap())).unwrap();
         let reversal_patch = dir.path().join(format!("reversal-{}.patch", task.id));
         std::fs::write(&reversal_patch, &reversal).unwrap();
         let check = Command::new("git")
@@ -1037,7 +1045,9 @@ fn d4_d9_mutant_tasks_provision_and_reverse_end_to_end() {
     for task in &tasks {
         let result = run_one(task, Mode::Rules, &driver, &MaterializingRunner, &config)
             .unwrap_or_else(|e| panic!("D4: task {} must provision, got {e:?}", task.id));
-        let dest = tsr_batch::run::copies_root(&out).join(&task.id).join("rules");
+        let dest = tsr_batch::run::copies_root(&out)
+            .join(&task.id)
+            .join("rules");
         let copied = std::fs::read_to_string(dest.join("src/lib.rs")).unwrap();
         assert!(
             copied.contains("~ changed by cargo-mutants ~"),
