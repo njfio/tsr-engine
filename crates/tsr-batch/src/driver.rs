@@ -205,14 +205,23 @@ impl ScriptedEdit {
 
     /// Apply the edit inside `copy`, refusing a path that would escape it.
     ///
-    /// The copy is the only writable mount (PRD §B10), so a path that is absolute or carries a
-    /// `..` component is an error rather than a write outside the sandbox.
+    /// The copy is the only writable mount (PRD §B10), so a path that is absolute, carries a `..`
+    /// component, or is a Windows-style escape (`C:\...`, `..\...`) is an error rather than a write
+    /// outside the sandbox. A path that passes the string check is then resolved component by
+    /// component with [`std::fs::symlink_metadata`]: `git archive` preserves committed symlinks, so
+    /// a mined repository can plant `escape -> <dir outside the repo>` in the snapshot the copy is
+    /// materialised from, and `copy.join(rel)` would follow it out of the copy. Any symlink
+    /// component, and any resolved path outside the canonicalised copy root, is refused before
+    /// `create_dir_all`/`fs::write`.
     pub fn apply(&self, copy: &Path) -> Result<(), DriverError> {
         let rel = Path::new(&self.path);
         if rel.is_absolute()
             || rel
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))
+            // A Windows drive prefix (`C:\...`) or a `..\` component is a literal escape on this
+            // host but is documented as refused, so the guard does not depend on the platform.
+            || self.path.contains('\\')
         {
             return Err(DriverError::Fixture(format!(
                 "edit path `{}` escapes the copy",
@@ -220,6 +229,44 @@ impl ScriptedEdit {
             )));
         }
         let target = copy.join(rel);
+        // Resolve each component against the copy, refusing any symlink and confirming the result
+        // stays under the canonicalised copy root (the pattern of `is_safe_descriptor_path`).
+        let root = copy
+            .canonicalize()
+            .map_err(|e| DriverError::Fixture(format!("resolving copy {}: {e}", copy.display())))?;
+        let mut current = root.clone();
+        for component in rel.components() {
+            let std::path::Component::Normal(part) = component else {
+                if matches!(component, std::path::Component::CurDir) {
+                    continue;
+                }
+                return Err(DriverError::Fixture(format!(
+                    "edit path `{}` escapes the copy",
+                    self.path
+                )));
+            };
+            current.push(part);
+            match std::fs::symlink_metadata(&current) {
+                // A symlink component (including a symlinked final file) would write through it.
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(DriverError::Fixture(format!(
+                        "edit path `{}` escapes the copy through a symlink",
+                        self.path
+                    )));
+                }
+                // A component that does not exist yet is fine: `create_dir_all` will make it.
+                Ok(_) | Err(_) => {}
+            }
+        }
+        // Defence in depth: the resolved path must still be under the copy root.
+        if let Ok(resolved) = current.canonicalize() {
+            if !resolved.starts_with(&root) {
+                return Err(DriverError::Fixture(format!(
+                    "edit path `{}` escapes the copy",
+                    self.path
+                )));
+            }
+        }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| DriverError::Fixture(format!("creating {}: {e}", parent.display())))?;
