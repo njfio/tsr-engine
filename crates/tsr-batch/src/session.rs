@@ -334,6 +334,20 @@ impl SessionCtx {
         )
     }
 
+    /// Record the `Stop` stage of the hook (PRD §B4 line 218: "the Stop hook is Stop").
+    ///
+    /// The reason is the typed `Stop` reason of §B5 (`done`, `budget`, `blocked`, `unsafe`,
+    /// `operator`). The Tier 0 controller records `Stop(budget)` when the tool-minute budget is
+    /// exhausted (D6): the attempt ends there, and the caller closes the task.
+    pub fn stop(&mut self, reason: impl Into<String>) -> Result<EventId, SessionError> {
+        self.append(
+            Source::Rules,
+            EventKind::Stop {
+                reason: reason.into(),
+            },
+        )
+    }
+
     /// Close the task with a reason.
     pub fn close(&mut self, reason: impl Into<String>) -> Result<EventId, SessionError> {
         self.append(

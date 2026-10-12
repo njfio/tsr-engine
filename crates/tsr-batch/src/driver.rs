@@ -101,6 +101,10 @@ pub struct DriverReport {
     /// continue to the next step.
     #[serde(default)]
     pub ended_on_denial: bool,
+    /// Whether the attempt ended on the Tier 0 budget (D6): the controller recorded `Stop(budget)`
+    /// and the attempt ended there. The caller closes the task and does not run the oracle.
+    #[serde(default)]
+    pub stopped_on_budget: bool,
 }
 
 /// One recorded denial.
@@ -505,7 +509,21 @@ impl Driver for ScriptedDriver {
         for step in &self.session.steps {
             if self.mode == Mode::Rules {
                 if let Some(controller) = tier0.as_mut() {
-                    controller.check(step)?;
+                    match controller.check(step) {
+                        Ok(()) => {}
+                        // D6: a budget stop ends *this* attempt with `Stop(budget)`. It is not an
+                        // error that aborts the batch: the driver records the Stop, marks the
+                        // report, and returns, so `run_one` closes the task and the batch moves on
+                        // to the next task. A read-before-test refusal is still an error (the
+                        // session is malformed, not merely out of budget).
+                        Err(Tier0Error::BudgetExhausted { .. }) => {
+                            ctx.stop("budget")?;
+                            report.stopped = true;
+                            report.stopped_on_budget = true;
+                            return Ok(report);
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
                 }
             }
             let candidate = self.candidate_for(ctx, step)?;

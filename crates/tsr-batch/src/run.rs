@@ -354,6 +354,29 @@ pub fn run_one(
         Err(e) => return Err(e.into()),
     };
 
+    // (4b) D6: a Tier 0 budget stop ends *this* task, not the batch. The driver has already
+    // recorded `Stop(budget)`; close the task and record it as rejected without running the
+    // oracle — the attempt is over, so there is nothing for the oracle to judge. The batch
+    // continues with the next task.
+    if report.stopped_on_budget {
+        ctx.close("stop:budget")?;
+        let state_root_at_end = ctx.head_root()?.to_hex();
+        return Ok(TaskResult {
+            task: task.id.clone(),
+            system: mode.system().to_string(),
+            outcome: Outcome::Rejected,
+            generator_tokens: report.generator_tokens,
+            tool_minutes: report.tool_minutes,
+            wall_clock_ms: report.wall_clock_ms,
+            family: task.family.clone(),
+            lineage: task.lineage.clone(),
+            state_root_at_start,
+            state_root_at_end,
+            denials: report.denials,
+            oracle: None,
+        });
+    }
+
     // (5) Run the oracle through the Runner, in the session's copy (`dest`), not the parent
     // snapshot: the oracle judges the work the session actually did (D3).
     let flipped = runner.run(
