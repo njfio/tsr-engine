@@ -32,10 +32,12 @@ is reproducible byte for byte.
 ```console
 $ export PATH=/usr/local/cargo/bin:$PATH CARGO_HOME=$PWD/.cargo-home
 $ cargo test -p tsr-cli --test m2_episodes
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.32s
-     Running tests/m2_episodes.rs (target-fresh/debug/deps/m2_episodes-0c6b5dd344bda05a)
+   Compiling tsr-cli v0.0.1 (/work/crates/tsr-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.53s
+     Running tests/m2_episodes.rs (target/debug/deps/m2_episodes-0c6b5dd344bda05a)
 
-running 6 tests
+running 7 tests
+test r3_fixture_family_curves_have_nonzero_observed ... ok
 test generator_curve_differs_across_families ... ok
 test corpus_is_thirty_episodes_across_three_families ... ok
 test fixtures_are_committed_and_match_the_generator ... ok
@@ -43,10 +45,10 @@ test generation_is_deterministic ... ok
 test d6_fixture_compare_is_read_only ... ok
 test store_holds_every_episode_for_the_cli ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 67.68s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.25s
 ```
 
-The six tests are:
+The seven tests are:
 
 - `corpus_is_thirty_episodes_across_three_families` — thirty episodes, ten per family, each with the
   full event sequence.
@@ -60,14 +62,30 @@ The six tests are:
 - `d6_fixture_compare_is_read_only` — a plain run (no `TSR_REGEN_FIXTURES=1`) compares the committed
   JSON and store against a fresh build and **fails** on a mismatch instead of silently refreshing
   them; it leaves `fixtures/m2/episodes/*.json` and `fixtures/m2/store/tsr.db` byte-identical.
+- `r3_fixture_family_curves_have_nonzero_observed` — the fixture families' reliability bins carry a
+  non-zero observed rate (the M2 exit evidence: the generator's calibration curve is visible).
 
 ## Regeneration is explicit
 
 The corpus is regenerated only when `TSR_REGEN_FIXTURES=1` is set. Without it the test compares
-read-only and never writes the committed files:
+read-only and never writes the committed files. With it the run passes and leaves the committed
+fixtures byte-identical (the generator is deterministic):
 
 ```console
 $ TSR_REGEN_FIXTURES=1 cargo test -p tsr-cli --test m2_episodes
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.36s
+     Running tests/m2_episodes.rs (target/debug/deps/m2_episodes-0c6b5dd344bda05a)
+
+running 7 tests
+test d6_fixture_compare_is_read_only ... ok
+test r3_fixture_family_curves_have_nonzero_observed ... ok
+test corpus_is_thirty_episodes_across_three_families ... ok
+test fixtures_are_committed_and_match_the_generator ... ok
+test generation_is_deterministic ... ok
+test generator_curve_differs_across_families ... ok
+test store_holds_every_episode_for_the_cli ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 59.08s
 ```
 
 ## Thirty episodes, ten per family
@@ -108,10 +126,10 @@ to rebuild it, then the `reflect`/`review` commands below read it.
 
 ```console
 $ ls -la fixtures/m2/store/
-total 624
-drwxr-xr-x 3 root root     96 Oct 12 01:03 .
+total 620
+drwxr-xr-x 3 root root     96 Oct 12 06:25 .
 drwxr-xr-x 4 root root    128 Oct 11 18:47 ..
--rw-r--r-- 1 root root 638976 Oct 12 00:08 tsr.db
+-rw-r--r-- 1 root root 634880 Oct 12 05:44 tsr.db
 ```
 
 The store holds all thirty episodes in one file; there is no per-episode store. A task id from any
@@ -123,7 +141,7 @@ episode opens it, e.g. `alpha-00`'s task is
 ```console
 $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store fixtures/m2/store/tsr.db
 Mirror — task 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b
-ledger root 7107da8033a57f3988ab786ed8b64d4fc8ed54f0670381e990bf2aba74464a95
+ledger root 4bd309c28434cc40da89720fe3a697a0cf18fd5bb3e46afd3a76f613da6ef3e7
 
 Desire
   intent: the approved test passes without touching the schema
@@ -131,33 +149,37 @@ Desire
   notes: none
 
 Imagination
-  candidate de1f6a69fdfd (generator) propose_patch — committed
-  candidate 6f904c678006 (council) propose_patch — excluded by conflict
-  candidate 0b1e5f37bbf3 (intuition) inspect — considered
+  candidate dadc31a4d175 (generator) propose_patch — committed
+  candidate bfc509aad313 (council) propose_patch — excluded by conflict
+  candidate 4eec48230410 (intuition) inspect — considered
     support (preferences served): 9336872f1b30
     tensions addressed: none yet
 
 Belief
-  committed: de1f6a69fdfd
+  committed: dadc31a4d175
   generator: raw p 0.4670; uncalibrated; support 1 episodes; propensity 1.0000
   controller: raw p 0.4034; uncalibrated; support 1 episodes; propensity 1.0000
   operator: raw p 0.3715; uncalibrated; support 1 episodes; propensity 1.0000
 
 Return
-  d2c473e3f7a1 executed exit=1 evidence=0436095cafff
-  914441e6d5da label exit=- evidence=0436095cafff
+  905fedd5f9e1 executed exit=1 evidence=0436095cafff
+  fd4069f0895b label exit=- evidence=0436095cafff
     label disputed 
 
 Residual
   Surprise (forecast residual per forecaster)
-    forecast 35cd358cf453 residual -0.4670
-    forecast fcf47932deec residual -0.4034
-    forecast 8a1b7e0d5beb residual -0.3715
+    forecast 35cd358cf453 by generator residual -0.4670
+    forecast fcf47932deec by controller residual -0.4034
+    forecast 8a1b7e0d5beb by operator residual -0.3715
   Contrast (desired minus actual, per criterion)
     criterion b3bfa8e8731d unmet rejected the criterion went unmet evidence 
     criterion 14a407adf352 unmet rejected the criterion went unmet evidence 
-    criterion 14a407adf352 unmet wrong_behaviour  evidence d2c473e3f7a1
+    criterion 14a407adf352 unmet wrong_behaviour  evidence 905fedd5f9e1
 ```
+
+The Surprise rows carry the forecaster (`by generator`, `by controller`, `by operator`) and the
+residual is **forecast minus observed** everywhere: the generator forecast 0.4670 and the outcome was
+0, so its residual is −0.4670.
 
 ## The Mirror as JSON — `tsr reflect <task> --json`
 
@@ -165,7 +187,7 @@ Residual
 $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store fixtures/m2/store/tsr.db --json
 {
   "task": "1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b",
-  "ledger_root": "7107da8033a57f3988ab786ed8b64d4fc8ed54f0670381e990bf2aba74464a95",
+  "ledger_root": "4bd309c28434cc40da89720fe3a697a0cf18fd5bb3e46afd3a76f613da6ef3e7",
   "desire": {
     "intent": "the approved test passes without touching the schema",
     "criteria": [
@@ -180,7 +202,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
   "imagination": {
     "candidates": [
       {
-        "id": "de1f6a69fdfd",
+        "id": "dadc31a4d175",
         "source": "generator",
         "kind": "propose_patch",
         "excluded_by_conflict": false,
@@ -189,7 +211,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
         "tensions": []
       },
       {
-        "id": "6f904c678006",
+        "id": "bfc509aad313",
         "source": "council",
         "kind": "propose_patch",
         "excluded_by_conflict": true,
@@ -198,7 +220,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
         "tensions": []
       },
       {
-        "id": "0b1e5f37bbf3",
+        "id": "4eec48230410",
         "source": "intuition",
         "kind": "inspect",
         "excluded_by_conflict": false,
@@ -211,7 +233,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
     ]
   },
   "belief": {
-    "committed": "de1f6a69fdfd",
+    "committed": "dadc31a4d175",
     "forecasters": [
       {
         "forecaster": "generator",
@@ -244,7 +266,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
   },
   "returns": [
     {
-      "event": "d2c473e3f7a1",
+      "event": "905fedd5f9e1",
       "status": "executed",
       "exit_code": 1,
       "evidence_digest": "0436095cafff",
@@ -253,7 +275,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
       "supersedes": null
     },
     {
-      "event": "914441e6d5da",
+      "event": "fd4069f0895b",
       "status": "label",
       "exit_code": null,
       "evidence_digest": "0436095cafff",
@@ -298,7 +320,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
         "unmet": "wrong_behaviour",
         "reason": null,
         "evidence": [
-          "d2c473e3f7a1"
+          "905fedd5f9e1"
         ]
       }
     ]
@@ -313,24 +335,25 @@ The fixture corpus labels every return, so a rejection names the return it super
 untouched:
 
 ```console
+$ cp fixtures/m2/store/tsr.db .ev-d6/scratch.db
 $ tsr review 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b rejected \
-    --return d2c473e3f7a1fd3305752691bf8215d7d9c15c18a7827747ad716853fa3a6351 \
-    --reason "regresses span offsets" --store .ev7.db
-reviewed d2c473e3f7a1fd3305752691bf8215d7d9c15c18a7827747ad716853fa3a6351 label=rejected status=rejected record=ebc0b7945ebbd92b9f3e5fa15a14fb68dff39fb5d505d7dbb42dfc4008399144
+    --return 905fedd5f9e146104bd18b1bc0589dac143303999cfcf3d13b0e404076903f32 \
+    --reason "regresses span offsets" --store .ev-d6/scratch.db
+reviewed 905fedd5f9e146104bd18b1bc0589dac143303999cfcf3d13b0e404076903f32 label=rejected status=rejected record=4a1e0962a25accd1b3f8e2fa2140d2558587b9af2eb9a83effc7ee85f6256e48
 ```
 
 ## An operator note — `tsr note`
 
 ```console
 $ tsr note 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b \
-    --text "operator saw the offsets drift" --store .ev7.db
-noted e9284f482d238102ffb2863cd05a88e9bf35fd50e50525e0da0eb4f8b11d6d63 (observation=experience source=operator)
+    --text "operator saw the offsets drift" --store .ev-d6/scratch.db
+noted f2cf9a367ec97a96c3af673e220f85859fcabf32445e0b117a0a33262db1fcaf (observation=experience source=operator)
 ```
 
 ## Reconciling dispatches — `tsr task reconcile`
 
 ```console
-$ tsr task reconcile 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store .ev7.db
+$ tsr task reconcile 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store .ev-d6/scratch.db
 no pending dispatches
 ```
 
@@ -338,13 +361,14 @@ no pending dispatches
 
 `tsr reflect --family <f>` draws each forecaster's calibration curve over the family's episodes. The
 generator's curve is the one that differs across families — that is the calibration bias the corpus
-was built to carry:
+was built to carry. Every bin with a count carries a **non-zero observed rate** where the family's
+outcomes are accepted: the M2 exit evidence is that the generator's calibration curve is visible.
 
 ```console
 $ tsr reflect --family alpha --store fixtures/m2/store/tsr.db
 Calibration curves — family alpha
 
-  generator: n 10 brier 0.5038 log_loss 1.3975
+  generator: n 10 brier 0.1360 log_loss 0.4206
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 0 mean_p - observed -
@@ -352,23 +376,23 @@ Calibration curves — family alpha
     bin [0.4,0.5) count 3 mean_p 0.4723 observed 0.0000
     bin [0.5,0.6) count 2 mean_p 0.5434 observed 0.0000
     bin [0.6,0.7) count 0 mean_p - observed -
-    bin [0.7,0.8) count 1 mean_p 0.7954 observed 0.0000
-    bin [0.8,0.9) count 2 mean_p 0.8491 observed 0.0000
-    bin [0.9,1.0) count 2 mean_p 0.9225 observed 0.0000
+    bin [0.7,0.8) count 1 mean_p 0.7954 observed 1.0000
+    bin [0.8,0.9) count 2 mean_p 0.8491 observed 1.0000
+    bin [0.9,1.0) count 2 mean_p 0.9225 observed 1.0000
 
-  controller: n 10 brier 0.3076 log_loss 0.8200
+  controller: n 10 brier 0.1083 log_loss 0.3969
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 1 mean_p 0.2937 observed 0.0000
     bin [0.3,0.4) count 2 mean_p 0.3273 observed 0.0000
     bin [0.4,0.5) count 2 mean_p 0.4048 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
-    bin [0.6,0.7) count 4 mean_p 0.6895 observed 0.0000
-    bin [0.7,0.8) count 1 mean_p 0.7385 observed 0.0000
+    bin [0.6,0.7) count 4 mean_p 0.6895 observed 1.0000
+    bin [0.7,0.8) count 1 mean_p 0.7385 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 
-  operator: n 10 brier 0.3557 log_loss 0.9370
+  operator: n 10 brier 0.1055 log_loss 0.3868
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 0 mean_p - observed -
@@ -376,7 +400,7 @@ Calibration curves — family alpha
     bin [0.4,0.5) count 2 mean_p 0.4129 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
     bin [0.6,0.7) count 0 mean_p - observed -
-    bin [0.7,0.8) count 5 mean_p 0.7502 observed 0.0000
+    bin [0.7,0.8) count 5 mean_p 0.7502 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 ```
@@ -385,31 +409,31 @@ Calibration curves — family alpha
 $ tsr reflect --family beta --store fixtures/m2/store/tsr.db
 Calibration curves — family beta
 
-  generator: n 10 brier 0.3210 log_loss 0.8569
+  generator: n 10 brier 0.1033 log_loss 0.3838
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 0 mean_p - observed -
     bin [0.3,0.4) count 4 mean_p 0.3340 observed 0.0000
     bin [0.4,0.5) count 1 mean_p 0.4175 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
-    bin [0.6,0.7) count 3 mean_p 0.6812 observed 0.0000
-    bin [0.7,0.8) count 2 mean_p 0.7725 observed 0.0000
+    bin [0.6,0.7) count 3 mean_p 0.6812 observed 1.0000
+    bin [0.7,0.8) count 2 mean_p 0.7725 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 
-  controller: n 10 brier 0.3076 log_loss 0.8200
+  controller: n 10 brier 0.1083 log_loss 0.3969
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 1 mean_p 0.2937 observed 0.0000
     bin [0.3,0.4) count 2 mean_p 0.3273 observed 0.0000
     bin [0.4,0.5) count 2 mean_p 0.4048 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
-    bin [0.6,0.7) count 4 mean_p 0.6895 observed 0.0000
-    bin [0.7,0.8) count 1 mean_p 0.7385 observed 0.0000
+    bin [0.6,0.7) count 4 mean_p 0.6895 observed 1.0000
+    bin [0.7,0.8) count 1 mean_p 0.7385 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 
-  operator: n 10 brier 0.3557 log_loss 0.9370
+  operator: n 10 brier 0.1055 log_loss 0.3868
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 0 mean_p - observed -
@@ -417,7 +441,7 @@ Calibration curves — family beta
     bin [0.4,0.5) count 2 mean_p 0.4129 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
     bin [0.6,0.7) count 0 mean_p - observed -
-    bin [0.7,0.8) count 5 mean_p 0.7502 observed 0.0000
+    bin [0.7,0.8) count 5 mean_p 0.7502 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 ```
@@ -426,31 +450,31 @@ Calibration curves — family beta
 $ tsr reflect --family gamma --store fixtures/m2/store/tsr.db
 Calibration curves — family gamma
 
-  generator: n 10 brier 0.1832 log_loss 0.5352
+  generator: n 10 brier 0.1155 log_loss 0.3975
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 3 mean_p 0.1723 observed 0.0000
     bin [0.2,0.3) count 2 mean_p 0.2434 observed 0.0000
     bin [0.3,0.4) count 0 mean_p - observed -
-    bin [0.4,0.5) count 1 mean_p 0.4954 observed 0.0000
-    bin [0.5,0.6) count 2 mean_p 0.5491 observed 0.0000
-    bin [0.6,0.7) count 2 mean_p 0.6225 observed 0.0000
+    bin [0.4,0.5) count 1 mean_p 0.4954 observed 1.0000
+    bin [0.5,0.6) count 2 mean_p 0.5491 observed 1.0000
+    bin [0.6,0.7) count 2 mean_p 0.6225 observed 1.0000
     bin [0.7,0.8) count 0 mean_p - observed -
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 
-  controller: n 10 brier 0.3076 log_loss 0.8200
+  controller: n 10 brier 0.1083 log_loss 0.3969
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 1 mean_p 0.2937 observed 0.0000
     bin [0.3,0.4) count 2 mean_p 0.3273 observed 0.0000
     bin [0.4,0.5) count 2 mean_p 0.4048 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
-    bin [0.6,0.7) count 4 mean_p 0.6895 observed 0.0000
-    bin [0.7,0.8) count 1 mean_p 0.7385 observed 0.0000
+    bin [0.6,0.7) count 4 mean_p 0.6895 observed 1.0000
+    bin [0.7,0.8) count 1 mean_p 0.7385 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 
-  operator: n 10 brier 0.3557 log_loss 0.9370
+  operator: n 10 brier 0.1055 log_loss 0.3868
     bin [0.0,0.1) count 0 mean_p - observed -
     bin [0.1,0.2) count 0 mean_p - observed -
     bin [0.2,0.3) count 0 mean_p - observed -
@@ -458,15 +482,65 @@ Calibration curves — family gamma
     bin [0.4,0.5) count 2 mean_p 0.4129 observed 0.0000
     bin [0.5,0.6) count 0 mean_p - observed -
     bin [0.6,0.7) count 0 mean_p - observed -
-    bin [0.7,0.8) count 5 mean_p 0.7502 observed 0.0000
+    bin [0.7,0.8) count 5 mean_p 0.7502 observed 1.0000
     bin [0.8,0.9) count 0 mean_p - observed -
     bin [0.9,1.0) count 0 mean_p - observed -
 ```
 
-The generator's Brier is 0.5038 in `alpha`, 0.3210 in `beta` and 0.1832 in `gamma`: the
-over-confident family scores worst and the under-confident family best, which is the bias the
-generator was seeded with. The controller and the operator are identical across families, as they
-carry no bias.
+The generator's Brier is 0.1360 in `alpha`, 0.1033 in `beta` and 0.1155 in `gamma`: the
+over-confident family scores worst and the unbiased family best, which is the bias the generator was
+seeded with. The controller and the operator are identical across families, as they carry no bias.
+
+## The build, the lints and the full test run
+
+```console
+$ cargo build --workspace
+   Compiling tsr-ledger v0.0.1 (/work/crates/tsr-ledger)
+   Compiling tsr-cli v0.0.1 (/work/crates/tsr-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.67s
+```
+
+```console
+$ cargo fmt --all -- --check
+$ echo $?
+0
+```
+
+`cargo fmt --all -- --check` prints nothing and exits 0: the tree is formatted.
+
+```console
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Checking tsr-domain v0.0.1 (/work/crates/tsr-domain)
+    Checking tsr-store v0.0.1 (/work/crates/tsr-store)
+    Checking tsr-forecast v0.0.1 (/work/crates/tsr-forecast)
+    Checking tsr-policy v0.0.1 (/work/crates/tsr-policy)
+    Checking tsr-ledger v0.0.1 (/work/crates/tsr-ledger)
+    Checking tsr-cli v0.0.1 (/work/crates/tsr-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.00s
+```
+
+```console
+$ cargo test --workspace --no-fail-fast
+...
+     Running tests/m2_episodes.rs (target/debug/deps/m2_episodes-317c894e7d1424a0)
+running 7 tests
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.76s
+     Running tests/m2_reconcile.rs (target/debug/deps/m2_reconcile-d7289a69cde3fbae)
+running 21 tests
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+...
+   Doc-tests tsr_store
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+The full run is green: **256 tests passed, 0 failed, 0 ignored** across every crate and every
+integration target (`tsr-cli`, `tsr-domain`, `tsr-forecast`, `tsr-ledger`, `tsr-policy`,
+`tsr-store`), plus the doc-tests. The M0 tests all ran and passed here — `m0_harness` (13),
+`m0_real_session` (2), `m0_reconstruct` (1), `m0_forecast_default` (6) — so no Docker-only test was
+skipped on this host.
 
 ## What is not here
 
@@ -475,18 +549,20 @@ carry no bias.
   `calibrated_p` is `null` and `calibrator` is `null`.
 - **No committed store.** `fixtures/m2/store/tsr.db` is derived and git-ignored; rebuild it with the
   generator before running the commands above.
-- **`reflect --family` needs a `Scope::Family` preference no hook session has.** The family curve
-  folds the episodes of one family, which requires a preference scoped to that family
-  (`Scope::Family`). A hook session records only task-scoped preferences, so a session recorded by
-  the hook has no family scope and `tsr reflect --family <f>` over it draws no curve. The command
-  that shows it, over the hook's own session store:
 
-  ```console
-  $ tsr reflect --family alpha --store fixtures/m0/claude-session.db
-  Calibration curves — family alpha
+## LIMITATION — `reflect --family` needs a `Scope::Family` preference no hook session has
 
-  no scored forecasts for family alpha
-  ```
+The family curve folds the episodes of one family, which requires a preference scoped to that family
+(`Scope::Family`). A hook session records only task-scoped preferences, so a session recorded by the
+hook has no family scope and `tsr reflect --family <f>` over it draws no curve. The command that
+shows it, over a store built from the hook's own session log
+(`fixtures/m0/claude-session.events.jsonl`):
 
-  The fixture corpus carries the family scope, so the curves above are drawn from it; a real hook
-  session will need M3's batch runner to record the family scope.
+```console
+$ tsr reflect --family alpha --store .ev-d6/claude-session.db
+Calibration curves — family alpha
+  no scored forecasts yet
+```
+
+The fixture corpus carries the family scope, so the curves above are drawn from it; a real hook
+session will need M3's batch runner to record the family scope.
