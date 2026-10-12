@@ -1391,6 +1391,27 @@ fn f6_verify_report_and_apply_refuse_the_same_tampers() {
                 std::fs::write(&p, &bytes).unwrap();
             }),
         ),
+        (
+            // P1: an edited `code_commit` line is refused only because it changes the canonical
+            // rendering, not because it is compared with the environment.
+            "an edited code_commit line",
+            Box::new(|b: &Path| {
+                let p = b.join("manifest.toml");
+                let text = std::fs::read_to_string(&p).unwrap();
+                let forged: String = text
+                    .lines()
+                    .map(|l| {
+                        if l.trim_start().starts_with("code_commit =") {
+                            "code_commit = \"deadbeef\"".to_string()
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                std::fs::write(&p, forged).unwrap();
+            }),
+        ),
     ];
 
     for (name, tamper) in tampers {
