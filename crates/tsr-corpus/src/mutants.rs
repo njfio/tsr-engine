@@ -794,29 +794,42 @@ pub fn mutants(
     let cas = out.join("cas");
     fs::create_dir_all(&cas).map_err(MutantsError::Io)?;
 
+    // N5 (PRD §B10): the kill run executes the repository's code, so it must never run in the
+    // operator's repository — that would make the repository the sandbox's writable mount and leave
+    // `mutants.out/` behind in it. Materialise HEAD into a disposable copy and run both the list and
+    // the kill run there. The repository is only read (`git archive`); the copy is removed below.
+    let copy = scratch_dir("kill-run");
+    let _ = fs::remove_dir_all(&copy);
+    crate::mine::materialize(repo, "HEAD", &copy).map_err(|e| {
+        MutantsError::Runner(format!(
+            "could not materialise HEAD into a disposable copy: {e}"
+        ))
+    })?;
+
     // The list run: cargo-mutants writes the JSON array of descriptors to
-    // `mutants.out/mutants.json` inside the snapshot. A non-zero exit or unparseable output is an
-    // error.
-    let list_run = runner.run(repo, &opts.list_argv, &opts.limits);
+    // `mutants.out/mutants.json` inside the copy. A non-zero exit or unparseable output is an error.
+    let list_run = runner.run(&copy, &opts.list_argv, &opts.limits);
     if !list_run.succeeded() {
+        let _ = fs::remove_dir_all(&copy);
         return Err(MutantsError::Runner(format!(
             "cargo mutants --list exited {}",
             list_run.exit
         )));
     }
-    let listed = read_list(repo)?;
+    let listed = read_list(&copy)?;
 
-    // The kill run: outcomes.json inside the snapshot names the caught mutants, and each scenario's
-    // own log names the tests that failed under it. Exit 2 (`FoundProblems`: some mutants missed)
-    // and exit 3 (`Timeout`) mean the run completed; only a genuine failure is an error (D9b).
-    let run = runner.run(repo, &opts.run_argv, &opts.limits);
+    // The kill run: outcomes.json inside the copy names the caught mutants, and each scenario's own
+    // log names the tests that failed under it. Exit 2 (`FoundProblems`: some mutants missed) and
+    // exit 3 (`Timeout`) mean the run completed; only a genuine failure is an error (D9b).
+    let run = runner.run(&copy, &opts.run_argv, &opts.limits);
     if !kill_run_ok(run.exit) {
+        let _ = fs::remove_dir_all(&copy);
         return Err(MutantsError::Runner(format!(
             "cargo mutants exited {} (not a completed run)",
             run.exit
         )));
     }
-    let lab = read_outcomes(repo)?;
+    let lab = read_outcomes(&copy)?;
 
     let mut report_out = MutantsReport {
         repo: repo_str.clone(),
@@ -864,7 +877,8 @@ pub fn mutants(
             continue;
         }
         // The failing tests come from THIS mutant's own kill-run log, not one shared report (D9a).
-        let failing = read_failing_tests(repo, outcome)?;
+        // The log lives in the disposable copy the kill run wrote (N5), not in the repository.
+        let failing = read_failing_tests(&copy, outcome)?;
 
         // D4: the mutation diff is the diff cargo-mutants applied to the base tree. It is written
         // to the corpus's own CAS, so `tsr task run` can read it from beside `tasks.jsonl` and
@@ -916,6 +930,9 @@ pub fn mutants(
         body.push('\n');
     }
     fs::write(out.join("tasks.jsonl"), body).map_err(MutantsError::Io)?;
+    // The disposable copy has served its purpose — the descriptors, outcomes and per-scenario logs
+    // are all read. Remove it so nothing is left behind (N5).
+    let _ = fs::remove_dir_all(&copy);
     Ok(report_out)
 }
 

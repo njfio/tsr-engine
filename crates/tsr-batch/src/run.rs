@@ -227,6 +227,22 @@ pub fn copies_root(out: &Path) -> PathBuf {
     out.join("copies")
 }
 
+/// Make `path` absolute against the process working directory (N2).
+///
+/// `--out` and a mined `task.repo` may both be relative. The provisioning run is given the copies
+/// root as its working directory, so a relative `dest` would resolve against that root and land the
+/// copy in `brel/copies/brel/copies/…`; a relative `--repo` would resolve against the copies root
+/// too, where the repository is not. Resolving both against the process working directory — the
+/// directory the batch was launched from — makes every path absolute before use. An already-absolute
+/// path is returned unchanged.
+pub fn absolute(path: &Path) -> Result<PathBuf, RunError> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let cwd = std::env::current_dir()?;
+    Ok(cwd.join(path))
+}
+
 /// The argv that runs the flipped tests, run through the Runner.
 ///
 /// `dir` is the working directory the oracle runs in — the session's copy, not the parent
@@ -325,9 +341,17 @@ pub fn run_one(
             repo: task.repo.clone(),
         });
     }
-    let copies_root = copies_root(&config.out);
+    // N2: every path is made absolute before use. `--out` may be relative, and the provisioning run
+    // is given the copies root as its working directory; a relative `dest` would then resolve
+    // *against* that root (`brel/copies/brel/copies/…`) and the copy would land in the wrong place.
+    // The repository is resolved against the process working directory — the directory the batch was
+    // launched from, which is where a relatively-mined `task.repo` is meaningful — so a repo mined by
+    // relative path is still materialisable.
+    let out_abs = absolute(&config.out)?;
+    let copies_root = copies_root(&out_abs);
     std::fs::create_dir_all(&copies_root)?;
     let dest = copies_root.join(&task.id).join(mode.system());
+    let repo_abs = absolute(Path::new(&task.repo))?;
     // R1: a re-run into the same `--out` must get a *fresh* copy. A leftover `dest` from a previous
     // run — or a file a previous session edited — is not the snapshot, so it is cleared before
     // provisioning (the store is cleared the same way above). `materialize` replaces a pre-existing
@@ -338,7 +362,7 @@ pub fn run_one(
     }
     let provision = runner.run(
         &copies_root,
-        &provision_argv(Path::new(&task.repo), snapshot, &dest),
+        &provision_argv(&repo_abs, snapshot, &dest),
         &config.limits,
     );
     ctx.observe(tsr_domain::Observation::Evidence {
@@ -349,7 +373,7 @@ pub fn run_one(
     // the session and the oracle against a directory that does not hold the snapshot, so refuse.
     if provision.exit != 0 {
         return Err(RunError::ProvisioningFailed {
-            argv: provision_argv(Path::new(&task.repo), snapshot, &dest).join(" "),
+            argv: provision_argv(&repo_abs, snapshot, &dest).join(" "),
             exit: provision.exit,
         });
     }

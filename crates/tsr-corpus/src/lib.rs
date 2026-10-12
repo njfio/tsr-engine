@@ -275,9 +275,46 @@ impl ExecRunner {
     }
 }
 
+/// The provisioning argv a [`Runner`] is asked to serve: `tsr corpus materialize …`.
+///
+/// Provisioning is a **trusted host step** (N3, PRD §B10): the runner materialises the snapshot into
+/// the task's copy itself, reading the repository (which is only read) and writing only into the
+/// copy. It is never handed to `tsr exec`, because the sealed sandbox mounts only its working
+/// directory — the copies root — so a `--repo` outside it would be unreadable and provisioning would
+/// fail. Returns `(repo, snapshot, dest)` when `argv` is a provisioning argv.
+pub fn provision_argv_parts(argv: &[String]) -> Option<(PathBuf, String, PathBuf)> {
+    if argv.len() < 3 || argv[0] != "tsr" || argv[1] != "corpus" || argv[2] != "materialize" {
+        return None;
+    }
+    let value = |flag: &str| -> Option<String> {
+        argv.iter()
+            .position(|a| a == flag)
+            .and_then(|i| argv.get(i + 1))
+            .cloned()
+    };
+    let repo = value("--repo")?;
+    let snapshot = value("--snapshot")?;
+    let dest = value("--out")?;
+    Some((PathBuf::from(repo), snapshot, PathBuf::from(dest)))
+}
+
 impl Runner for ExecRunner {
     fn run(&self, snapshot: &Path, argv: &[String], limits: &Limits) -> RunResult {
         let started = Instant::now();
+        // N3: provisioning is a trusted host step, never `tsr exec`. The sealed sandbox mounts only
+        // its working directory (the copies root), so a `--repo` outside it is unreadable there;
+        // materialising on the host reads the repository (which is only read) and writes only into
+        // the task's copy. Every other argv — session steps, the oracle — still goes through
+        // `tsr exec`.
+        if let Some((repo, snap, dest)) = provision_argv_parts(argv) {
+            return match crate::mine::materialize(&repo, &snap, &dest) {
+                Ok(_) => RunResult::from_output(0, b"", b"", elapsed_ms(started, limits)),
+                Err(e) => {
+                    let msg = format!("tsr-corpus: provisioning failed: {e}\n");
+                    RunResult::from_output(1, b"", msg.as_bytes(), elapsed_ms(started, limits))
+                }
+            };
+        }
         let mut cmd = Command::new(&self.program);
         cmd.args(exec_argv(argv));
         cmd.current_dir(snapshot);
