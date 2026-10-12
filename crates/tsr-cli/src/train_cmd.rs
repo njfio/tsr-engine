@@ -86,6 +86,17 @@ pub enum TrainCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Apply a bundle to a dataset's rows: raw p, calibrated p (or uncalibrated) and support (B7, B10).
+    Apply {
+        /// The bundle directory.
+        bundle: PathBuf,
+        /// The dataset directory.
+        #[arg(long)]
+        dataset: PathBuf,
+        /// The side to apply to: `held_out` (default), `fit`, `calibrate` or `all`.
+        #[arg(long, default_value = "held_out")]
+        side: String,
+    },
 }
 
 /// Run a `tsr train` subcommand, returning the process exit code.
@@ -124,6 +135,11 @@ pub fn run(cmd: TrainCmd) -> std::process::ExitCode {
             seed,
             json,
         } => run_report(&bundle, &dataset, seed, json),
+        TrainCmd::Apply {
+            bundle,
+            dataset,
+            side,
+        } => run_apply(&bundle, &dataset, &side),
     }
 }
 
@@ -175,7 +191,8 @@ fn read_events_file(path: &Path) -> Result<Vec<(i64, Event)>, String> {
 /// task is its own lineage and its family is `unknown`; a caller that needs the real family and
 /// lineage passes `--tasks`.
 fn index_from_log(log: &[(i64, Event)]) -> Vec<TaskIndexRow> {
-    let mut seen: std::collections::BTreeSet<tsr_domain::TaskId> = std::collections::BTreeSet::new();
+    let mut seen: std::collections::BTreeSet<tsr_domain::TaskId> =
+        std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (_, ev) in log {
         if !seen.insert(ev.task) {
@@ -393,6 +410,81 @@ fn report_path(bundle: &Path, ext: &str) -> std::path::PathBuf {
     let mut s = bundle.as_os_str().to_os_string();
     s.push(format!(".report.{ext}"));
     std::path::PathBuf::from(s)
+}
+
+/// Apply a bundle to a dataset's rows (B7, B10): per row its id, family, `raw p`, then `p` with its
+/// calibrator version or `uncalibrated`, and `support=<n>`.
+///
+/// `--side held_out` (the default) reads only held_out rows and logs each read to
+/// `holdout-access.jsonl`; `fit`, `calibrate` and `all` read the other sides.
+fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCode {
+    let b = match tsr_learn::bundle::load_bundle(bundle) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("tsr: cannot load bundle: {e}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    let ds = match tsr_learn::bundle::load_dataset(dataset) {
+        Ok(ds) => ds,
+        Err(e) => {
+            eprintln!("tsr: cannot load dataset: {e}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    let want: Option<tsr_learn::dataset::Side> = match side {
+        "held_out" => Some(tsr_learn::dataset::Side::HeldOut),
+        "fit" => Some(tsr_learn::dataset::Side::Fit),
+        "calibrate" => Some(tsr_learn::dataset::Side::Calibrate),
+        "all" => None,
+        other => {
+            eprintln!("tsr: --side must be `held_out`, `fit`, `calibrate` or `all`, not {other:?}");
+            return std::process::ExitCode::from(2);
+        }
+    };
+    // B9: every read of a held_out row is logged, the apply pass included.
+    for r in &ds.rows {
+        if r.side == tsr_learn::dataset::Side::HeldOut {
+            if let Err(e) = tsr_learn::probes::log_holdout_access(dataset, r, "apply") {
+                eprintln!("tsr: cannot log holdout access: {e}");
+                return std::process::ExitCode::from(1);
+            }
+        }
+    }
+    let mut printed = 0u32;
+    for r in &ds.rows {
+        if let Some(w) = want {
+            if r.side != w {
+                continue;
+            }
+        }
+        let applied = match b.apply(r) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("tsr: cannot apply bundle to row {}: {e}", r.id.to_hex());
+                return std::process::ExitCode::from(2);
+            }
+        };
+        let calibrated = match &applied.calibrated {
+            Some(c) => format!(
+                "p={} calibrator={}",
+                tsr_learn::report::proxy("p", c.p.get()),
+                c.calibrator
+            ),
+            None => "uncalibrated".to_string(),
+        };
+        println!(
+            "row {} family {} {} {} support={}",
+            r.id.to_hex(),
+            r.family,
+            tsr_learn::report::proxy("raw_p", applied.raw_p),
+            calibrated,
+            applied.support.episodes
+        );
+        printed += 1;
+    }
+    println!("rows={printed}");
+    std::process::ExitCode::SUCCESS
 }
 
 fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::process::ExitCode {

@@ -40,6 +40,22 @@ pub const BOOTSTRAP_RESAMPLES: usize = 2000;
 /// The bootstrap confidence level.
 pub const BOOTSTRAP_LEVEL: f64 = 0.90;
 
+/// One reliability bin: its bounds, its row count, the mean forecast in it and the observed
+/// frequency of the label there (as lane 04's tsr-forecast reports).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReliabilityBin {
+    /// The bin's lower bound.
+    pub lower: f64,
+    /// The bin's upper bound.
+    pub upper: f64,
+    /// The number of rows in the bin.
+    pub n: u32,
+    /// The mean forecast of the rows in the bin.
+    pub mean_forecast: f64,
+    /// The observed frequency of the label in the bin.
+    pub observed_frequency: f64,
+}
+
 /// One forecaster's scores over a set of rows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Scores {
@@ -48,8 +64,8 @@ pub struct Scores {
     pub brier: Option<f64>,
     /// The mean log loss, or `None` for an empty set.
     pub log_loss: Option<f64>,
-    /// 10 equal-width bins: `(lower, upper, count)`.
-    pub reliability: Vec<(f64, f64, u32)>,
+    /// 10 equal-width bins, each with its n, mean forecast and observed frequency.
+    pub reliability: Vec<ReliabilityBin>,
 }
 
 /// A paired difference with its cluster-bootstrap interval.
@@ -156,22 +172,36 @@ pub fn score(pairs: &[(f64, f64)]) -> Scores {
     }
     let mut brier = 0.0;
     let mut log_loss = 0.0;
-    let mut bins = [0u32; RELIABILITY_BINS];
+    let mut counts = [0u32; RELIABILITY_BINS];
+    let mut sum_p = [0.0f64; RELIABILITY_BINS];
+    let mut sum_y = [0.0f64; RELIABILITY_BINS];
     for (p, y) in pairs {
         brier += (p - y) * (p - y);
         let c = p.clamp(LOG_LOSS_CLIP, 1.0 - LOG_LOSS_CLIP);
         log_loss += -(y * c.ln() + (1.0 - y) * (1.0 - c).ln());
         let idx = ((p * RELIABILITY_BINS as f64) as usize).min(RELIABILITY_BINS - 1);
-        bins[idx] += 1;
+        counts[idx] += 1;
+        sum_p[idx] += p;
+        sum_y[idx] += y;
     }
     let nf = pairs.len() as f64;
-    let reliability = bins
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
+    let reliability = (0..RELIABILITY_BINS)
+        .map(|i| {
             let lo = i as f64 / RELIABILITY_BINS as f64;
             let hi = (i + 1) as f64 / RELIABILITY_BINS as f64;
-            (lo, hi, *c)
+            let n = counts[i];
+            let (mean_forecast, observed_frequency) = if n == 0 {
+                (0.0, 0.0)
+            } else {
+                (sum_p[i] / n as f64, sum_y[i] / n as f64)
+            };
+            ReliabilityBin {
+                lower: lo,
+                upper: hi,
+                n,
+                mean_forecast,
+                observed_frequency,
+            }
         })
         .collect();
     Scores {
@@ -563,7 +593,7 @@ pub fn render_report(r: &Report, json: bool) -> String {
 
     out.push_str("\npopulation\n");
     for (name, n) in &r.population {
-        out.push_str(&format!("family {name} {}\n", proxy("support", *n as f64)));
+        out.push_str(&format!("family {name} tasks={n}\n"));
     }
 
     out.push_str("\nfloor sweep (calibrate slice)\n");
@@ -597,10 +627,14 @@ fn render_scores(label: &str, s: &Scores) -> String {
         None => "log_loss=n/a".to_string(),
     };
     out.push_str(&format!("  {label} n={} {brier} {log_loss}\n", s.n));
-    for (lo, hi, c) in &s.reliability {
+    for b in &s.reliability {
         out.push_str(&format!(
-            "    bin [{lo:.1},{hi:.1}) {}\n",
-            proxy("coverage", *c as f64)
+            "    bin [{:.1},{:.1}) n={} {} {}\n",
+            b.lower,
+            b.upper,
+            b.n,
+            proxy("mean_forecast", b.mean_forecast),
+            proxy("observed_frequency", b.observed_frequency),
         ));
     }
     out
@@ -787,10 +821,7 @@ mod tests {
         let r = report(&b, &ds, 11);
         let cb = r.controller.brier.expect("controller has rows");
         let gb = r.generator.brier.expect("generator has rows");
-        assert!(
-            cb < gb,
-            "controller {cb} < generator {gb}"
-        );
+        assert!(cb < gb, "controller {cb} < generator {gb}");
         let p = &r.paired;
         assert!(p.interval.is_some(), "two or more clusters");
         let (lo, hi) = p.interval.unwrap();
@@ -1044,13 +1075,29 @@ mod tests {
         for i in 0..20u64 {
             let label = i % 2 == 0;
             let signal = if label { 1.0 } else { 0.0 };
-            rows.push(row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i));
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
         }
         // 10 calibrated rows with NO generator p: the controller can score them, the generator cannot.
         for i in 20..30u64 {
             let label = i % 2 == 0;
             let signal = if label { 1.0 } else { 0.0 };
-            let mut r = row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i);
+            let mut r = row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            );
             r.generator_raw = None;
             rows.push(r);
         }
@@ -1059,7 +1106,15 @@ mod tests {
         for i in 30..40u64 {
             let label = i % 2 == 0;
             let signal = if label { 1.0 } else { 0.0 };
-            rows.push(row(&b, "underconfident", &format!("l{}", i % 3), signal, label, 0.9, i));
+            rows.push(row(
+                &b,
+                "underconfident",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
         }
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 7);
@@ -1068,9 +1123,15 @@ mod tests {
             "B4: controller n={} and generator n={} must be the same comparison set",
             r.controller.n, r.generator.n
         );
-        assert_eq!(r.controller.n, 20, "the comparison set is the 20 rows with both p's");
+        assert_eq!(
+            r.controller.n, 20,
+            "the comparison set is the 20 rows with both p's"
+        );
         // The uncalibrated rows are excluded from the pair and counted.
-        assert_eq!(r.uncalibrated, 10, "the ten underconfident rows are uncalibrated");
+        assert_eq!(
+            r.uncalibrated, 10,
+            "the ten underconfident rows are uncalibrated"
+        );
     }
 
     /// B5: a task's paired difference is the MEAN over its rows of (controller − generator), so the
@@ -1087,9 +1148,27 @@ mod tests {
         //   (0.1-0)^2 - (0.5-0)^2 = 0.01 - 0.25 = -0.24 each.
         // Per-task mean = (0 + (-0.24))/2 = -0.12; per-row mean = (0 + (-0.24)*3)/4 = -0.18.
         let mut rows = Vec::new();
-        rows.push(row_in_task(&b, "calibrated", "lA", "taskA", 1.0, true, 0.9, 0));
+        rows.push(row_in_task(
+            &b,
+            "calibrated",
+            "lA",
+            "taskA",
+            1.0,
+            true,
+            0.9,
+            0,
+        ));
         for i in 1..4u64 {
-            rows.push(row_in_task(&b, "calibrated", "lB", "taskB", 0.0, false, 0.5, i));
+            rows.push(row_in_task(
+                &b,
+                "calibrated",
+                "lB",
+                "taskB",
+                0.0,
+                false,
+                0.5,
+                i,
+            ));
         }
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 7);
@@ -1105,12 +1184,23 @@ mod tests {
     /// family prints brier=0.000000.
     #[test]
     fn b6_empty_set_prints_na_not_a_number() {
-        let b = bundle_for(&["calibrated", "overconfident"], &["calibrated", "overconfident"]);
+        let b = bundle_for(
+            &["calibrated", "overconfident"],
+            &["calibrated", "overconfident"],
+        );
         let mut rows = Vec::new();
         for i in 0..20u64 {
             let label = i % 2 == 0;
             let signal = if label { 1.0 } else { 0.0 };
-            rows.push(row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i));
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
         }
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 7);
@@ -1123,5 +1213,76 @@ mod tests {
             "B6: an empty set must not print a number:\n{text}"
         );
         assert!(text.contains("n/a"), "B6: an empty set prints n/a:\n{text}");
+    }
+
+    /// B10: reliability bins carry, per bin, n, the mean forecast and the observed frequency (as
+    /// lane 04's tsr-forecast does); bin counts print as `n=`, not `coverage=`; population counts
+    /// print as `tasks=`, not `support=`; `coverage` is used only in the floor sweep. Today a bin
+    /// prints only its count under the name `coverage`, and the population prints `support=`.
+    #[test]
+    fn b10_reliability_bins_carry_n_mean_and_observed_frequency() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // 20 rows, half label true at signal 1.0 (controller 0.9) and half label false at signal
+        // 0.0 (controller 0.1). The 0.9 bin holds 10 rows with mean forecast 0.9 and observed
+        // frequency 1.0; the 0.1 bin holds 10 rows with mean forecast 0.1 and observed 0.0.
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.5,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        let bins = &r.controller.reliability;
+        assert_eq!(bins.len(), RELIABILITY_BINS, "ten equal-width bins");
+        let total: u32 = bins.iter().map(|b| b.n).sum();
+        assert_eq!(total, 20, "every scored row falls in exactly one bin");
+        // The 0.9 bin: n=10, mean forecast 0.9, observed frequency 1.0.
+        let hi = bins
+            .iter()
+            .find(|b| b.n == 10 && (b.mean_forecast - 0.9).abs() < 1e-9)
+            .expect("a bin with n=10 and mean forecast 0.9");
+        assert!(
+            (hi.observed_frequency - 1.0).abs() < 1e-9,
+            "the 0.9 bin's observed frequency is 1.0, got {}",
+            hi.observed_frequency
+        );
+        let lo = bins
+            .iter()
+            .find(|b| b.n == 10 && (b.mean_forecast - 0.1).abs() < 1e-9)
+            .expect("a bin with n=10 and mean forecast 0.1");
+        assert!(
+            (lo.observed_frequency - 0.0).abs() < 1e-9,
+            "the 0.1 bin's observed frequency is 0.0, got {}",
+            lo.observed_frequency
+        );
+
+        let text = render_report(&r, false);
+        // Bin counts print as `n=`, never `coverage=`.
+        assert!(
+            !text.contains("coverage="),
+            "B10: a bin count must not print as coverage=:\n{text}"
+        );
+        assert!(
+            text.contains("bin [0.9,1.0) n=10"),
+            "B10: a bin prints its n, mean forecast and observed frequency:\n{text}"
+        );
+        // Population counts print as `tasks=`, never `support=`.
+        assert!(
+            text.contains("family calibrated tasks="),
+            "B10: a population count prints as tasks=:\n{text}"
+        );
+        assert!(
+            !text.contains("support="),
+            "B10: a population count must not print as support=:\n{text}"
+        );
     }
 }

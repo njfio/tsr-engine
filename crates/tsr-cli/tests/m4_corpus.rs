@@ -371,3 +371,98 @@ fn two_real_sessions_pair_each_commitment_with_its_own_generator_forecast() {
         );
     }
 }
+
+/// B7, B10: `tsr train apply` prints, per row, its id, family, `raw p`, then `p` with its calibrator
+/// version or `uncalibrated`, and `support=<n>`; a held_out read is logged to holdout-access.jsonl.
+#[test]
+fn b7_train_apply_prints_raw_and_calibrated_p_and_support() {
+    use std::process::Command;
+
+    let dir = temp_dir("apply");
+    let data = dir.join("data");
+    let bundle = dir.join("bundle");
+    let tsr = PathBuf::from(env!("CARGO_BIN_EXE_tsr"));
+    let fx = fixtures_dir();
+
+    let dataset = Command::new(&tsr)
+        .args([
+            "train",
+            "dataset",
+            "--events",
+            fx.join("events.jsonl").to_str().expect("events"),
+            "--tasks",
+            fx.join("tasks.jsonl").to_str().expect("tasks"),
+            "--labels",
+            fx.join("labels.jsonl").to_str().expect("labels"),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            "7",
+            "--out",
+            data.to_str().expect("data"),
+        ])
+        .output()
+        .expect("run tsr train dataset");
+    assert!(
+        dataset.status.success(),
+        "tsr train dataset succeeds: {}",
+        String::from_utf8_lossy(&dataset.stderr)
+    );
+
+    let fit = Command::new(&tsr)
+        .args([
+            "train",
+            "fit",
+            data.to_str().expect("data"),
+            "--out",
+            bundle.to_str().expect("bundle"),
+        ])
+        .output()
+        .expect("run tsr train fit");
+    assert!(
+        fit.status.success(),
+        "tsr train fit succeeds: {}",
+        String::from_utf8_lossy(&fit.stderr)
+    );
+
+    let apply = Command::new(&tsr)
+        .args([
+            "train",
+            "apply",
+            bundle.to_str().expect("bundle"),
+            "--dataset",
+            data.to_str().expect("data"),
+            "--side",
+            "held_out",
+        ])
+        .output()
+        .expect("run tsr train apply");
+    assert!(
+        apply.status.success(),
+        "tsr train apply succeeds: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let text = String::from_utf8_lossy(&apply.stdout);
+    assert!(
+        text.contains("raw_p="),
+        "B7: apply prints each row's raw p:\n{text}"
+    );
+    assert!(
+        text.contains("support="),
+        "B7: apply prints each row's support:\n{text}"
+    );
+    assert!(
+        text.contains("calibrator=") || text.contains("uncalibrated"),
+        "B7: apply prints p with its calibrator version or uncalibrated:\n{text}"
+    );
+    // B9: a held_out read is logged.
+    let log = data.join("holdout-access.jsonl");
+    assert!(
+        log.exists(),
+        "B9: apply on held_out logs each read to holdout-access.jsonl"
+    );
+}

@@ -75,10 +75,60 @@ pub struct Bundle {
     pub population: BTreeMap<String, u32>,
 }
 
+/// The result of applying a bundle to a row (B7, B10; lane 06 item 8).
+///
+/// `raw_p` is the head's output, always. `calibrated` is `Some` only for a row whose family is in
+/// the bundle's calibrated population — the calibrator is the bundle id and the population is the
+/// family's fit+calibrate resolved count — and `None` (`uncalibrated`) otherwise, never a
+/// fabricated number. `support` is the same-family fit+calibrate episode count within feature range.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Applied {
+    /// The controller's raw probability: the head's output, always.
+    pub raw_p: f64,
+    /// The calibrated probability, only for a family in the population.
+    pub calibrated: Option<tsr_domain::Calibrated>,
+    /// The same-family episodes within feature range.
+    pub support: tsr_domain::Support,
+}
+
 impl Bundle {
     /// Whether a family is in the calibrated population.
     pub fn population_contains(&self, family: &str) -> bool {
         self.population.contains_key(family)
+    }
+
+    /// Apply the bundle to a row (B7, B10): the raw `p`, a `Calibrated` only for a family in the
+    /// population, and the support.
+    ///
+    /// The raw `p` is the head's output, always. `Calibrated { p, calibrator, population }` is
+    /// constructed only when the row's family is in the bundle's population: `calibrator` is the
+    /// bundle id's first 12 hex and the feature-schema version (the manifest's `calibrator`), and
+    /// `population` names the family with its fit+calibrate resolved count. Every other row is
+    /// `uncalibrated` — `calibrated` is `None`, never a fabricated number. A row whose feature
+    /// length differs from the head's is refused rather than zipped.
+    pub fn apply(&self, row: &Row) -> Result<Applied, LearnError> {
+        let raw = crate::head::predict_checked(&self.head, &row.features)?;
+        let support =
+            crate::support::support(&self.spec, &self.support_index, &row.family, &row.features);
+        let calibrated = match self.population.get(&row.family) {
+            Some(count) => {
+                let p = crate::isotonic::apply_isotonic(&self.isotonic, raw);
+                let probability = tsr_domain::Probability::new(p).map_err(|e| {
+                    LearnError::Invalid(format!("calibrated p {p} is not a probability: {e}"))
+                })?;
+                Some(tsr_domain::Calibrated {
+                    p: probability,
+                    calibrator: self.manifest.calibrator.clone(),
+                    population: format!("{}={count}", row.family),
+                })
+            }
+            None => None,
+        };
+        Ok(Applied {
+            raw_p: raw,
+            calibrated,
+            support,
+        })
     }
 }
 
@@ -707,6 +757,76 @@ mod tests {
             training_root,
             source_root: Hash::of(&[b"source"]),
         }
+    }
+
+    /// B7, B10: `apply` returns the raw p always, a `Calibrated` only for a family in the population,
+    /// and the support. A family outside the population is `uncalibrated` — `calibrated` is `None`,
+    /// never a fabricated number.
+    #[test]
+    fn b7_apply_calibrates_only_a_family_in_the_population() {
+        let ds = dataset();
+        let ddir = tmpdir("ds-apply");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out-apply");
+        let id = write_bundle(&ddir, &out, 30).unwrap();
+        let b = load_bundle(&out).unwrap();
+        assert!(
+            b.population_contains("calibrated"),
+            "the fixture's family is in the population"
+        );
+
+        // A row of the calibrated family: raw p, a Calibrated with the bundle's calibrator, support.
+        let mut v = vec![0.0; b.spec.names.len()];
+        v[0] = 1.0;
+        v[b.spec.names.len() - 1] = 2.0;
+        let in_pop = row("calibrated", v.clone(), Some(true), Side::HeldOut, 900);
+        let applied = b.apply(&in_pop).unwrap();
+        let raw = crate::head::predict_checked(&b.head, &in_pop.features).unwrap();
+        assert_eq!(applied.raw_p, raw, "raw p is the head's output, always");
+        let cal = applied
+            .calibrated
+            .as_ref()
+            .expect("a family in the population is calibrated");
+        assert_eq!(cal.calibrator, b.manifest.calibrator);
+        assert!(
+            cal.population.starts_with("calibrated="),
+            "the population names the family and its count, got {}",
+            cal.population
+        );
+        assert!(
+            applied.support.episodes > 0,
+            "the fixture has same-family rows"
+        );
+
+        // A row of a family outside the population: uncalibrated, never a fabricated number.
+        let out_pop = row("other", v, Some(true), Side::HeldOut, 901);
+        let applied = b.apply(&out_pop).unwrap();
+        assert!(
+            applied.calibrated.is_none(),
+            "a family outside the population is uncalibrated"
+        );
+        assert_eq!(
+            applied.raw_p,
+            crate::head::predict_checked(&b.head, &out_pop.features).unwrap()
+        );
+        assert_eq!(applied.support.episodes, 0, "no same-family rows");
+        let _ = id;
+    }
+
+    /// B7: a row whose feature length differs from the head's is refused, not zipped.
+    #[test]
+    fn b7_apply_refuses_a_feature_length_mismatch() {
+        let ds = dataset();
+        let ddir = tmpdir("ds-apply-len");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out-apply-len");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let b = load_bundle(&out).unwrap();
+        let short = row("calibrated", vec![1.0], Some(true), Side::HeldOut, 902);
+        assert!(
+            b.apply(&short).is_err(),
+            "a feature-length mismatch is an error, not a zip"
+        );
     }
 
     #[test]
