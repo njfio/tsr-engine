@@ -380,3 +380,63 @@ fn both_records_are_recorded_apart_and_only_contrast_expands() {
         other => panic!("expected an Observed return, got {other:?}"),
     }
 }
+
+/// R8: `expand` checks a Contrast's content address even when the Contrast was appended directly
+/// as an `Observed` event, not through `record_contrast`.
+///
+/// The content-address check used to sit only on the write helper (`record_contrast`), so a forged
+/// Contrast appended straight to the log was accepted by `expand` (`write.rs:152-166`). The fold
+/// must refuse it with `ContrastIdMismatch` (exit 2).
+#[test]
+fn r8_expand_rejects_a_forged_contrast_appended_directly() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let ret = a_return(&store);
+    let mut contrast = Filter::contrast_from_criteria(
+        ret,
+        vec![(criterion("c-reliability"), UnmetKind::WrongBehaviour)],
+        vec![ret],
+    );
+    // Forge the id: it is no longer the content address of (from_return, unmet, evidence).
+    contrast.id = tsr_domain::ContrastId(Hash::of(&[b"forged-contrast"]));
+    assert_ne!(
+        contrast.id,
+        tsr_ledger::filter::contrast_id(&contrast.from_return, &contrast.unmet, &contrast.evidence),
+        "the forged id is not the content address"
+    );
+
+    // Append it directly as an Observed event, bypassing `record_contrast`'s check.
+    let ev = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::Observed {
+            observation: Observation::Return {
+                surprise: Vec::new(),
+                contrast: Some(contrast.clone()),
+            },
+        },
+        "2026-01-01T00:07:00Z",
+    );
+    store.append(&ev).expect("append the forged contrast");
+
+    let err = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast.id,
+            "the task must not regress span offsets",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:07:30Z",
+        )
+        .expect_err("a forged contrast is refused");
+    assert!(
+        matches!(err, tsr_ledger::LedgerError::ContrastIdMismatch { .. }),
+        "the refusal is ContrastIdMismatch, got {err:?}"
+    );
+    assert_eq!(expanded_count(&store), 0, "nothing was appended");
+}

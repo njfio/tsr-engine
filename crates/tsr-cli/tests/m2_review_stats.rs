@@ -341,3 +341,48 @@ fn d4_stats_without_task_over_family() {
         "--stats --family without a task exits 0"
     );
 }
+
+/// D4: `tsr review --family alpha` without `--stats` must exit 2 with a message about the missing
+/// task, not `invalid task id ""`.
+///
+/// The positional is optional so `--stats` can omit it; without `--stats` the empty string used to
+/// reach `Hash::from_hex("")` and print `tsr: invalid task id "": …`, which names the wrong
+/// problem. The CLI must say the task is missing.
+#[test]
+fn d4_cli_family_without_stats_names_the_missing_task() {
+    let dir = std::env::temp_dir().join(format!("tsr-review-cli-nostats-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("tsr.db");
+    let _ = std::fs::remove_file(&db);
+    {
+        let store = Store::open(&db).unwrap();
+        let t = task(30);
+        let _ = append_return(&store, &t, 30, 0);
+    }
+    let bin = env!("CARGO_BIN_EXE_tsr");
+    let out = std::process::Command::new(bin)
+        .args([
+            "review",
+            "--family",
+            "alpha",
+            "--store",
+            db.to_str().unwrap(),
+        ])
+        .output()
+        .expect("the tsr binary runs");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "`tsr review --family alpha` without --stats exits 2; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("invalid task id"),
+        "the message must not be `invalid task id \"\"`; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("task"),
+        "the message names the missing task; stderr: {stderr}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -159,6 +159,14 @@ impl<'a> Ledger<'a> {
             } = &ev.kind
             {
                 if c.id == *id {
+                    // R8: the content-address check must hold for a Contrast appended directly as
+                    // an `Observed` event too, not only for one written through `record_contrast`.
+                    // A record whose id is not the content address of its own fields is refused.
+                    let expected =
+                        crate::filter::contrast_id(&c.from_return, &c.unmet, &c.evidence);
+                    if expected != c.id {
+                        return Err(LedgerError::ContrastIdMismatch { id: c.id, expected });
+                    }
                     return Ok(c.clone());
                 }
             }

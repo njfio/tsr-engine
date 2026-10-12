@@ -277,22 +277,28 @@ fn main() -> ExitCode {
 }
 
 fn run_task(cmd: TaskCmd) -> ExitCode {
-    // R5: the store is opened per arm, never up front. `task open` is the only arm that writes, so
-    // it is the only one that may create the store; `status`/`export`/`reconcile` only read, so a
-    // missing store is refused with exit 2 naming the path rather than created here.
+    // N2: `status` and `export` are M0 arms (lane 01's). At d2b5f96 `run_task` opened the shared
+    // store up front, so both create the store when it is missing and exit 0. Restore that.
+    //
+    // `reconcile` is M2 and reads the log itself: it must refuse a missing store with exit 2
+    // naming the path rather than create one (R5), so it is dispatched before the shared store is
+    // opened.
+    if let TaskCmd::Reconcile { task, store } = &cmd {
+        return reconcile_cmd::run(task, store.as_deref());
+    }
+    let store = match store_path::open_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tsr: cannot open store: {e}");
+            return ExitCode::from(1);
+        }
+    };
     match cmd {
         TaskCmd::Open {
             name,
             workspace,
             intent,
         } => {
-            let store = match store_path::open_store() {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("tsr: cannot open store: {e}");
-                    return ExitCode::from(1);
-                }
-            };
             let name = name.unwrap_or_else(|| "default".to_string());
             let workspace = workspace.unwrap_or_else(|| {
                 std::env::current_dir()
@@ -312,10 +318,6 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             }
         }
         TaskCmd::Status { task: name } => {
-            let store = match open_read_store() {
-                Ok(s) => s,
-                Err(code) => return code,
-            };
             let id = store_path::resolve_task(&store, &name);
             match task::status(&store, &id) {
                 Ok((count, last)) => {
@@ -331,12 +333,8 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
                 }
             }
         }
-        TaskCmd::Reconcile { task, store } => reconcile_cmd::run(&task, store.as_deref()),
+        TaskCmd::Reconcile { .. } => unreachable!("reconcile is dispatched before the store opens"),
         TaskCmd::Export { task: name } => {
-            let store = match open_read_store() {
-                Ok(s) => s,
-                Err(code) => return code,
-            };
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {
                 Ok(json) => {
@@ -348,24 +346,6 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
                     ExitCode::from(1)
                 }
             }
-        }
-    }
-}
-
-/// Open the store for a read-only `task` arm: the shared resolver's path (`TSR_DB`, else
-/// `.tsr/tsr.db`), refusing a store that does not exist with exit 2 naming the path. Never creates
-/// the store or its parent directory.
-fn open_read_store() -> Result<tsr_store::Store, ExitCode> {
-    let path = store_path::db_path();
-    if !path.is_file() {
-        eprintln!("tsr: no store at {}", path.display());
-        return Err(ExitCode::from(2));
-    }
-    match tsr_store::Store::open(&path) {
-        Ok(s) => Ok(s),
-        Err(e) => {
-            eprintln!("tsr: cannot open store {}: {e}", path.display());
-            Err(ExitCode::from(2))
         }
     }
 }

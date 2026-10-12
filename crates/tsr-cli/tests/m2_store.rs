@@ -20,11 +20,10 @@ fn tsr_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tsr"))
 }
 
-/// A scratch directory under the target dir (never `/tmp`, which this host prunes).
+/// A scratch directory under the system temp dir (R7: a test must never write into the source
+/// tree).
 fn scratch(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target-r5/m2-store")
-        .join(name);
+    let dir = std::env::temp_dir().join("m2-store").join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
@@ -170,6 +169,9 @@ fn run_tsr_no_db(cwd: &Path, args: &[&str]) -> (i32, String, String) {
 
 /// R5: `tsr task reconcile` with `TSR_DB` unset must NOT create `.tsr/tsr.db`; it only reads, so a
 /// missing store is refused with exit 2 naming the path.
+///
+/// N2: `run_task` now opens the shared store up front (as at d2b5f96), so the refusal comes from
+/// `reconcile_cmd`'s own leaf guard, which names the path it could not read.
 #[test]
 fn r5_task_reconcile_without_tsr_db_refuses_missing_store() {
     let dir = scratch("reconcile-no-db");
@@ -192,41 +194,31 @@ fn r5_task_reconcile_without_tsr_db_refuses_missing_store() {
     );
 }
 
-/// R5: `tsr task status` with `TSR_DB` unset must NOT create `.tsr/tsr.db`.
+/// N2: `tsr task status` and `tsr task export` are M0 arms (lane 01's). At d2b5f96 `run_task`
+/// opened the shared store up front, so both arms create the store when it is missing and exit 0
+/// with an empty task. The lane's unrequested change made them refuse a missing store with exit 2;
+/// this reverts that. An M0 test, not this lane's, decides their behaviour.
 #[test]
-fn r5_task_status_without_tsr_db_refuses_missing_store() {
-    let dir = scratch("status-no-db");
+fn n2_task_status_and_export_use_the_shared_store() {
+    let dir = scratch("n2-status-export");
     let cwd = dir.join("cwd");
     std::fs::create_dir_all(&cwd).unwrap();
-    let t = task(5);
+    let t = task(7);
 
     let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "status", &t.to_string()]);
     assert_eq!(
-        code, 2,
-        "a missing store is refused with exit 2; stderr={stderr}"
+        code, 0,
+        "task status opens the shared store like M0; stderr={stderr}"
     );
     assert!(
-        !cwd.join(".tsr").join("tsr.db").exists(),
-        "task status must not create .tsr/tsr.db it only reads"
+        cwd.join(".tsr").join("tsr.db").exists(),
+        "task status creates the shared store, as at d2b5f96"
     );
-}
-
-/// R5: `tsr task export` with `TSR_DB` unset must NOT create `.tsr/tsr.db`.
-#[test]
-fn r5_task_export_without_tsr_db_refuses_missing_store() {
-    let dir = scratch("export-no-db");
-    let cwd = dir.join("cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let t = task(6);
 
     let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "export", &t.to_string()]);
     assert_eq!(
-        code, 2,
-        "a missing store is refused with exit 2; stderr={stderr}"
-    );
-    assert!(
-        !cwd.join(".tsr").join("tsr.db").exists(),
-        "task export must not create .tsr/tsr.db it only reads"
+        code, 0,
+        "task export opens the shared store like M0; stderr={stderr}"
     );
 }
 

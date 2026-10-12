@@ -532,6 +532,12 @@ pub fn run(args: &ReviewArgs) -> ExitCode {
         };
         return print_stats(&store, &task, args.family.as_deref());
     }
+    // D4: without `--stats` a task is required. An empty positional (the CLI makes it optional so
+    // `--stats` can omit it) must name the missing task, not report `invalid task id ""`.
+    if args.task.trim().is_empty() {
+        eprintln!("tsr: review needs a task id (or --stats to compute over a family)");
+        return ExitCode::from(2);
+    }
     let task = match Hash::from_hex(&args.task) {
         Ok(h) => TaskId(h),
         Err(e) => {

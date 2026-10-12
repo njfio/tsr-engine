@@ -947,11 +947,10 @@ fn cli_reconcile_over_a_real_store_reports_and_settles() {
 // as settled). These tests drive the built binary over a real on-disk store and CAS.
 // ---------------------------------------------------------------------------------------------
 
-/// A scratch directory under the target dir (never `/tmp`, which this host prunes).
+/// A scratch directory under the system temp dir (R7: a test must never write into the source
+/// tree).
 fn d1_scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/d1-reconcile")
-        .join(name);
+    let dir = std::env::temp_dir().join("d1-reconcile").join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
