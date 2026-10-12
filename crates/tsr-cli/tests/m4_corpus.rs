@@ -328,6 +328,19 @@ fn two_real_sessions_pair_each_commitment_with_its_own_generator_forecast() {
     drive("m4-two-sessions-a", "cargo test --offline -p parser");
     drive("m4-two-sessions-b", "cargo test --offline -p lexer");
 
+    // R6: `--tasks` is required. One index row per session, each its own lineage. The task id is
+    // `task_for_session(session_id)`, exactly as the hook derives it.
+    let tasks = dir.join("tasks.jsonl");
+    let ta = tsr_cli::store_path::task_for_session("m4-two-sessions-a");
+    let tb = tsr_cli::store_path::task_for_session("m4-two-sessions-b");
+    std::fs::write(
+        &tasks,
+        format!(
+            "{{\"task\":\"{ta}\",\"family\":\"calibrated\",\"lineage\":\"lineage-a\",\"timestamp\":\"2026-02-01T00:00:00Z\"}}\n{{\"task\":\"{tb}\",\"family\":\"calibrated\",\"lineage\":\"lineage-b\",\"timestamp\":\"2026-02-02T00:00:00Z\"}}\n"
+        ),
+    )
+    .expect("write tasks.jsonl");
+
     // `tsr train dataset --store` reads the whole store and writes rows.jsonl.
     let dataset = Command::new(&tsr)
         .args([
@@ -335,6 +348,8 @@ fn two_real_sessions_pair_each_commitment_with_its_own_generator_forecast() {
             "dataset",
             "--store",
             db.to_str().expect("db path"),
+            "--tasks",
+            tasks.to_str().expect("tasks path"),
             "--out",
             out.to_str().expect("out path"),
             "--by",
@@ -642,12 +657,25 @@ fn two_real_forecasts_pair_both_with_the_commitment() {
         }),
     );
 
+    // R6: `--tasks` is required. One index row for the session, keyed by the id the hook derives.
+    let tasks = dir.join("tasks.jsonl");
+    let tid = tsr_cli::store_path::task_for_session(session);
+    std::fs::write(
+        &tasks,
+        format!(
+            "{{\"task\":\"{tid}\",\"family\":\"calibrated\",\"lineage\":\"lineage-a\",\"timestamp\":\"2026-02-01T00:00:00Z\"}}\n"
+        ),
+    )
+    .expect("write tasks.jsonl");
+
     let dataset = Command::new(&tsr)
         .args([
             "train",
             "dataset",
             "--store",
             db.to_str().expect("db path"),
+            "--tasks",
+            tasks.to_str().expect("tasks path"),
             "--out",
             out.to_str().expect("out path"),
             "--by",

@@ -640,6 +640,16 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
 
+    // F6/B8: `code_commit` is not part of the bundle id (so `TSR_CODE_COMMIT` does not move the
+    // id), so an edit to it would otherwise verify. It must match the environment that verifies.
+    if manifest.code_commit != code_commit() {
+        return Err(VerifyError::Learn(LearnError::Invalid(format!(
+            "manifest.toml: code_commit {:?} is not the current {:?}",
+            manifest.code_commit,
+            code_commit()
+        ))));
+    }
+
     // Fail closed: a manifest that omits its id or any content digest is refused, never treated
     // as "no mismatch". `id` and `content_digests` are `#[serde(default)]`, so a stripped manifest
     // parses; without this check `verify_bundle` would perform no digest and no id check at all.
@@ -654,6 +664,16 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
                 "manifest.toml: missing content digest for {name:?}"
             ))));
         }
+    }
+
+    // F6/B8: the manifest must be the canonical rendering of its own fields, so a comment,
+    // whitespace or a reordered key is refused rather than verifying with exit 0.
+    let canonical = toml::to_string_pretty(&manifest)
+        .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
+    if canonical != manifest_text {
+        return Err(VerifyError::Learn(LearnError::Invalid(
+            "manifest.toml: not the canonical rendering of its fields".to_string(),
+        )));
     }
 
     // Recompute every content file's digest and compare with the stored digest, naming the file.
@@ -1271,6 +1291,39 @@ mod tests {
         assert!(
             err.contains("manifest.toml") && err.contains("canonical"),
             "F6: a comment must be refused as non-canonical, got: {err}"
+        );
+    }
+
+    /// F6/B8: `code_commit` is not part of the bundle id, so an edit to it must be refused by
+    /// `verify_bundle` against the current environment.
+    #[test]
+    fn f6_a_code_commit_edit_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-commit-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("f6-commit-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged: String = text
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("code_commit =") {
+                    "code_commit = \"deadbeef\"".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, forged).unwrap();
+        let err = match verify_bundle(&out, None) {
+            Ok(_) => panic!("F6: a code_commit edit must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml") && err.contains("code_commit"),
+            "F6: a code_commit edit must be refused naming manifest.toml, got: {err}"
         );
     }
 
