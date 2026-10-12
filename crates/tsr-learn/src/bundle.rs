@@ -107,7 +107,7 @@ impl Bundle {
     /// `uncalibrated` — `calibrated` is `None`, never a fabricated number. A row whose feature
     /// length differs from the head's is refused rather than zipped.
     pub fn apply(&self, row: &Row) -> Result<Applied, LearnError> {
-        let raw = crate::head::predict_checked(&self.head, &row.features)?;
+        let raw = crate::head::predict_checked(&self.head, &self.spec, &row.features)?;
         let support =
             crate::support::support(&self.spec, &self.support_index, &row.family, &row.features);
         let calibrated = match self.population.get(&row.family) {
@@ -288,6 +288,29 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
             split_digest.to_hex()
         )));
     }
+
+    // B15: the standardization statistics live in `features.json` (the spec). Recompute them from
+    // the fit slice's labelled rows and refuse a spec whose declared statistics disagree, so a
+    // tampered `features.json` cannot silently change how every row is standardized.
+    let mut spec = spec;
+    let fit_labelled: Vec<Row> = rows
+        .iter()
+        .filter(|r| r.side == Side::Fit && r.label.is_some())
+        .cloned()
+        .collect();
+    let (mean, std) = crate::head::standardize_stats(&fit_labelled, spec.names.len());
+    if !spec.standardize_mean.is_empty() && spec.standardize_mean != mean {
+        return Err(LearnError::Invalid(
+            "features.json: standardize_mean disagrees with the fit slice's recomputed mean".into(),
+        ));
+    }
+    if !spec.standardize_std.is_empty() && spec.standardize_std != std {
+        return Err(LearnError::Invalid(
+            "features.json: standardize_std disagrees with the fit slice's recomputed std".into(),
+        ));
+    }
+    spec.standardize_mean = mean;
+    spec.standardize_std = std;
     let source_root = Hash::from_hex(
         manifest["source_root"]
             .as_str()
@@ -307,11 +330,21 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     })
 }
 
+/// B15 test hook: the support index a dataset would produce, so a test can assert it holds only
+/// labelled fit/calibrate rows.
+#[cfg(test)]
+pub fn support_index_for_test(ds: &Dataset) -> Vec<SupportEntry> {
+    support_index(ds)
+}
+
 /// The support index: each fit- and calibrate-slice row's family and feature vector, no labels.
+///
+/// B15: only rows with a **resolved label** count — an unlabelled row is not a resolved episode, so
+/// it must not inflate support. (The index carries no label; the filter is applied here.)
 fn support_index(ds: &Dataset) -> Vec<SupportEntry> {
     ds.rows
         .iter()
-        .filter(|r| r.side == Side::Fit || r.side == Side::Calibrate)
+        .filter(|r| (r.side == Side::Fit || r.side == Side::Calibrate) && r.label.is_some())
         .map(|r| SupportEntry {
             family: r.family.clone(),
             features: r.features.clone(),
@@ -479,7 +512,7 @@ pub fn write_bundle(
         .collect();
     let xs: Vec<f64> = cal_rows
         .iter()
-        .map(|r| crate::head::predict(&head, &r.features))
+        .map(|r| crate::head::predict(&head, &ds.spec, &r.features))
         .collect();
     let ys: Vec<f64> = cal_rows
         .iter()
@@ -878,7 +911,7 @@ mod tests {
         v[b.spec.names.len() - 1] = 2.0;
         let in_pop = row("calibrated", v.clone(), Some(true), Side::HeldOut, 900);
         let applied = b.apply(&in_pop).unwrap();
-        let raw = crate::head::predict_checked(&b.head, &in_pop.features).unwrap();
+        let raw = crate::head::predict_checked(&b.head, &b.spec, &in_pop.features).unwrap();
         assert_eq!(applied.raw_p, raw, "raw p is the head's output, always");
         let cal = applied
             .calibrated
@@ -904,7 +937,7 @@ mod tests {
         );
         assert_eq!(
             applied.raw_p,
-            crate::head::predict_checked(&b.head, &out_pop.features).unwrap()
+            crate::head::predict_checked(&b.head, &b.spec, &out_pop.features).unwrap()
         );
         assert_eq!(applied.support.episodes, 0, "no same-family rows");
         let _ = id;

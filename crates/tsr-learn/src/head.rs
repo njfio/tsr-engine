@@ -19,15 +19,15 @@ pub const DEFAULT_ITERS: u32 = 500;
 /// The learning rate of the full-batch updates.
 pub const LEARNING_RATE: f64 = 0.5;
 
-/// A fitted logistic head: weights, bias, the standardization statistics, and the fit settings.
+/// A fitted logistic head: weights, bias, and the fit settings.
+///
+/// B15: the standardization statistics are **not** here — they live in the feature spec
+/// (`features.json`), which is the declared schema, and the learning rate is declared there too.
+/// The head carries only what is fitted.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Head {
     pub weights: Vec<f64>,
     pub bias: f64,
-    /// Per-feature mean, from the fit slice.
-    pub mean: Vec<f64>,
-    /// Per-feature standard deviation, from the fit slice (never zero: a constant feature gets 1.0).
-    pub std: Vec<f64>,
     pub l2: f64,
     pub iters: u32,
 }
@@ -42,7 +42,9 @@ fn sigmoid(z: f64) -> f64 {
 }
 
 /// Fit-slice standardization statistics: per-feature mean and standard deviation.
-fn standardize_stats(rows: &[Row], dim: usize) -> (Vec<f64>, Vec<f64>) {
+///
+/// B15: these are computed from the fit slice and stored in the feature spec, not in the head.
+pub fn standardize_stats(rows: &[Row], dim: usize) -> (Vec<f64>, Vec<f64>) {
     let n = rows.len().max(1) as f64;
     let mut mean = vec![0.0; dim];
     for r in rows {
@@ -68,14 +70,14 @@ fn standardize_stats(rows: &[Row], dim: usize) -> (Vec<f64>, Vec<f64>) {
     (mean, std)
 }
 
-/// Standardize a feature vector with the head's stored statistics.
-fn standardize(head: &Head, x: &FeatureVector) -> Vec<f64> {
+/// Standardize a feature vector with the spec's declared statistics (B15).
+fn standardize(spec: &FeatureSpec, x: &FeatureVector) -> Vec<f64> {
     x.values
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            let m = head.mean.get(i).copied().unwrap_or(0.0);
-            let s = head.std.get(i).copied().unwrap_or(1.0);
+            let m = spec.standardize_mean.get(i).copied().unwrap_or(0.0);
+            let s = spec.standardize_std.get(i).copied().unwrap_or(1.0);
             (v - m) / s
         })
         .collect()
@@ -88,16 +90,10 @@ fn standardize(head: &Head, x: &FeatureVector) -> Vec<f64> {
 pub fn fit_head(rows: &[Row], spec: &FeatureSpec, l2: f64, iters: u32) -> Head {
     let dim = spec.names.len();
     let labelled: Vec<&Row> = rows.iter().filter(|r| r.label.is_some()).collect();
-    let (mean, std) = standardize_stats(
-        &labelled.iter().map(|r| (*r).clone()).collect::<Vec<_>>(),
-        dim,
-    );
 
     let mut head = Head {
         weights: vec![0.0; dim],
         bias: 0.0,
-        mean,
-        std,
         l2,
         iters,
     };
@@ -105,10 +101,10 @@ pub fn fit_head(rows: &[Row], spec: &FeatureSpec, l2: f64, iters: u32) -> Head {
         return head;
     }
 
-    // Pre-standardize the fit rows once.
+    // Pre-standardize the fit rows once, with the spec's declared statistics (B15).
     let xs: Vec<Vec<f64>> = labelled
         .iter()
-        .map(|r| standardize(&head, &r.features))
+        .map(|r| standardize(spec, &r.features))
         .collect();
     let ys: Vec<f64> = labelled
         .iter()
@@ -131,19 +127,20 @@ pub fn fit_head(rows: &[Row], spec: &FeatureSpec, l2: f64, iters: u32) -> Head {
             }
             grad_b += err;
         }
+        let lr = spec.learning_rate;
         for (i, g) in grad_w.iter().enumerate() {
             // L2 penalty on the weights (not the bias).
             let g = g / n + l2 * head.weights[i];
-            head.weights[i] -= LEARNING_RATE * g;
+            head.weights[i] -= lr * g;
         }
-        head.bias -= LEARNING_RATE * (grad_b / n);
+        head.bias -= lr * (grad_b / n);
     }
     head
 }
 
 /// The head's output for a feature vector: the controller's `raw p`, always.
-pub fn predict(head: &Head, x: &FeatureVector) -> f64 {
-    let xs = standardize(head, x);
+pub fn predict(head: &Head, spec: &FeatureSpec, x: &FeatureVector) -> f64 {
+    let xs = standardize(spec, x);
     let z: f64 = head.bias
         + xs.iter()
             .zip(head.weights.iter())
@@ -157,7 +154,11 @@ pub fn predict(head: &Head, x: &FeatureVector) -> f64 {
 /// `predict` zips the vector against the weights, so a shorter vector silently drops the tail and a
 /// longer one silently ignores it — a misaligned vector then prints a plausible number. Callers
 /// that score a dataset against a bundle use this so a length mismatch is an error, not a score.
-pub fn predict_checked(head: &Head, x: &FeatureVector) -> Result<f64, crate::LearnError> {
+pub fn predict_checked(
+    head: &Head,
+    spec: &FeatureSpec,
+    x: &FeatureVector,
+) -> Result<f64, crate::LearnError> {
     if x.values.len() != head.weights.len() {
         return Err(crate::LearnError::Invalid(format!(
             "feature length {} does not match the head's {} weights",
@@ -165,7 +166,7 @@ pub fn predict_checked(head: &Head, x: &FeatureVector) -> Result<f64, crate::Lea
             head.weights.len()
         )));
     }
-    Ok(predict(head, x))
+    Ok(predict(head, spec, x))
 }
 
 #[cfg(test)]
@@ -229,8 +230,8 @@ mod tests {
         pos[0] = 1.0;
         let mut neg = vec![0.0; dim];
         neg[0] = 0.0;
-        let p_pos = predict(&head, &FeatureVector { values: pos });
-        let p_neg = predict(&head, &FeatureVector { values: neg });
+        let p_pos = predict(&head, &spec, &FeatureVector { values: pos });
+        let p_neg = predict(&head, &spec, &FeatureVector { values: neg });
         assert!(
             p_pos > p_neg,
             "the head separates the signal: {p_pos} > {p_neg}"

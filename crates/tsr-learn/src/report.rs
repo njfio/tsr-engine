@@ -150,7 +150,7 @@ pub fn calibrated_p(bundle: &Bundle, row: &Row) -> Option<f64> {
     if !bundle.population_contains(&row.family) {
         return None;
     }
-    let raw = predict_checked(&bundle.head, &row.features).ok()?;
+    let raw = predict_checked(&bundle.head, &bundle.spec, &row.features).ok()?;
     Some(apply_isotonic(&bundle.isotonic, raw))
 }
 
@@ -158,7 +158,7 @@ pub fn calibrated_p(bundle: &Bundle, row: &Row) -> Option<f64> {
 ///
 /// B1: a row whose feature length differs from the bundle's is refused rather than zipped.
 pub fn raw_p(bundle: &Bundle, row: &Row) -> f64 {
-    predict_checked(&bundle.head, &row.features).unwrap_or(f64::NAN)
+    predict_checked(&bundle.head, &bundle.spec, &row.features).unwrap_or(f64::NAN)
 }
 
 /// Score a set of `(p, y)` pairs.
@@ -448,7 +448,10 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         for floor in FLOOR_SWEEP {
             let mut pairs = Vec::new();
             for r in &fam_rows {
-                let sup = row_support(bundle, r).episodes;
+                // B15: the floor sweep must not count the row itself — support is the number of
+                // *other* fit/calibrate episodes within range, so a row cannot satisfy its own
+                // floor. Subtract the row's own contribution (1 when it is in the index).
+                let sup = row_support(bundle, r).episodes.saturating_sub(1);
                 if sup >= floor {
                     if let Some(c) = calibrated_p(bundle, r) {
                         let y = if r.label == Some(true) { 1.0 } else { 0.0 };
@@ -715,8 +718,6 @@ mod tests {
         let head = Head {
             weights,
             bias: 0.0,
-            mean: vec![0.0; dim],
-            std: vec![1.0; dim],
             l2: 0.0,
             iters: 1,
         };
@@ -1041,16 +1042,16 @@ mod tests {
         let short = FeatureVector {
             values: vec![0.0; dim - 1],
         };
-        let err = predict_checked(&b.head, &short).expect_err("a short vector is refused");
+        let err = predict_checked(&b.head, &b.spec, &short).expect_err("a short vector is refused");
         assert!(err.to_string().contains("feature length"), "{err}");
         let long = FeatureVector {
             values: vec![0.0; dim + 1],
         };
-        assert!(predict_checked(&b.head, &long).is_err());
+        assert!(predict_checked(&b.head, &b.spec, &long).is_err());
         let exact = FeatureVector {
             values: vec![0.0; dim],
         };
-        assert!(predict_checked(&b.head, &exact).is_ok());
+        assert!(predict_checked(&b.head, &b.spec, &exact).is_ok());
     }
 
     #[test]

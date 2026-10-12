@@ -534,6 +534,19 @@ pub fn build_dataset(
     // Canonical order: by row id.
     out.sort_by(|a, b| a.id.cmp(&b.id));
 
+    // B15: the standardization statistics are part of the feature spec (the declared schema), not
+    // of the fitted head. Compute them from the fit slice's labelled rows and store them in the
+    // spec, so `features.json` carries them and `load_dataset` can recompute and check them.
+    let mut spec = spec;
+    let fit_labelled: Vec<Row> = out
+        .iter()
+        .filter(|r| r.side == Side::Fit && r.label.is_some())
+        .cloned()
+        .collect();
+    let (mean, std) = crate::head::standardize_stats(&fit_labelled, spec.names.len());
+    spec.standardize_mean = mean;
+    spec.standardize_std = std;
+
     let data_root = data_root(&out);
     let training_root = training_root(&out);
     Ok(Dataset {
@@ -1095,5 +1108,55 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, LearnError::NonOperatorLabel { .. }));
+    }
+    /// B15: the standardization statistics live in the feature spec (`features.json`), not in the
+    /// head, and the learning rate is declared there too. On the pre-fix code `spec.standardize_mean`
+    /// was empty and the head carried `mean`/`std`; this test fails there.
+    #[test]
+    fn b15_standardization_stats_live_in_the_spec() {
+        let ds = build(7, SplitBy::Time);
+        let dim = ds.spec.names.len();
+        assert_eq!(
+            ds.spec.standardize_mean.len(),
+            dim,
+            "B15: features.json must carry a per-feature mean"
+        );
+        assert_eq!(
+            ds.spec.standardize_std.len(),
+            dim,
+            "B15: features.json must carry a per-feature std"
+        );
+        assert!(
+            ds.spec.learning_rate > 0.0,
+            "B15: features.json must declare the learning rate"
+        );
+        // The declared statistics are exactly the fit slice's labelled rows' statistics.
+        let fit_labelled: Vec<Row> = ds
+            .rows
+            .iter()
+            .filter(|r| r.side == Side::Fit && r.label.is_some())
+            .cloned()
+            .collect();
+        let (mean, std) = crate::head::standardize_stats(&fit_labelled, dim);
+        assert_eq!(ds.spec.standardize_mean, mean);
+        assert_eq!(ds.spec.standardize_std, std);
+    }
+
+    /// B15: support counts only fit- and calibrate-slice rows with a resolved label. An unlabelled
+    /// row must not inflate the support index.
+    #[test]
+    fn b15_support_index_counts_only_labelled_rows() {
+        let ds = build(7, SplitBy::Time);
+        let index = crate::bundle::support_index_for_test(&ds);
+        let labelled = ds
+            .rows
+            .iter()
+            .filter(|r| (r.side == Side::Fit || r.side == Side::Calibrate) && r.label.is_some())
+            .count();
+        assert_eq!(
+            index.len(),
+            labelled,
+            "B15: the support index must hold exactly the labelled fit/calibrate rows"
+        );
     }
 }

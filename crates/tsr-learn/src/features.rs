@@ -39,6 +39,25 @@ pub struct FeatureSpec {
     pub numeric_widths: Vec<f64>,
     /// §B8 features the log cannot supply, with the reason.
     pub absent: Vec<AbsentFeature>,
+    /// B15: the fit-slice standardization statistics the head standardizes with — per-feature mean
+    /// and standard deviation, in the order of [`FeatureSpec::names`]. These are part of the
+    /// feature spec (the spec is the bundle's declared schema), not of the fitted head: the head's
+    /// coefficients are fitted, the standardization is declared. Empty until `fit` fills them from
+    /// the fit slice; `load_dataset` recomputes them from the fit rows so a tampered `features.json`
+    /// is refused.
+    #[serde(default)]
+    pub standardize_mean: Vec<f64>,
+    #[serde(default)]
+    pub standardize_std: Vec<f64>,
+    /// B15: the learning rate of the head's full-batch updates, declared in the spec so it is
+    /// recorded in the bundle rather than living only as a constant in the code.
+    #[serde(default = "default_learning_rate")]
+    pub learning_rate: f64,
+}
+
+/// B15: the default learning rate, used when an older `features.json` carries no `learning_rate`.
+fn default_learning_rate() -> f64 {
+    crate::head::LEARNING_RATE
 }
 
 /// A feature vector: the values, in the order of [`FeatureSpec::names`].
@@ -161,6 +180,9 @@ pub fn spec_for_families(families: &[String]) -> FeatureSpec {
         names,
         numeric_widths: widths,
         absent: absent_features(),
+        standardize_mean: Vec::new(),
+        standardize_std: Vec::new(),
+        learning_rate: crate::head::LEARNING_RATE,
     }
 }
 
