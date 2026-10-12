@@ -76,9 +76,7 @@ pub fn fit_isotonic(xs: &[f64], ys: &[f64]) -> Isotonic {
             blocks[i].sum += right.sum;
             blocks[i].max_x = blocks[i].max_x.max(right.max_x);
             // The merged block may now violate against its new left neighbour.
-            if i > 0 {
-                i -= 1;
-            }
+            i = i.saturating_sub(1);
         } else {
             i += 1;
         }
