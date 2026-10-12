@@ -647,8 +647,20 @@ fn d5_at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
             "idempotent tool ran twice at {crash:?}"
         );
 
-        let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-        let check = ex.tool_check(std::path::Path::new("/nonexistent-cas"), cand.id);
+        // D5: the row drives the reconciler the way the CLI does — `ToolCheck::from_log` over
+        // the store's own events, never the fake executor's private keys. The old matrix fed
+        // `ex.tool_check(...)`, so its Acknowledgement row settled as `Executed` from the fake's
+        // in-memory `seen_keys` even though the log held no `Executed` and the CAS held no
+        // digest; the CLI, which loads its evidence from the log, records `Unresolved`.
+        let cas = std::env::temp_dir().join(format!(
+            "tsr-d5-matrix-cas-{}-{crash:?}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cas).unwrap();
+        let events = s.by_task(&task()).unwrap();
+        let check = ToolCheck::from_log(&cas, &events);
+        let pending = pending_dispatches(&events);
+        assert_eq!(pending.len(), 1, "one pending dispatch at {crash:?}");
         let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
         // Whatever the crash point, the reconciliation appends exactly one settling event.
         let ks = kinds(&s);
@@ -664,12 +676,91 @@ fn d5_at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
             executed <= 1,
             "at most one Executed per idempotent dispatch at {crash:?}: {ks:?}"
         );
-        if crash == CrashPoint::Intent {
-            assert_eq!(res, Resolution::UnresolvedIdempotent);
-        } else {
-            assert_eq!(res, Resolution::Executed);
-            assert_eq!(executed, 1, "the effect is recorded once at {crash:?}");
-        }
+        // The log's evidence decides: with no `Executed` in the log and no digest in the CAS,
+        // the check cannot say, so the dispatch is `Unresolved` (idempotent, retryable) at every
+        // crash point — including acknowledgement, which the old matrix settled as `Executed`
+        // from the fake's private keys.
+        assert_eq!(
+            res,
+            Resolution::UnresolvedIdempotent,
+            "the log holds no Executed and the CAS no digest at {crash:?}: {ks:?}"
+        );
+        assert_eq!(executed, 0, "no Executed is invented at {crash:?}: {ks:?}");
+        assert_eq!(ks[3], "unresolved", "settled at {crash:?}: {ks:?}");
+
+        std::fs::remove_dir_all(&cas).ok();
+    }
+}
+
+/// D5: every crash-matrix row drives the reconciler the way the CLI does — with
+/// `ToolCheck::from_log` over the store's own events, never with the fake executor's private
+/// keys. The old matrix fed `ex.tool_check(...)`, so its Acknowledgement row settled as
+/// `Executed` from the fake's in-memory `seen_keys` even though the log held no `Executed` and
+/// the CAS held no digest; the CLI, which loads its evidence from the log, would have recorded
+/// `Unresolved`. This test builds the check exactly as `reconcile_cmd::run` does and asserts the
+/// log's own evidence decides, with at most one `Executed` per idempotent dispatch.
+#[test]
+fn d5_matrix_rows_drive_reconcile_from_the_log() {
+    for crash in [
+        CrashPoint::Intent,
+        CrashPoint::Send,
+        CrashPoint::Acknowledgement,
+        CrashPoint::None,
+    ] {
+        let cand = candidate(&format!("matrix-log-{crash:?}"));
+        let (s, _) = dispatched(&cand);
+        let digest = Hash::of(&[format!("log-{crash:?}").as_bytes()]);
+        let mut ex = FakeExecutor::new(
+            FakeTool {
+                idempotent: true,
+                log_digest: digest,
+            },
+            crash,
+        );
+        let intent = tsr_domain::DispatchIntent {
+            candidate: cand.id,
+            idempotency_key: intent_key(&cand.id),
+            expected_state_version: 3,
+        };
+        // Dispatch, then retry once: an idempotent tool yields at most one effect.
+        let _ = ex.dispatch(&intent);
+        let _ = ex.dispatch(&intent);
+        assert!(
+            ex.effects_for(&cand.id) <= 1,
+            "idempotent tool ran twice at {crash:?}"
+        );
+
+        // The CLI's own check: evidence from the log and the CAS, not the fake's keys. The CAS
+        // directory is empty, so a digest is evidence only if the log recorded an `Executed`.
+        let cas = std::env::temp_dir().join(format!("tsr-d5-cas-{}-{crash:?}", std::process::id()));
+        std::fs::create_dir_all(&cas).unwrap();
+        let events = s.by_task(&task()).unwrap();
+        let check = ToolCheck::from_log(&cas, &events);
+
+        let pending = pending_dispatches(&events);
+        assert_eq!(pending.len(), 1, "one pending dispatch at {crash:?}");
+        let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+
+        let ks = kinds(&s);
+        assert_eq!(ks.len(), 4, "one settling event at {crash:?}: {ks:?}");
+        // D5: at most one Executed per idempotent dispatch, at every crash point.
+        let executed = ks.iter().filter(|k| *k == "executed").count();
+        assert!(
+            executed <= 1,
+            "at most one Executed per idempotent dispatch at {crash:?}: {ks:?}"
+        );
+        // The log's evidence decides. With no `Executed` in the log and no digest in the CAS,
+        // the check cannot say: the dispatch is `Unresolved` (idempotent, retryable), never
+        // `Executed` from the fake's private keys.
+        assert_eq!(
+            res,
+            Resolution::UnresolvedIdempotent,
+            "the log holds no Executed and the CAS no digest at {crash:?}: {ks:?}"
+        );
+        assert_eq!(executed, 0, "no Executed is invented at {crash:?}: {ks:?}");
+        assert_eq!(ks[3], "unresolved", "settled at {crash:?}: {ks:?}");
+
+        std::fs::remove_dir_all(&cas).ok();
     }
 }
 
@@ -916,8 +1007,7 @@ fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
     let cand = candidate("d1-idem");
     let dispatch = d1_seed_dispatched(&db, &cand);
 
-    // The tool ran once (its log digest D is in the CAS) and the log recorded that `Executed`;
-    // a crash then left a second `Dispatched` with no outcome. The retry's effect already happened.
+    // The tool ran once (its log digest D is in the CAS) and the log recorded that `Executed`.
     let digest = Hash::of(&[b"d1-tool-log"]);
     std::fs::write(cas.join(digest.to_hex()), b"the tool's log").unwrap();
     {
@@ -935,27 +1025,18 @@ fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
             "t3",
         );
         s.append(&executed).unwrap();
-        let retry = Event::new(
-            task(),
-            vec![executed.id],
-            Source::Rules,
-            EventKind::Dispatched {
-                candidate: cand.id,
-                in_sandbox: true,
-            },
-            "t4",
-        );
-        s.append(&retry).unwrap();
     }
 
     let (code, stdout, stderr) = d1_run_reconcile(&db);
     assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    // The dispatch's own `Executed` is its evidence, so nothing is pending: the CAS digest in the
+    // log settles it and reconcile appends nothing.
     assert!(
-        stdout.contains("executed"),
-        "the retry resolves to Executed; stdout: {stdout}"
+        stdout.contains("no pending dispatches"),
+        "the dispatch is settled by its own Executed; stdout: {stdout}"
     );
 
-    // The reconciliation landed: the retry is settled by an Executed carrying the CAS digest.
+    // The log's last event is the dispatch's own Executed carrying the CAS digest.
     let s = Store::open(&db).unwrap();
     let events = s.by_task(&task()).unwrap();
     let last = &events.last().unwrap().1;
@@ -1062,6 +1143,263 @@ fn d1_second_retry_refuses() {
     );
 
     // No third event was appended: the refusal is a refusal, not another retry.
+    let s = Store::open(&db).unwrap();
+    let unresolved = s
+        .by_task(&task())
+        .unwrap()
+        .into_iter()
+        .filter(|(_, e)| matches!(e.kind, EventKind::Unresolved { .. }))
+        .count();
+    assert_eq!(unresolved, 1, "the second retry appended nothing");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------------------------
+// D1 + R4: evidence is per dispatch. An `Executed` settles only the dispatch it follows; a
+// re-dispatch is pending until its own evidence is found, and the CAS decides.
+// ---------------------------------------------------------------------------------------------
+
+/// D1: a `RunApprovedTest` dispatch whose tool log reached `cas/` but whose `Executed` was never
+/// appended stays `unresolved retryable` — the CAS alone does not settle a dispatch, because the
+/// log holds no `Executed` naming the digest.
+#[test]
+fn d1_cas_digest_without_executed_stays_unresolved_retryable() {
+    let dir = d1_scratch("cas-without-executed");
+    let db = dir.join("tsr.db");
+    let cas = dir.join("cas");
+    std::fs::create_dir_all(&cas).unwrap();
+
+    let cand = candidate("d1-cas-no-executed");
+    d1_seed_dispatched(&db, &cand);
+
+    // The tool wrote its log to the CAS, but the crash landed before the `Executed` was appended.
+    let digest = Hash::of(&[b"d1-orphan-log"]);
+    std::fs::write(cas.join(digest.to_hex()), b"the tool's log").unwrap();
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(
+        code,
+        Some(0),
+        "an idempotent unknown is retryable; stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("unresolved") && stdout.contains("retryable"),
+        "the CAS alone does not settle the dispatch; stdout: {stdout}"
+    );
+
+    // No `Executed` was invented: the log holds dispatched then unresolved.
+    let s = Store::open(&db).unwrap();
+    assert_eq!(
+        kinds(&s),
+        vec!["task_opened", "proposed", "dispatched", "unresolved"]
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// R4: an earlier `Executed` marks the candidate "seen", so a later `Dispatched` of the same
+/// candidate — even a non-idempotent `ProposePatch` — was settled as `Executed` with the old
+/// digest. Evidence is per dispatch: the re-dispatch is pending until its own evidence is found.
+#[test]
+fn r4_redispatch_is_not_settled_by_an_earlier_executed() {
+    let dir = d1_scratch("redispatch-not-settled");
+    let db = dir.join("tsr.db");
+    let cas = dir.join("cas");
+    std::fs::create_dir_all(&cas).unwrap();
+
+    // A non-idempotent `ProposePatch`: a re-dispatch must never be settled by an earlier effect.
+    let cand = Candidate::new(
+        ActionKind::ProposePatch,
+        Source::Rules,
+        Hash::of(&[b"r4-redispatch"]),
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    let first = d1_seed_dispatched(&db, &cand);
+
+    // The first dispatch executed: its digest is in the CAS and the log holds the `Executed`.
+    let digest = Hash::of(&[b"r4-first-log"]);
+    std::fs::write(cas.join(digest.to_hex()), b"the first run's log").unwrap();
+    {
+        let s = Store::open(&db).unwrap();
+        let executed = Event::new(
+            task(),
+            vec![first],
+            Source::Rules,
+            EventKind::Executed {
+                candidate: cand.id,
+                exit_code: Some(0),
+                log_digest: Some(digest),
+                duration_ms: 5,
+            },
+            "t3",
+        );
+        s.append(&executed).unwrap();
+        // A second dispatch of the same candidate, with no evidence of its own yet.
+        let retry = Event::new(
+            task(),
+            vec![executed.id],
+            Source::Rules,
+            EventKind::Dispatched {
+                candidate: cand.id,
+                in_sandbox: true,
+            },
+            "t4",
+        );
+        s.append(&retry).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    // The re-dispatch is non-idempotent with no evidence of its own: blocked, exit 1.
+    assert_eq!(
+        code,
+        Some(1),
+        "a re-dispatch is not settled by an earlier Executed; stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // The log holds exactly one Executed (the first dispatch's) and a fresh Unresolved for the
+    // re-dispatch — the old digest was not reused.
+    let s = Store::open(&db).unwrap();
+    let events = s.by_task(&task()).unwrap();
+    let executed = events
+        .iter()
+        .filter(|(_, e)| matches!(e.kind, EventKind::Executed { .. }))
+        .count();
+    assert_eq!(executed, 1, "the earlier Executed is not duplicated");
+    let last = &events.last().unwrap().1;
+    match &last.kind {
+        EventKind::Unresolved { candidate, reason } => {
+            assert_eq!(*candidate, cand.id);
+            assert_eq!(reason, UNKNOWN_NON_IDEMPOTENT);
+        }
+        other => panic!("expected a fresh Unresolved for the re-dispatch, got {other:?}"),
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// R4: a re-dispatch of an idempotent candidate whose *own* `Executed` follows it resolves to
+/// `Executed` — the evidence is the dispatch's own, not an earlier one's.
+#[test]
+fn r4_redispatch_with_its_own_executed_resolves() {
+    let dir = d1_scratch("redispatch-own-evidence");
+    let db = dir.join("tsr.db");
+    let cas = dir.join("cas");
+    std::fs::create_dir_all(&cas).unwrap();
+
+    let cand = candidate("r4-own-evidence");
+    let first = d1_seed_dispatched(&db, &cand);
+
+    let first_digest = Hash::of(&[b"r4-first"]);
+    let second_digest = Hash::of(&[b"r4-second"]);
+    std::fs::write(cas.join(first_digest.to_hex()), b"first").unwrap();
+    std::fs::write(cas.join(second_digest.to_hex()), b"second").unwrap();
+    {
+        let s = Store::open(&db).unwrap();
+        let executed = Event::new(
+            task(),
+            vec![first],
+            Source::Rules,
+            EventKind::Executed {
+                candidate: cand.id,
+                exit_code: Some(0),
+                log_digest: Some(first_digest),
+                duration_ms: 5,
+            },
+            "t3",
+        );
+        s.append(&executed).unwrap();
+        let retry = Event::new(
+            task(),
+            vec![executed.id],
+            Source::Rules,
+            EventKind::Dispatched {
+                candidate: cand.id,
+                in_sandbox: true,
+            },
+            "t4",
+        );
+        s.append(&retry).unwrap();
+        // The retry's own evidence: an `Executed` that follows the re-dispatch.
+        let second = Event::new(
+            task(),
+            vec![retry.id],
+            Source::Rules,
+            EventKind::Executed {
+                candidate: cand.id,
+                exit_code: Some(0),
+                log_digest: Some(second_digest),
+                duration_ms: 6,
+            },
+            "t5",
+        );
+        s.append(&second).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+
+    // The re-dispatch was settled by its own Executed; nothing new was appended (the log already
+    // holds the retry's evidence, so there is no pending dispatch).
+    let s = Store::open(&db).unwrap();
+    let events = s.by_task(&task()).unwrap();
+    let executed = events
+        .iter()
+        .filter(|(_, e)| matches!(e.kind, EventKind::Executed { .. }))
+        .count();
+    assert_eq!(executed, 2, "both dispatches have their own Executed");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// R4: "retry once" counts automatic retries per candidate across all its dispatches. A second
+/// retry of the same candidate refuses with exit 2, even after a re-dispatch — the retry budget is
+/// per candidate, not reset by a new `Dispatched`.
+#[test]
+fn r4_second_retry_across_dispatches_refuses() {
+    let dir = d1_scratch("second-retry-across");
+    let db = dir.join("tsr.db");
+
+    let cand = candidate("r4-retry-across");
+    let first = d1_seed_dispatched(&db, &cand);
+    {
+        let s = Store::open(&db).unwrap();
+        // The first dispatch's retry was already spent.
+        let first_unknown = Event::new(
+            task(),
+            vec![first],
+            Source::Rules,
+            EventKind::Unresolved {
+                candidate: cand.id,
+                reason: UNKNOWN_IDEMPOTENT.to_string(),
+            },
+            "t3",
+        );
+        s.append(&first_unknown).unwrap();
+        // A re-dispatch of the same candidate.
+        let retry = Event::new(
+            task(),
+            vec![first_unknown.id],
+            Source::Rules,
+            EventKind::Dispatched {
+                candidate: cand.id,
+                in_sandbox: true,
+            },
+            "t4",
+        );
+        s.append(&retry).unwrap();
+    }
+
+    let (code, stdout, stderr) = d1_run_reconcile(&db);
+    assert_eq!(
+        code,
+        Some(2),
+        "a second retry of the same candidate refuses; stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // No third event was appended: the refusal is a refusal.
     let s = Store::open(&db).unwrap();
     let unresolved = s
         .by_task(&task())
