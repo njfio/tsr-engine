@@ -138,6 +138,11 @@ enum TaskCmd {
         /// session that fixed the flipped test from one that did not (D3).
         #[arg(long)]
         scripted_runner: bool,
+        /// The RATCHET protection profile to run under. Defaults to
+        /// `<store-root>/profiles/default.toml`, where `<store-root>` is the directory holding the
+        /// store's `.tsr/` (D10). There is no compile-time fallback.
+        #[arg(long)]
+        profile: Option<PathBuf>,
     },
     Status {
         task: String,
@@ -398,7 +403,15 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             driver,
             out,
             scripted_runner,
-        } => batch_cmd::run_cmd(&mode, &tasks, &driver, &out, scripted_runner),
+            profile,
+        } => batch_cmd::run_cmd(
+            &mode,
+            &tasks,
+            &driver,
+            &out,
+            scripted_runner,
+            profile.as_deref(),
+        ),
         TaskCmd::Export { task: name } => {
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {

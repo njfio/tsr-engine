@@ -12,7 +12,7 @@
 //! driver is the documented stub: it returns exit 2 with its reason (no Claude Code, no container
 //! runtime in this sandbox).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedSession};
 use tsr_batch::run::{run_all, BatchConfig};
@@ -28,8 +28,9 @@ pub fn run_cmd(
     driver: &str,
     out: &Path,
     scripted_runner: bool,
+    profile: Option<&Path>,
 ) -> std::process::ExitCode {
-    match run_inner(mode, tasks, driver, out, scripted_runner) {
+    match run_inner(mode, tasks, driver, out, scripted_runner, profile) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("tsr: task run: {e}");
@@ -44,6 +45,7 @@ fn run_inner(
     driver: &str,
     out: &Path,
     scripted_runner: bool,
+    profile_arg: Option<&Path>,
 ) -> Result<std::process::ExitCode, String> {
     let mode = match mode {
         "record" => Mode::Record,
@@ -51,9 +53,10 @@ fn run_inner(
         other => return Err(format!("unknown --mode `{other}` (want record|rules)")),
     };
 
-    // D10: the profile is resolved from the repository root, not the working
-    // directory, so `tsr task run` behaves the same wherever it is invoked.
-    let profile_path = repo_root().join("profiles/default.toml");
+    // D10: the profile comes from `--profile`, else from the store's repository root (the
+    // directory holding the store's `.tsr/`, as the M0 commands resolve the store), else the
+    // command exits 2 naming where it looked. There is no compile-time source path.
+    let profile_path = resolve_profile(profile_arg)?;
     let profile = Profile::load(&profile_path)
         .map_err(|e| format!("loading {}: {e}", profile_path.display()))?;
 
@@ -142,22 +145,32 @@ fn run_inner(
     Ok(std::process::ExitCode::SUCCESS)
 }
 
-/// The repository root: the nearest ancestor of the working directory that
-/// holds `profiles/default.toml`, falling back to the crate's own manifest
-/// directory (D10). A `tsr task run` invoked from a subdirectory therefore
-/// still finds the operator's standing profile.
-fn repo_root() -> std::path::PathBuf {
-    if let Ok(cwd) = std::env::current_dir() {
-        for dir in cwd.ancestors() {
-            if dir.join("profiles/default.toml").is_file() {
-                return dir.to_path_buf();
-            }
+/// Resolve the protection profile (D10).
+///
+/// `--profile` names it directly. Otherwise the profile is looked for at
+/// `<repository-root>/profiles/default.toml`, where `<repository-root>` is the nearest ancestor of
+/// the working directory that holds `profiles/default.toml` — the same walk the M0 commands use to
+/// find the store's session file. If no ancestor holds one the command exits 2 and says where it
+/// looked. There is no compile-time source path: a binary built on one machine must not silently
+/// load that machine's profile on another.
+fn resolve_profile(profile_arg: Option<&Path>) -> Result<PathBuf, String> {
+    if let Some(p) = profile_arg {
+        return Ok(p.to_path_buf());
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for dir in cwd.ancestors() {
+        let candidate = dir.join("profiles/default.toml");
+        if candidate.is_file() {
+            return Ok(candidate);
         }
     }
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .to_path_buf()
+    Err(format!(
+        "no profile: pass --profile <path>, or place one at {} (looked upward from {})",
+        cwd.join("profiles/default.toml").display(),
+        cwd.display()
+    ))
 }
+
 
 /// Load one session per task, in the order the manifest names them.
 fn load_sessions(

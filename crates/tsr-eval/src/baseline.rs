@@ -147,15 +147,21 @@ impl Report {
             s.push_str(&format!("  unit: {}\n", m.spec.unit));
             s.push_str(&format!("  direction: {}\n", m.spec.direction.as_str()));
             s.push_str(&format!("  {}\n", m.spec.proxy_label));
-            s.push_str(&format!("  record: {}\n", fmt_value(m.record)));
-            s.push_str(&format!("  rules:  {}\n", fmt_value(m.rules)));
+            s.push_str(&format!("  record: {}\n", fmt_proxy(&m.spec, m.record)));
+            s.push_str(&format!("  rules:  {}\n", fmt_proxy(&m.spec, m.rules)));
             match &m.diff {
                 Some(d) => {
-                    s.push_str(&format!("  paired diff (rules - record): {:.6}\n", d.point));
+                    // D10: the paired difference is printed through its Proxy, so the number
+                    // carries the engineering name it is a proxy for (Appendix A rule 2).
+                    let diff = m.diff_proxy().expect("diff is Some, so diff_proxy is Some");
+                    s.push_str(&format!("  paired diff (rules - record): {diff}\n"));
                     if d.is_defined() {
                         s.push_str(&format!(
-                            "  90% interval (cluster bootstrap over lineage, {} clusters, {} tasks): [{:.6}, {:.6}]\n",
-                            d.clusters, d.tasks, d.lo, d.hi
+                            "  90% interval (cluster bootstrap over lineage, {} clusters, {} tasks): [{}, {}]\n",
+                            d.clusters,
+                            d.tasks,
+                            metrics::proxy_for(&m.spec, d.lo),
+                            metrics::proxy_for(&m.spec, d.hi)
                         ));
                     } else {
                         // D5: fewer than two lineages — every resample is the
@@ -249,10 +255,13 @@ fn estimated_calls(r: &tsr_batch::results::TaskResult) -> f64 {
     r.generator_tokens as f64 / MEAN_TOKENS_PER_CALL
 }
 
-/// Format a metric value: six decimals, or `n/a` when undefined.
-fn fmt_value(v: Option<f64>) -> String {
+/// Format a metric value as its labeled proxy (`name=value`), or `n/a` when undefined (D10).
+///
+/// Every number the report prints goes through [`Proxy`], so the engineering name travels with the
+/// value (Appendix A rule 2).
+fn fmt_proxy(spec: &MetricSpec, v: Option<f64>) -> String {
     match v {
-        Some(x) => format!("{x:.6}"),
+        Some(x) => metrics::proxy_for(spec, x).to_string(),
         None => "n/a".to_string(),
     }
 }

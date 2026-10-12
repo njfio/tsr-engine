@@ -108,6 +108,46 @@ fn every_metric_carries_a_proxy_label_in_the_report() {
     }
 }
 
+/// D10: every number the report prints is a labeled proxy — `name=value`, the
+/// engineering name — never a bare float (PRD B2 rule 2, Appendix A rule 2).
+#[test]
+fn d10_every_printed_number_is_a_labeled_proxy() {
+    let text = report("clear");
+    // The per-system values carry the metric's engineering name.
+    for key in [
+        "completion_rate",
+        "cost_per_accepted",
+        "unsafe_attempts_blocked",
+        "generator_calls_per_task",
+    ] {
+        assert!(
+            text.contains(&format!("  record: {key}=")),
+            "the record value for {key} must print as `{key}=<value>`:\n{text}"
+        );
+        assert!(
+            text.contains(&format!("  rules:  {key}=")),
+            "the rules value for {key} must print as `{key}=<value>`:\n{text}"
+        );
+        assert!(
+            text.contains(&format!("  paired diff (rules - record): {key}=")),
+            "the paired diff for {key} must print as `{key}=<value>`:\n{text}"
+        );
+    }
+    // No line may print a bare six-decimal float as a metric value.
+    for line in text.lines() {
+        let t = line.trim_start();
+        for prefix in ["record:", "rules:", "paired diff (rules - record):"] {
+            if let Some(rest) = t.strip_prefix(prefix) {
+                let rest = rest.trim_start();
+                assert!(
+                    rest.contains('='),
+                    "`{prefix}` must print a labeled proxy, not a bare float: {line:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn pairing_drops_tasks_present_in_only_one_system() {
     // A results dir with one unpaired task: the report names it and pairs the rest.
