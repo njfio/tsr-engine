@@ -838,3 +838,212 @@ fn d4_a_materialised_copy_with_a_missing_mutation_diff_is_refused() {
         "D4: expected MutationDiff, got {err:?}"
     );
 }
+
+/// D4, D9: end to end on a real repository with a stand-in cargo-mutants — every reversal passes
+/// `git apply --check`, and `tsr task run` provisions every mutant task.
+///
+/// The defect: `tsr corpus mutants` wrote `mutated_snapshot = blake3(descriptor)` and neither
+/// `base_snapshot` nor `mutation_diff`, so `tsr task run` failed at provisioning; and the reversal
+/// was reconstructed from the descriptor's `replacement`, so `git apply --check` refused it
+/// (`corrupt patch`). The fix records the base tree id and the mutation diff in the corpus's own
+/// CAS, materialises the base and applies the mutation diff, and takes the reversal as a real
+/// `git diff` between the mutated copy and the base copy.
+///
+/// This test runs the real `tsr_corpus::mutants::mutants` against a real repository with a stand-in
+/// runner, then provisions every task it wrote through `run_one` with a runner that materialises
+/// the base tree the way `tsr corpus materialize` does.
+#[test]
+fn d4_d9_mutant_tasks_provision_and_reverse_end_to_end() {
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(
+        repo.join("src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\npub fn is_positive(n: i32) -> bool {\n    n > 0\n}\n\n#[cfg(test)]\nmod tests {\n",
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    let base_tree = git(&["rev-parse", "HEAD^{tree}"]);
+    assert!(!base_tree.is_empty(), "the repository has a HEAD tree");
+
+    // A stand-in cargo-mutants: the list run writes the sample's descriptors, the kill run writes
+    // the sample's outcomes and one log per scenario.
+    let list = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m3/cargo-mutants-sample.json"),
+    )
+    .unwrap();
+    let outcomes = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/m3/cargo-mutants-outcomes-sample.json"),
+    )
+    .unwrap();
+    struct StandInMutants {
+        list: String,
+        outcomes: String,
+    }
+    impl tsr_corpus::Runner for StandInMutants {
+        fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if argv.iter().any(|a| a.contains("--list")) {
+                let path = snapshot.join("mutants.out/mutants.json");
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, &self.list).unwrap();
+                return RunResult::from_output(0, self.list.as_bytes(), b"", 1);
+            }
+            let path = snapshot.join("mutants.out/outcomes.json");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &self.outcomes).unwrap();
+            // One log per scenario, each naming the test that failed under it. The log path is
+            // the one the outcome names, relative to `mutants.out`.
+            let lab: serde_json::Value = serde_json::from_str(&self.outcomes).unwrap();
+            for outcome in lab["outcomes"].as_array().unwrap() {
+                let Some(rel) = outcome["log_path"].as_str() else {
+                    continue;
+                };
+                let log = snapshot.join("mutants.out").join(rel);
+                std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+                std::fs::write(
+                    &log,
+                    "running 1 test\ntest tests::add_works ... FAILED\n\nfailures:\n    tests::add_works\n",
+                )
+                .unwrap();
+            }
+            RunResult::from_output(0, self.outcomes.as_bytes(), b"", 1)
+        }
+    }
+
+    let corpus = dir.path().join("corpus");
+    let report = tsr_corpus::mutants::mutants(
+        &repo,
+        &corpus,
+        &tsr_corpus::mutants::MutantsOptions::default(),
+        &StandInMutants { list, outcomes },
+    )
+    .expect("mutants runs");
+    assert!(report.tasks > 0, "the stand-in produced caught mutants");
+
+    // Every task names its base snapshot and its mutation diff, and both are readable.
+    let manifest = std::fs::read_to_string(corpus.join("tasks.jsonl")).unwrap();
+    let tasks: Vec<CorpusTask> = manifest
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(tasks.len(), report.tasks);
+    let cas = tsr_corpus::mine::cas_dir(&corpus);
+    for task in &tasks {
+        assert_eq!(
+            task.base_snapshot.as_deref(),
+            Some(base_tree.as_str()),
+            "D4: the task records the tree id it mutated"
+        );
+        let digest = task
+            .mutation_diff
+            .as_deref()
+            .expect("D4: the task records its mutation diff");
+        assert!(
+            cas.join(digest).exists(),
+            "D4: the mutation diff is in the corpus's own CAS beside tasks.jsonl"
+        );
+    }
+
+    // D9: every reversal applies to the mutated copy by construction.
+    for task in &tasks {
+        let base = task.base_snapshot.as_deref().unwrap();
+        let mutation = std::fs::read_to_string(cas.join(task.mutation_diff.as_deref().unwrap()))
+            .unwrap();
+        let mutated = dir.path().join(format!("mutated-{}", task.id));
+        tsr_corpus::mine::materialize(&repo, base, &mutated).expect("materialise base");
+        let mutation_patch = dir.path().join(format!("mutation-{}.patch", task.id));
+        std::fs::write(&mutation_patch, &mutation).unwrap();
+        let applied = Command::new("git")
+            .arg("-C")
+            .arg(&mutated)
+            .args(["apply", "--whitespace=nowarn"])
+            .arg(&mutation_patch)
+            .output()
+            .unwrap();
+        assert!(
+            applied.status.success(),
+            "the mutation diff must apply to the base tree: {}",
+            String::from_utf8_lossy(&applied.stderr)
+        );
+        let reversal = std::fs::read_to_string(cas.join(task.reversal_diff.as_deref().unwrap()))
+            .unwrap();
+        let reversal_patch = dir.path().join(format!("reversal-{}.patch", task.id));
+        std::fs::write(&reversal_patch, &reversal).unwrap();
+        let check = Command::new("git")
+            .arg("-C")
+            .arg(&mutated)
+            .args(["apply", "--check"])
+            .arg(&reversal_patch)
+            .output()
+            .unwrap();
+        assert!(
+            check.status.success(),
+            "D9: every reversal must pass `git apply --check`; task {} said: {}\npatch:\n{reversal}",
+            task.id,
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+
+    // `tsr task run` provisions every mutant task: `run_one` materialises the base and applies the
+    // mutation diff, and the copy holds the mutated source.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if argv.iter().any(|a| a == "materialize") {
+                let repo = argv[argv.iter().position(|a| a == "--repo").unwrap() + 1].clone();
+                let snap = argv[argv.iter().position(|a| a == "--snapshot").unwrap() + 1].clone();
+                let out = argv[argv.iter().position(|a| a == "--out").unwrap() + 1].clone();
+                let status = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!(
+                        "mkdir -p {out} && git -C {repo} archive --format=tar {snap} | tar -x -C {out}"
+                    ))
+                    .status()
+                    .unwrap();
+                return RunResult::exit_only(status.code().unwrap_or(1));
+            }
+            RunResult::exit_only(0)
+        }
+    }
+
+    let out = dir.path().join("batch-out");
+    let mut config = BatchConfig::new(&out, profile());
+    // D4: the batch reads the mutation diff from the corpus directory's own CAS, beside
+    // tasks.jsonl — not from its own `--out`.
+    config.corpus_dir = corpus.clone();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    for task in &tasks {
+        let result = run_one(task, Mode::Rules, &driver, &MaterializingRunner, &config)
+            .unwrap_or_else(|e| panic!("D4: task {} must provision, got {e:?}", task.id));
+        let dest = tsr_batch::run::copies_root(&out).join(&task.id).join("rules");
+        let copied = std::fs::read_to_string(dest.join("src/lib.rs")).unwrap();
+        assert!(
+            copied.contains("~ changed by cargo-mutants ~"),
+            "D4: task {}'s copy must hold the mutated source, got: {copied:?}",
+            task.id
+        );
+        assert_eq!(result.outcome, Outcome::Accepted);
+    }
+}

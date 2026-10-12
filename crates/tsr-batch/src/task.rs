@@ -24,6 +24,14 @@ pub enum TaskError {
     /// be `.` or `..`, because the batch runner joins it into `out/state/<id>` and `out/copies/<id>`.
     #[error("bad task id {id:?} on line {line}: must match [A-Za-z0-9._-]{{1,128}} and not be `.` or `..`")]
     InvalidId { line: usize, id: String },
+    /// A mutant task names no base snapshot or no mutation diff (D4): its copy cannot be
+    /// provisioned, so it is refused where the manifest is parsed rather than judged later.
+    #[error("mutant task {id:?} on line {line} names no {missing}: its copy cannot be provisioned")]
+    UnprovisionableMutant {
+        line: usize,
+        id: String,
+        missing: &'static str,
+    },
 }
 
 /// Which corpus produced a task.
@@ -153,6 +161,25 @@ pub fn read_tasks(path: &Path) -> Result<Vec<CorpusTask>, TaskError> {
                 line: i + 1,
                 id: task.id,
             });
+        }
+        // D4: a mutant task's copy is its base snapshot with its mutation diff applied. A task that
+        // names neither cannot be provisioned, so it is refused here — at load, before any path is
+        // built from it — rather than failing later at provisioning.
+        if task.kind() == TaskKind::Mutant {
+            if task.base_snapshot.as_deref().unwrap_or("").is_empty() {
+                return Err(TaskError::UnprovisionableMutant {
+                    line: i + 1,
+                    id: task.id,
+                    missing: "base_snapshot",
+                });
+            }
+            if task.mutation_diff.as_deref().unwrap_or("").is_empty() {
+                return Err(TaskError::UnprovisionableMutant {
+                    line: i + 1,
+                    id: task.id,
+                    missing: "mutation_diff",
+                });
+            }
         }
         out.push(task);
     }

@@ -69,9 +69,12 @@ fn run_inner(
     }
 
     std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
-    let config = BatchConfig::new(out, profile);
-
     let manifest_dir = tasks_path.parent().unwrap_or_else(|| Path::new("."));
+    // D4: the corpus directory is where `tasks.jsonl` lives. A mutant's mutation diff is a CAS key
+    // in that directory's own `cas/`, so provisioning reads it from beside the manifest rather than
+    // from the batch's `--out`.
+    let mut config = BatchConfig::new(out, profile);
+    config.corpus_dir = manifest_dir.to_path_buf();
 
     // The runner is chosen by the explicit test flag, not by the driver: by default the oracle
     // runs through `ExecRunner` (`tsr exec -- <argv>` in the sealed sibling sandbox, PRD §B4), so

@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "tsr_cli"
 path = "src/lib.rs"
 
+[[test]]
+name = "d3_session_copy"
+path = "tests/d3_session_copy.rs"
+
 [dependencies]
 tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }

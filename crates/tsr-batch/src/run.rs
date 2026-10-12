@@ -68,6 +68,10 @@ pub enum RunError {
 pub struct BatchConfig {
     /// Where the results, the stores and the provisioned copies go.
     pub out: PathBuf,
+    /// The corpus directory the manifest was read from: the directory holding `tasks.jsonl` and
+    /// the corpus's own `cas/` (D4). A mutant's mutation diff is a CAS key in *this* directory's
+    /// CAS, not the batch's `--out` CAS, so provisioning reads it from beside the manifest.
+    pub corpus_dir: PathBuf,
     /// The RATCHET profile every gated action is checked against.
     pub profile: Profile,
     /// The limits every Runner call runs under.
@@ -79,8 +83,10 @@ pub struct BatchConfig {
 impl BatchConfig {
     /// A config with the default limits and a fixed clock.
     pub fn new(out: impl Into<PathBuf>, profile: Profile) -> Self {
+        let out = out.into();
         Self {
-            out: out.into(),
+            corpus_dir: out.clone(),
+            out,
             profile,
             limits: Limits::new(60_000, 1 << 20),
             clock: "2026-01-01T00:00:00Z".to_string(),
@@ -360,7 +366,10 @@ pub fn run_one(
     // therefore gated on the copy existing, so a scripted run never needs a CAS it does not use.
     if let Some(diff_digest) = task.mutation_diff.as_deref() {
         if dest.exists() {
-            let cas = tsr_corpus::mine::cas_dir(&config.out);
+            // D4: the mutation diff lives in the corpus directory's own CAS, beside `tasks.jsonl`,
+            // not in the batch's `--out` CAS. `tsr corpus mutants --out <corpus>` writes it there,
+            // and `tsr task run --tasks <corpus>/tasks.jsonl` reads it from there.
+            let cas = tsr_corpus::mine::cas_dir(&config.corpus_dir);
             let diff = tsr_corpus::mine::read_cas(&cas, diff_digest).map_err(|e| {
                 RunError::MutationDiff {
                     digest: diff_digest.to_string(),

@@ -175,6 +175,58 @@ pub struct ScriptedStep {
     pub tool_minutes: u32,
     /// Wall-clock milliseconds this step spends.
     pub wall_clock_ms: u64,
+    /// A file edit this step applies inside the task's disposable copy (D3), or `None` for a step
+    /// that touches no file. The path is relative to the copy's root; the driver writes it there
+    /// and nowhere else, so a session's fix lands where the oracle judges it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<ScriptedEdit>,
+}
+
+/// A file edit a scripted step applies inside the task's disposable copy (D3).
+///
+/// The path is relative to the copy's root and must not escape it: an absolute path or a `..`
+/// component is refused, so a fixture cannot write outside the copy the oracle judges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScriptedEdit {
+    /// The path to write, relative to the copy's root.
+    pub path: String,
+    /// The file's new contents.
+    pub contents: String,
+}
+
+impl ScriptedEdit {
+    /// An edit that writes `contents` to `path` (relative to the copy's root).
+    pub fn new(path: impl Into<String>, contents: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            contents: contents.into(),
+        }
+    }
+
+    /// Apply the edit inside `copy`, refusing a path that would escape it.
+    ///
+    /// The copy is the only writable mount (PRD §B10), so a path that is absolute or carries a
+    /// `..` component is an error rather than a write outside the sandbox.
+    pub fn apply(&self, copy: &Path) -> Result<(), DriverError> {
+        let rel = Path::new(&self.path);
+        if rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(DriverError::Fixture(format!(
+                "edit path `{}` escapes the copy",
+                self.path
+            )));
+        }
+        let target = copy.join(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| DriverError::Fixture(format!("creating {}: {e}", parent.display())))?;
+        }
+        std::fs::write(&target, &self.contents)
+            .map_err(|e| DriverError::Fixture(format!("writing {}: {e}", target.display())))
+    }
 }
 
 impl ScriptedStep {
@@ -193,6 +245,7 @@ impl ScriptedStep {
             generator_tokens: 0,
             tool_minutes: 0,
             wall_clock_ms: 0,
+            edit: None,
         }
     }
 
@@ -211,6 +264,7 @@ impl ScriptedStep {
             generator_tokens: 0,
             tool_minutes: 1,
             wall_clock_ms: 1200,
+            edit: None,
         }
     }
 
@@ -227,6 +281,7 @@ impl ScriptedStep {
             generator_tokens: 0,
             tool_minutes: 0,
             wall_clock_ms: 0,
+            edit: None,
         }
     }
 
@@ -243,6 +298,7 @@ impl ScriptedStep {
             generator_tokens: 0,
             tool_minutes: 0,
             wall_clock_ms: 0,
+            edit: None,
         }
     }
 }
@@ -527,7 +583,7 @@ impl Driver for ScriptedDriver {
         &self,
         ctx: &mut SessionCtx,
         _task: &CorpusTask,
-        _copy: &Path,
+        copy: &Path,
     ) -> Result<DriverReport, DriverError> {
         let mut report = DriverReport::default();
         // The Tier 0 controller (D6) is consulted for each step in rules mode, before the step is
@@ -601,6 +657,13 @@ impl Driver for ScriptedDriver {
                         Err(e) => return Err(e.into()),
                     }
                 }
+            }
+
+            // D3: a step that edits a file applies it inside the task's disposable copy, and only
+            // there. The edit happens after the gate has allowed the step (a denied step does not
+            // happen), so a rules-mode denial leaves the copy untouched.
+            if let Some(edit) = &step.edit {
+                edit.apply(copy)?;
             }
 
             if step.dispatch {
