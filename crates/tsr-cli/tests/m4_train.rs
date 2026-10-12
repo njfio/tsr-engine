@@ -1256,3 +1256,230 @@ fn f8_dataset_accepts_a_clone_group_spanning_time() {
         "F8/R5: dataset accepts its own split when a clone group spans time:\n{out}\n{err}"
     );
 }
+
+/// Run the binary with `TSR_CODE_COMMIT` removed from the environment.
+fn run_no_commit(args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(tsr_bin())
+        .args(args)
+        .env_remove("TSR_CODE_COMMIT")
+        .output()
+        .expect("the tsr binary runs");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// P1: `code_commit` is recorded provenance, not a verified property. An untouched bundle verifies
+/// with `TSR_CODE_COMMIT` unset, equal to the recorded value, and different from it; `verify` prints
+/// the value labelled `code_commit (recorded, not verified)=<value>`.
+#[test]
+fn p1_verify_ignores_the_code_commit_environment() {
+    let dir = temp_dir("p1-commit");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+
+    // Unset: the bundle still verifies, and the label is printed.
+    let (code, out, err) = run_no_commit(&["train", "verify", b.to_str().unwrap()]);
+    assert_eq!(code, 0, "P1: verify with TSR_CODE_COMMIT unset: {err}");
+    assert!(
+        out.contains("code_commit (recorded, not verified)="),
+        "P1: verify prints the labelled code_commit: {out}"
+    );
+
+    // Equal to the recorded value.
+    let recorded = out
+        .lines()
+        .find_map(|l| l.strip_prefix("code_commit (recorded, not verified)="))
+        .expect("the label is printed")
+        .trim()
+        .to_string();
+    let (code, _, err) = run_env(
+        &["train", "verify", b.to_str().unwrap()],
+        "TSR_CODE_COMMIT",
+        &recorded,
+    );
+    assert_eq!(code, 0, "P1: verify with the recorded commit: {err}");
+
+    // Different from the recorded value: still verifies.
+    let (code, _, err) = run_env(
+        &["train", "verify", b.to_str().unwrap()],
+        "TSR_CODE_COMMIT",
+        "abc123",
+    );
+    assert_eq!(code, 0, "P1: verify from another commit: {err}");
+}
+
+/// F6/B8: `verify`, `report` and `apply` run the one `load_bundle`, so every manifest or content
+/// tamper `verify` refuses, `report` and `apply` refuse too — all exit 2.
+#[test]
+fn f6_verify_report_and_apply_refuse_the_same_tampers() {
+    let dir = temp_dir("f6-shared");
+    let ds = build_dataset(&dir, "7");
+
+    // Each tamper is applied to a fresh bundle; all three commands must exit 2.
+    type Tamper = (&'static str, Box<dyn Fn(&Path)>);
+    let tampers: Vec<Tamper> = vec![
+        (
+            "a comment",
+            Box::new(|b: &Path| {
+                let p = b.join("manifest.toml");
+                let text = std::fs::read_to_string(&p).unwrap();
+                std::fs::write(&p, format!("# a comment\n{text}")).unwrap();
+            }),
+        ),
+        (
+            "a whitespace edit",
+            Box::new(|b: &Path| {
+                let p = b.join("manifest.toml");
+                let text = std::fs::read_to_string(&p).unwrap();
+                std::fs::write(&p, text.replace("state = ", "state  = ")).unwrap();
+            }),
+        ),
+        (
+            "a forged calibrator",
+            Box::new(|b: &Path| {
+                let p = b.join("manifest.toml");
+                let text = std::fs::read_to_string(&p).unwrap();
+                let forged: String = text
+                    .lines()
+                    .map(|l| {
+                        if l.trim_start().starts_with("calibrator =") {
+                            "calibrator = \"000000000000 features@v9\"".to_string()
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                std::fs::write(&p, forged).unwrap();
+            }),
+        ),
+        (
+            "state=\"active\"",
+            Box::new(|b: &Path| {
+                let p = b.join("manifest.toml");
+                let text = std::fs::read_to_string(&p).unwrap();
+                let forged: String = text
+                    .lines()
+                    .map(|l| {
+                        if l.trim_start().starts_with("state =") {
+                            "state = \"active\"".to_string()
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                std::fs::write(&p, forged).unwrap();
+            }),
+        ),
+        (
+            "a missing head.json",
+            Box::new(|b: &Path| {
+                std::fs::remove_file(b.join("head.json")).unwrap();
+            }),
+        ),
+        (
+            "a one-byte isotonic.json change",
+            Box::new(|b: &Path| {
+                let p = b.join("isotonic.json");
+                let mut bytes = std::fs::read(&p).unwrap();
+                let last = bytes.len() - 2;
+                bytes[last] ^= 0x01;
+                std::fs::write(&p, &bytes).unwrap();
+            }),
+        ),
+    ];
+
+    for (name, tamper) in tampers {
+        // A fresh bundle per tamper: `fit` writes a bundle directory once.
+        let b = dir.join("models").join(name.replace([' ', '=', '"'], "-"));
+        let (code, _, err) = run(&[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "fit for {name} failed: {err}");
+        tamper(&b);
+        let (code, _, err) = run(&["train", "verify", b.to_str().unwrap()]);
+        assert_eq!(code, 2, "F6/B8: verify must refuse {name}: {err}");
+        let (code, _, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds.to_str().unwrap(),
+            "--seed",
+            "7",
+        ]);
+        assert_eq!(code, 2, "F6/B8: report must refuse {name}: {err}");
+        let (code, _, err) = run(&[
+            "train",
+            "apply",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds.to_str().unwrap(),
+            "--side",
+            "held_out",
+        ]);
+        assert_eq!(code, 2, "F6/B8: apply must refuse {name}: {err}");
+    }
+}
+
+/// P2: `report` and `apply` refuse (exit 2, naming both roots) a dataset whose data root differs
+/// from the one the bundle recorded, even when its split digest and feature spec still match.
+#[test]
+fn p2_report_and_apply_refuse_a_dataset_with_another_data_root() {
+    let dir = temp_dir("p2-root");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+
+    // The P2 repro: edit a held-out `generator_raw`, then recompute the row id and the data root
+    // with the public `row_id_of`/`data_root`. The split digest and the feature spec are unchanged,
+    // so only the data root differs from the bundle's.
+    let mut ds2 = tsr_learn::bundle::load_dataset(&ds).expect("the dataset loads");
+    let held = ds2
+        .rows
+        .iter_mut()
+        .find(|r| r.side == tsr_learn::dataset::Side::HeldOut)
+        .expect("the dataset has a held-out row");
+    held.generator_raw = Some(0.99);
+    held.id = tsr_learn::dataset::row_id_of(held);
+    ds2.data_root = tsr_learn::dataset::data_root(&ds2.rows);
+    let ds2_dir = dir.join("tampered-dataset");
+    tsr_learn::dataset::write_dataset(&ds2, &ds2_dir).expect("the tampered dataset writes");
+
+    let (code, _, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds2_dir.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 2, "P2: report refuses a foreign data root: {err}");
+    assert!(
+        err.contains("data root"),
+        "P2: report names the data root: {err}"
+    );
+
+    let (code, _, err) = run(&[
+        "train",
+        "apply",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds2_dir.to_str().unwrap(),
+        "--side",
+        "held_out",
+    ]);
+    assert_eq!(code, 2, "P2: apply refuses a foreign data root: {err}");
+    assert!(
+        err.contains("data root"),
+        "P2: apply names the data root: {err}"
+    );
+}

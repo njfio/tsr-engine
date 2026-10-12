@@ -621,17 +621,17 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
             ))
         })
     };
-    let head: Head = serde_json::from_str(&read("head.json")?)?;
-    let isotonic: Isotonic = serde_json::from_str(&read("isotonic.json")?)?;
-    let spec: FeatureSpec = serde_json::from_str(&read("features.json")?)?;
-    let split: SplitManifest = serde_json::from_str(&read("split.json")?)?;
-    let support_file: SupportFile = serde_json::from_str(&read("support.json")?)?;
 
-    // Recompute the id from the content files and the manifest's content fields, and refuse a
-    // mismatch against the stored id.
+    // Recompute every content file's digest and compare with the stored digest BEFORE parsing the
+    // files, so a one-byte change is refused naming the file rather than surfacing as a JSON parse
+    // error. `verify_bundle` runs this same function, so it names the file too.
     let mut content_digests: Vec<(String, Hash)> = Vec::new();
     for name in CONTENT_FILES {
-        let bytes = std::fs::read(dir.join(name))?;
+        let bytes = std::fs::read(dir.join(name)).map_err(|e| {
+            LearnError::Invalid(format!(
+                "bundle file {name:?} is missing or unreadable: {e}"
+            ))
+        })?;
         let found = file_digest(&bytes);
         let expected = manifest
             .content_digests
@@ -645,6 +645,13 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
         }
         content_digests.push((name.to_string(), found));
     }
+
+    let head: Head = serde_json::from_str(&read("head.json")?)?;
+    let isotonic: Isotonic = serde_json::from_str(&read("isotonic.json")?)?;
+    let spec: FeatureSpec = serde_json::from_str(&read("features.json")?)?;
+    let split: SplitManifest = serde_json::from_str(&read("split.json")?)?;
+    let support_file: SupportFile = serde_json::from_str(&read("support.json")?)?;
+
     let id = bundle_id(&content_digests, &manifest);
     if manifest.id != id.to_hex() {
         return Err(LearnError::Invalid(format!(
@@ -695,94 +702,17 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     })
 }
 
-/// Verify a bundle: recompute every digest and refuse a mismatch, naming the file.
+/// Verify a bundle: run the one loader every command runs, then optionally rebuild.
 ///
+/// F6/B8: `verify`, `report` and `apply` all run `load_bundle`, so every manifest or content
+/// tamper `verify` refuses, `report` and `apply` refuse too — one function, one set of checks.
 /// With `rebuild`, retrain from the dataset directory and compare ids.
 pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyError> {
-    let manifest_text = std::fs::read_to_string(dir.join("manifest.toml"))?;
-    let manifest: Manifest = toml::from_str(&manifest_text)
-        .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
-
-    // F6/B8: `code_commit` is not part of the bundle id (so `TSR_CODE_COMMIT` does not move the
-    // id), so an edit to it would otherwise verify. It must match the environment that verifies.
-    if manifest.code_commit != code_commit() {
-        return Err(VerifyError::Learn(LearnError::Invalid(format!(
-            "manifest.toml: code_commit {:?} is not the current {:?}",
-            manifest.code_commit,
-            code_commit()
-        ))));
-    }
-
-    // Fail closed: a manifest that omits its id or any content digest is refused, never treated
-    // as "no mismatch". `id` and `content_digests` are `#[serde(default)]`, so a stripped manifest
-    // parses; without this check `verify_bundle` would perform no digest and no id check at all.
-    if manifest.id.is_empty() {
-        return Err(VerifyError::Learn(LearnError::Invalid(
-            "manifest.toml: missing bundle id".to_string(),
-        )));
-    }
-    for name in CONTENT_FILES {
-        if !manifest.content_digests.contains_key(*name) {
-            return Err(VerifyError::Learn(LearnError::Invalid(format!(
-                "manifest.toml: missing content digest for {name:?}"
-            ))));
-        }
-    }
-
-    // F6/B8: the manifest must be the canonical rendering of its own fields, so a comment,
-    // whitespace or a reordered key is refused rather than verifying with exit 0.
-    let canonical = toml::to_string_pretty(&manifest)
-        .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
-    if canonical != manifest_text {
-        return Err(VerifyError::Learn(LearnError::Invalid(
-            "manifest.toml: not the canonical rendering of its fields".to_string(),
-        )));
-    }
-
-    // Recompute every content file's digest and compare with the stored digest, naming the file.
-    let mut content_digests: Vec<(String, Hash)> = Vec::new();
-    for name in CONTENT_FILES {
-        let bytes = std::fs::read(dir.join(name))?;
-        let found = file_digest(&bytes);
-        let expected = manifest
-            .content_digests
-            .get(*name)
-            .expect("presence checked above");
-        if &found.to_hex() != expected {
-            return Err(VerifyError::DigestMismatch {
-                file: (*name).to_string(),
-                found: found.to_hex(),
-                expected: expected.clone(),
-            });
-        }
-        content_digests.push((name.to_string(), found));
-    }
-    let recomputed = bundle_id(&content_digests, &manifest);
-
-    // B8: fields outside the id are either recomputed or fixed. The calibrator is the id's first
-    // 12 hex and the feature-schema version; the state is `draft` at M4. A forged calibrator or
-    // state is refused, naming manifest.toml.
-    let expected_calibrator = format!("{} {}", &recomputed.to_hex()[..12], manifest.feature_schema);
-    if manifest.calibrator != expected_calibrator {
-        return Err(VerifyError::Learn(LearnError::Invalid(format!(
-            "manifest.toml: calibrator {:?} disagrees with the recomputed {:?}",
-            manifest.calibrator, expected_calibrator
-        ))));
-    }
-    if manifest.state != "draft" {
-        return Err(VerifyError::Learn(LearnError::Invalid(format!(
-            "manifest.toml: state {:?} is not \"draft\"",
-            manifest.state
-        ))));
-    }
-
-    // The stored id must equal the recomputed id.
-    if manifest.id != recomputed.to_hex() {
-        return Err(VerifyError::IdMismatch {
-            found: manifest.id.clone(),
-            expected: recomputed.to_hex(),
-        });
-    }
+    // P1: `code_commit` is recorded provenance, not a verified property — no signature backs it,
+    // so anyone who can edit the manifest can edit it consistently. It is never compared with the
+    // environment here; `verify` and `report` print it labelled `code_commit (recorded, not
+    // verified)`. `load_bundle` still refuses a manifest whose canonical rendering changed.
+    let bundle = load_bundle(dir).map_err(VerifyError::Learn)?;
 
     if let Some(dataset_dir) = rebuild {
         // B9: build in a temporary directory, compare ids, and remove it, so the bundle directory
@@ -790,16 +720,16 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
         let tmp = std::env::temp_dir().join(format!(
             "tsr-verify-rebuild-{}-{}",
             std::process::id(),
-            recomputed.to_hex()
+            bundle.id.to_hex()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
-        let rebuilt = write_bundle(dataset_dir, &tmp, manifest.support_floor);
+        let rebuilt = write_bundle(dataset_dir, &tmp, bundle.manifest.support_floor);
         let _ = std::fs::remove_dir_all(&tmp);
         let rebuilt = rebuilt.map_err(VerifyError::Learn)?;
-        if rebuilt != recomputed {
+        if rebuilt != bundle.id {
             return Err(VerifyError::IdMismatch {
                 found: rebuilt.to_hex(),
-                expected: recomputed.to_hex(),
+                expected: bundle.id.to_hex(),
             });
         }
     }
@@ -1019,11 +949,14 @@ mod tests {
         let mut bytes = std::fs::read(out.join("head.json")).unwrap();
         bytes[0] ^= 0x01;
         std::fs::write(out.join("head.json"), &bytes).unwrap();
+        // F6/B8: `verify_bundle` runs `load_bundle`, so a one-byte change is refused naming the
+        // file (as a `LearnError`), not surfaced as a JSON parse error.
         let err = verify_bundle(&out, None).unwrap_err();
-        match err {
-            VerifyError::DigestMismatch { file, .. } => assert_eq!(file, "head.json"),
-            other => panic!("expected a digest mismatch naming head.json, got {other:?}"),
-        }
+        let msg = err.to_string();
+        assert!(
+            msg.contains("head.json"),
+            "expected a digest mismatch naming head.json, got {msg}"
+        );
     }
 
     #[test]
@@ -1411,37 +1344,139 @@ mod tests {
         );
     }
 
-    /// F6/B8: `code_commit` is not part of the bundle id, so an edit to it must be refused by
-    /// `verify_bundle` against the current environment.
+    /// P1: `code_commit` is recorded provenance, not a verified property. An untouched bundle must
+    /// verify whatever `TSR_CODE_COMMIT` says — unset, equal or different — because no signature
+    /// backs the field and anyone who can edit the manifest can edit it consistently.
     #[test]
-    fn f6_a_code_commit_edit_is_refused() {
+    fn p1_verify_ignores_the_code_commit_environment() {
         let ds = dataset();
-        let ddir = tmpdir("f6-commit-ds");
+        let ddir = tmpdir("p1-commit-ds");
         crate::dataset::write_dataset(&ds, &ddir).unwrap();
-        let out = tmpdir("f6-commit-out");
+        let out = tmpdir("p1-commit-out");
         write_bundle(&ddir, &out, 30).unwrap();
-        let path = out.join("manifest.toml");
-        let text = std::fs::read_to_string(&path).unwrap();
-        let forged: String = text
-            .lines()
-            .map(|l| {
-                if l.trim_start().starts_with("code_commit =") {
-                    "code_commit = \"deadbeef\"".to_string()
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&path, forged).unwrap();
-        let err = match verify_bundle(&out, None) {
-            Ok(_) => panic!("F6: a code_commit edit must be refused"),
-            Err(e) => e.to_string(),
-        };
+
+        // Unset: the recorded commit is whatever the fitter's environment said.
+        std::env::remove_var("TSR_CODE_COMMIT");
         assert!(
-            err.contains("manifest.toml") && err.contains("code_commit"),
-            "F6: a code_commit edit must be refused naming manifest.toml, got: {err}"
+            verify_bundle(&out, None).is_ok(),
+            "P1: an untouched bundle verifies with TSR_CODE_COMMIT unset"
         );
+
+        // Equal to the recorded value.
+        let recorded = load_bundle(&out).unwrap().manifest.code_commit.clone();
+        std::env::set_var("TSR_CODE_COMMIT", &recorded);
+        assert!(
+            verify_bundle(&out, None).is_ok(),
+            "P1: an untouched bundle verifies with TSR_CODE_COMMIT equal to the recorded value"
+        );
+
+        // Different from the recorded value: still verifies.
+        std::env::set_var("TSR_CODE_COMMIT", "abc123");
+        assert!(
+            verify_bundle(&out, None).is_ok(),
+            "P1: an untouched bundle verifies from another commit"
+        );
+        std::env::remove_var("TSR_CODE_COMMIT");
+    }
+
+    /// F6/B8: `load_bundle` is the one function verify, report and apply run, so every manifest or
+    /// content tamper `verify` refuses, `load_bundle` refuses too. A `code_commit` edit is refused
+    /// only when it changes the canonical rendering (P1: it is recorded, not verified).
+    #[test]
+    fn f6_load_bundle_refuses_every_tamper_verify_refuses() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-shared-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+
+        // Each tamper is applied to a fresh bundle; both `verify_bundle` and `load_bundle` must
+        // refuse it (exit 2 in the CLI, which runs `load_bundle` for report and apply).
+        type Tamper = (&'static str, Box<dyn Fn(&Path)>);
+        let tampers: Vec<Tamper> = vec![
+            (
+                "a comment",
+                Box::new(|dir: &Path| {
+                    let p = dir.join("manifest.toml");
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    std::fs::write(&p, format!("# a comment\n{text}")).unwrap();
+                }),
+            ),
+            (
+                "a whitespace edit",
+                Box::new(|dir: &Path| {
+                    let p = dir.join("manifest.toml");
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    std::fs::write(&p, text.replace("state = ", "state  = ")).unwrap();
+                }),
+            ),
+            (
+                "a forged calibrator",
+                Box::new(|dir: &Path| {
+                    let p = dir.join("manifest.toml");
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    let forged: String = text
+                        .lines()
+                        .map(|l| {
+                            if l.trim_start().starts_with("calibrator =") {
+                                "calibrator = \"000000000000 features@v9\"".to_string()
+                            } else {
+                                l.to_string()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    std::fs::write(&p, forged).unwrap();
+                }),
+            ),
+            (
+                "state=\"active\"",
+                Box::new(|dir: &Path| {
+                    let p = dir.join("manifest.toml");
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    let forged: String = text
+                        .lines()
+                        .map(|l| {
+                            if l.trim_start().starts_with("state =") {
+                                "state = \"active\"".to_string()
+                            } else {
+                                l.to_string()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    std::fs::write(&p, forged).unwrap();
+                }),
+            ),
+            (
+                "a missing head.json",
+                Box::new(|dir: &Path| {
+                    std::fs::remove_file(dir.join("head.json")).unwrap();
+                }),
+            ),
+            (
+                "a one-byte isotonic.json change",
+                Box::new(|dir: &Path| {
+                    let p = dir.join("isotonic.json");
+                    let mut bytes = std::fs::read(&p).unwrap();
+                    let last = bytes.len() - 2;
+                    bytes[last] ^= 0x01;
+                    std::fs::write(&p, &bytes).unwrap();
+                }),
+            ),
+        ];
+
+        for (name, tamper) in tampers {
+            let out = tmpdir(&format!("f6-shared-{}", name.replace(' ', "-")));
+            write_bundle(&ddir, &out, 30).unwrap();
+            tamper(&out);
+            assert!(
+                verify_bundle(&out, None).is_err(),
+                "F6/B8: verify must refuse {name}"
+            );
+            assert!(
+                load_bundle(&out).is_err(),
+                "F6/B8: load_bundle (report and apply) must refuse {name} too"
+            );
+        }
     }
 
     /// F6/B8: a deleted content file must be named, not reported as a bare io error.

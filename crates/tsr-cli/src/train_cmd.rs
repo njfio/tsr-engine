@@ -384,6 +384,14 @@ fn run_verify(bundle: &Path, rebuild: Option<&Path>) -> std::process::ExitCode {
     match tsr_learn::bundle::verify_bundle(bundle, rebuild) {
         Ok(()) => {
             println!("bundle {} verified", bundle.display());
+            // P1: `code_commit` is recorded provenance, not a verified property. Print it with the
+            // label the operator chose, so a reader never mistakes it for a checked value.
+            if let Ok(b) = tsr_learn::bundle::load_bundle(bundle) {
+                println!(
+                    "code_commit (recorded, not verified)={}",
+                    b.manifest.code_commit
+                );
+            }
             std::process::ExitCode::SUCCESS
         }
         Err(e) => {

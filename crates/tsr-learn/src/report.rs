@@ -116,6 +116,9 @@ pub struct Report {
     pub paired: Paired,
     /// The paired difference, per family.
     pub paired_by_family: BTreeMap<String, Paired>,
+    /// P1: the bundle's recorded code commit. Recorded provenance, not a verified property — no
+    /// signature backs it, so it is printed labelled `code_commit (recorded, not verified)`.
+    pub code_commit: String,
     /// The support floor and the calibrated population.
     pub support_floor: u32,
     /// F13: the log-loss clip, so `--json` carries it as the text report does.
@@ -257,6 +260,18 @@ pub fn check_dataset_matches_bundle(
     if want != &got {
         return Err(crate::LearnError::Invalid(format!(
             "dataset split digest {got} does not match the bundle's {want}"
+        )));
+    }
+    // P2: the split digest covers assignments only, so a dataset whose held-out `generator_raw`
+    // values were edited and whose row ids and roots were recomputed with the public
+    // `row_id_of`/`data_root` keeps the split digest and the feature spec. Anchor the dataset to
+    // the bundle by its data root too: the bundle records the data root it was fit from, and a
+    // dataset with another one is not the bundle's evaluation set. The error names both roots.
+    let want_root = &bundle.manifest.data_manifest;
+    let got_root = dataset.data_root.to_hex();
+    if want_root != &got_root {
+        return Err(crate::LearnError::Invalid(format!(
+            "dataset data root {got_root} does not match the bundle's {want_root}"
         )));
     }
     if dataset.spec.version != bundle.spec.version {
@@ -486,6 +501,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         floor_sweep,
         paired,
         paired_by_family,
+        code_commit: bundle.manifest.code_commit.clone(),
         support_floor: bundle.manifest.support_floor,
         log_loss_clip: LOG_LOSS_CLIP,
         population: bundle.population.clone(),
@@ -570,6 +586,11 @@ pub fn render_report(r: &Report, json: bool) -> String {
     out.push_str(&format!("bundle {}\n", r.bundle_id));
     out.push_str(&format!("split_digest {}\n", r.split_digest));
     out.push_str(&format!("calibrator {}\n", r.calibrator));
+    // P1: recorded provenance, not verified — printed with the label the operator chose.
+    out.push_str(&format!(
+        "code_commit (recorded, not verified)={}\n",
+        r.code_commit
+    ));
     out.push_str(&format!("seed {}\n", r.seed));
     out.push_str(&format!("scored {}\n", r.scored));
     out.push_str(&format!("excluded {}\n", r.excluded));
@@ -734,8 +755,8 @@ mod tests {
             id: Hash::of(&[b"bundle"]),
             dir: std::path::PathBuf::from("/tmp/none"),
             manifest: Manifest {
-                data_manifest: "d".into(),
-                training_root: "t".into(),
+                data_manifest: Hash::of(&[b"data"]).to_hex(),
+                training_root: Hash::of(&[b"train"]).to_hex(),
                 feature_schema: spec.version.clone(),
                 code_commit: "unknown".into(),
                 seed: 1,
@@ -800,6 +821,7 @@ mod tests {
             rows,
             split: b.split.clone(),
             spec: b.spec.clone(),
+            // The bundle records the data root it was fit from; a matching dataset carries it.
             data_root: Hash::of(&[b"data"]),
             training_root: Hash::of(&[b"train"]),
             source_root: Hash::of(&[b"source"]),
@@ -1031,6 +1053,41 @@ mod tests {
         // The matching dataset is accepted.
         let ok = dataset(&b, rows);
         assert!(report_logged(&b, &ok, 7, std::path::Path::new("/tmp/none")).is_ok());
+    }
+
+    /// P2: `report` must anchor the dataset to the bundle by its data root, not only by the split
+    /// digest and the feature spec. A dataset whose held-out `generator_raw` values were edited and
+    /// whose row ids and roots were recomputed with the public `row_id_of`/`data_root` keeps the
+    /// split digest and the feature spec, so today it is accepted and the overall verdict flips.
+    #[test]
+    fn p2_report_refuses_a_dataset_whose_data_root_differs() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "calibrated", "l", signal, label, 0.5, i));
+        }
+        let mut tampered = dataset(&b, rows);
+        // Edit a held-out generator_raw, then recompute the row id and the data root with the
+        // public functions — exactly the P2 repro.
+        tampered.rows[0].generator_raw = Some(0.99);
+        tampered.rows[0].id = crate::dataset::row_id_of(&tampered.rows[0]);
+        tampered.data_root = crate::dataset::data_root(&tampered.rows);
+
+        let err = report_logged(&b, &tampered, 7, std::path::Path::new("/tmp/none"))
+            .expect_err("P2: a dataset with another data root is refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("data root") || msg.contains("data_root"),
+            "P2: the refusal names the data root: {msg}"
+        );
+        assert!(
+            msg.contains(&tampered.data_root.to_hex()) && msg.contains(&b.manifest.data_manifest),
+            "P2: the refusal names BOTH roots (dataset {} and bundle {}): {msg}",
+            tampered.data_root.to_hex(),
+            b.manifest.data_manifest
+        );
     }
 
     /// B1: `predict` must return an error on a feature-length mismatch instead of zipping the
