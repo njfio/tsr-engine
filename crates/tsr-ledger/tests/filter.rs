@@ -82,8 +82,9 @@ fn surprise_alone_never_expands() {
     let surprise =
         Filter::surprise_from_forecasts(&[forecast("f-1", 0.8), forecast("f-2", 0.3)], 0.0);
     assert_eq!(surprise.len(), 2, "one residual per forecaster");
-    assert!((surprise[0].residual - -0.8).abs() < 1e-12);
-    assert!((surprise[1].residual - -0.3).abs() < 1e-12);
+    // D11: forecast minus observed, so a forecast of 0.8 against outcome 0 is +0.8.
+    assert!((surprise[0].residual - 0.8).abs() < 1e-12);
+    assert!((surprise[1].residual - 0.3).abs() < 1e-12);
 
     let (observed, produced) = filter
         .filter_return(

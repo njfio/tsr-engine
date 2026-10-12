@@ -400,7 +400,7 @@ impl Forecast {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Surprise {
     pub forecast: ForecastId,
-    /// outcome (0 or 1) minus raw probability; in `[-1, 1]`.
+    /// raw probability minus outcome (0 or 1); in `[-1, 1]`.
     pub residual: f64,
 }
 

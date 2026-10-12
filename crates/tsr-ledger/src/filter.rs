@@ -2,8 +2,8 @@
 //!
 //! One return produces **two separate records**, kept apart:
 //!
-//! - **Surprise** — the forecast residual per forecaster (observed outcome minus the raw
-//!   probability). It updates Expectation on the physical side and is recorded as an `Observed`
+//! - **Surprise** — the forecast residual per forecaster (the raw probability minus the observed
+//!   outcome). It updates Expectation on the physical side and is recorded as an `Observed`
 //!   event carrying [`tsr_domain::Surprise`]. It is **never** an input to expansion.
 //! - **Contrast** — desired minus actual, scored against the task's named open criteria: which
 //!   were unmet and how ([`UnmetKind`]). It is the **only** input to expansion.
@@ -43,16 +43,17 @@ impl<'a> Filter<'a> {
         &self.ledger
     }
 
-    /// The forecast residual per forecaster: `observed - raw p`, in `[-1, 1]`.
+    /// The forecast residual per forecaster: `raw p - observed`, in `[-1, 1]`.
     ///
     /// `observed` is the outcome of the named event (0 or 1). One [`Surprise`] per forecast, in
-    /// the order given. This is the physical-side record; it never expands.
+    /// the order given. This is the physical-side record; it never expands. The sign is forecast
+    /// minus observed, the same as the scorer's residual (D11).
     pub fn surprise_from_forecasts(forecasts: &[Forecast], observed: f64) -> Vec<Surprise> {
         forecasts
             .iter()
             .map(|f| Surprise {
                 forecast: f.id,
-                residual: observed - f.raw.get(),
+                residual: f.raw.get() - observed,
             })
             .collect()
     }
@@ -203,7 +204,10 @@ pub fn dimension_name(kind: &UnmetKind) -> &'static str {
 }
 
 /// The content address of a contrast: blake3 over the return, the unmet pairs and the evidence.
-fn contrast_id(
+///
+/// Public so the write path can check a Contrast's `id` against its own content (D12): the same
+/// contrast is the same id, and a record whose id is not its content address is refused.
+pub fn contrast_id(
     from_return: &EventId,
     unmet: &[(CriterionId, UnmetKind)],
     evidence: &[EventId],

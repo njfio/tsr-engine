@@ -252,7 +252,7 @@ pub struct ResidualPoint {
     /// The time the forecast was recorded, as the log's `recorded_at`.
     pub at: String,
     pub forecaster: Forecaster,
-    /// Outcome minus raw probability, in `[-1, 1]`.
+    /// Raw probability minus outcome, in `[-1, 1]`.
     pub residual: f64,
 }
 
