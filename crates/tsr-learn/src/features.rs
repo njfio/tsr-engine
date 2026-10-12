@@ -492,8 +492,18 @@ mod tests {
 
         // With no Committed event at all, no patch has been made.
         let only_proposed = vec![
-            ev(EventKind::Proposed { candidate: committed_patch }, b"1"),
-            ev(EventKind::Proposed { candidate: uncommitted_patch }, b"2"),
+            ev(
+                EventKind::Proposed {
+                    candidate: committed_patch,
+                },
+                b"1",
+            ),
+            ev(
+                EventKind::Proposed {
+                    candidate: uncommitted_patch,
+                },
+                b"2",
+            ),
         ];
         let c2 = pre_action_counts(&only_proposed);
         assert_eq!(c2.patches, 0, "A8: a Proposed patch is not a patch made");
