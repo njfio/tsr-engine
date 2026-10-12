@@ -18,6 +18,9 @@ pub struct Isotonic {
 /// `xs` are the head's raw outputs on the calibrate slice, `ys` the resolved labels (0/1). The
 /// result is a monotone step function: for any `x`, [`apply_isotonic`] returns the pooled mean of
 /// the block whose `x`-range contains it.
+///
+/// Tied `x` values are pooled **before** PAV (A13): rows that share an input are one block, so the
+/// fitted calibrator does not depend on the order the rows arrive in.
 pub fn fit_isotonic(xs: &[f64], ys: &[f64]) -> Isotonic {
     assert_eq!(xs.len(), ys.len(), "xs and ys must be the same length");
     if xs.is_empty() {
@@ -43,6 +46,15 @@ pub fn fit_isotonic(xs: &[f64], ys: &[f64]) -> Isotonic {
     }
     let mut blocks: Vec<Block> = Vec::new();
     for &i in &idx {
+        // A13: pool tied inputs. If this row's x equals the current block's max_x, it belongs to the
+        // same block regardless of arrival order, so add it in rather than opening a new block.
+        if let Some(last) = blocks.last_mut() {
+            if last.max_x == xs[i] {
+                last.weight += 1.0;
+                last.sum += ys[i];
+                continue;
+            }
+        }
         blocks.push(Block {
             weight: 1.0,
             sum: ys[i],
@@ -131,5 +143,31 @@ mod tests {
         let iso = fit_isotonic(&[], &[]);
         assert!(iso.breakpoints.is_empty());
         assert_eq!(apply_isotonic(&iso, 0.42), 0.42);
+    }
+
+    #[test]
+    fn a13_pav_pools_tied_inputs_so_row_order_does_not_matter() {
+        // A13: tied x values must be pooled before PAV, so the fitted calibrator does not depend on
+        // the order the rows arrive in. Three rows share x = 0.5 with labels 1, 0, 0.
+        let xs = vec![0.5, 0.5, 0.5];
+        let ys = vec![1.0, 0.0, 0.0];
+        let forward = fit_isotonic(&xs, &ys);
+
+        // The same rows, shuffled: the labels arrive in a different order.
+        let xs_shuffled = vec![0.5, 0.5, 0.5];
+        let ys_shuffled = vec![0.0, 1.0, 0.0];
+        let shuffled = fit_isotonic(&xs_shuffled, &ys_shuffled);
+
+        assert_eq!(
+            forward, shuffled,
+            "A13: PAV must pool tied inputs, so the calibrator is independent of row order"
+        );
+        // The pooled mean of the tied block is 1/3, and it is the only breakpoint.
+        assert_eq!(forward.breakpoints.len(), 1, "one pooled block for one x");
+        assert!(
+            (forward.breakpoints[0].1 - 1.0 / 3.0).abs() < 1e-12,
+            "the tied block's pooled mean is 1/3, got {}",
+            forward.breakpoints[0].1
+        );
     }
 }

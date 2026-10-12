@@ -12,7 +12,12 @@ description = "Tier 1 calibration for the TSR Decision Engine: the common decisi
 tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `float_roundtrip` is required: the default serde_json float parser is fast but not
+# correctly rounded, so a f64 written to rows.jsonl and re-read differs by 1 ULP. That
+# made probe_post_action report a false post-action leak and `tsr train fit` refuse.
+# The feature lives here (not in the workspace) because tsr-learn is the crate that
+# writes and re-reads rows.jsonl; Cargo unifies it for the whole build.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 blake3 = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }

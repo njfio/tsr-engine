@@ -197,16 +197,20 @@ pub fn pre_action_counts(events_before: &[(i64, Event)]) -> PreActionCounts {
         match &e.kind {
             EventKind::Proposed { candidate } => {
                 proposed.insert(candidate.id, (candidate.kind, candidate.args));
-                match candidate.kind {
-                    ActionKind::Inspect => {
-                        c.inspections += 1;
-                        inspect_targets.insert(candidate.args);
-                    }
-                    ActionKind::ProposePatch => {
+                if candidate.kind == ActionKind::Inspect {
+                    c.inspections += 1;
+                    inspect_targets.insert(candidate.args);
+                }
+            }
+            // A8: "patches so far" and "distinct patch targets" count patches that were *committed*
+            // before this commitment, not merely proposed. A Proposed patch that was never committed
+            // is not a patch the task has made.
+            EventKind::Committed { candidate, .. } => {
+                if let Some((kind, args)) = proposed.get(candidate) {
+                    if *kind == ActionKind::ProposePatch {
                         c.patches += 1;
-                        patch_targets.insert(candidate.args);
+                        patch_targets.insert(*args);
                     }
-                    _ => {}
                 }
             }
             EventKind::Executed {
@@ -369,6 +373,23 @@ mod tests {
         }
     }
 
+    fn committed(candidate: tsr_domain::CandidateId) -> EventKind {
+        EventKind::Committed {
+            candidate,
+            decision: tsr_domain::Decision::Selected {
+                value: candidate,
+                utility: tsr_domain::Utility {
+                    p_success: 0.5,
+                    value: 0.0,
+                    cost: 0.0,
+                    ev: 0.0,
+                },
+                propensity: 1.0,
+                evidence: Vec::new(),
+            },
+        }
+    }
+
     fn ev(kind: EventKind, tag: &[u8]) -> (i64, Event) {
         let t = TaskId(Hash::of(&[b"t"]));
         let mut e = Event::new(t, Vec::new(), Source::Rules, kind, "2024-01-01T00:00:00Z");
@@ -397,17 +418,86 @@ mod tests {
 
     #[test]
     fn counts_read_only_pre_action_events() {
+        // A8: a patch counts only once it is *committed*, so the Proposed patch below is committed
+        // by the Committed event that follows it.
+        let patch = Candidate::new(
+            ActionKind::ProposePatch,
+            Source::Generator,
+            Hash::of(&[b"p1"]),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let patch_id = patch.id;
         let events = vec![
             ev(proposed(ActionKind::Inspect, b"i1"), b"1"),
             ev(proposed(ActionKind::Inspect, b"i1"), b"2"), // same target
             ev(proposed(ActionKind::Inspect, b"i2"), b"3"),
-            ev(proposed(ActionKind::ProposePatch, b"p1"), b"4"),
+            ev(EventKind::Proposed { candidate: patch }, b"4"),
+            ev(committed(patch_id), b"5"),
         ];
         let c = pre_action_counts(&events);
         assert_eq!(c.inspections, 3);
         assert_eq!(c.distinct_inspect_targets, 2);
         assert_eq!(c.patches, 1);
         assert_eq!(c.distinct_patch_targets, 1);
+    }
+
+    #[test]
+    fn a8_patches_count_only_committed_patches_not_proposed_ones() {
+        // A8: "patches so far" and "distinct patch targets" count patches *committed* before the
+        // commitment, not Proposed events. Two patches are proposed; only one is committed.
+        let committed_patch = Candidate::new(
+            ActionKind::ProposePatch,
+            Source::Generator,
+            Hash::of(&[b"p-committed"]),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let committed_id = committed_patch.id;
+        let uncommitted_patch = Candidate::new(
+            ActionKind::ProposePatch,
+            Source::Generator,
+            Hash::of(&[b"p-uncommitted"]),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+
+        let events = vec![
+            ev(
+                EventKind::Proposed {
+                    candidate: committed_patch.clone(),
+                },
+                b"1",
+            ),
+            ev(
+                EventKind::Proposed {
+                    candidate: uncommitted_patch.clone(),
+                },
+                b"2",
+            ),
+            ev(committed(committed_id), b"3"),
+        ];
+        let c = pre_action_counts(&events);
+        assert_eq!(
+            c.patches, 1,
+            "A8: only the committed patch counts, not the merely proposed one"
+        );
+        assert_eq!(
+            c.distinct_patch_targets, 1,
+            "A8: distinct patch targets count committed patches only"
+        );
+
+        // With no Committed event at all, no patch has been made.
+        let only_proposed = vec![
+            ev(EventKind::Proposed { candidate: committed_patch }, b"1"),
+            ev(EventKind::Proposed { candidate: uncommitted_patch }, b"2"),
+        ];
+        let c2 = pre_action_counts(&only_proposed);
+        assert_eq!(c2.patches, 0, "A8: a Proposed patch is not a patch made");
+        assert_eq!(c2.distinct_patch_targets, 0);
     }
 
     #[test]
