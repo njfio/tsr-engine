@@ -125,32 +125,146 @@ pub struct SplitConfig {
 ///
 /// `--by time`: forward-time by the index timestamp — the earliest tasks are fit, the next
 /// calibrate, the latest held_out. `--by repo`: whole lineages are assigned by a seeded shuffle.
-/// A task, and a clone group when the index names one, never crosses a boundary.
+///
+/// The atomic unit is the thing that must never cross a boundary:
+/// - under `--by repo` the unit is the whole **lineage**, merged with every lineage a clone group
+///   touches (the union of task, clone group and lineage). A clone group whose members sit in
+///   several lineages therefore merges those lineages into one unit, so no lineage and no clone
+///   group can land on two sides.
+/// - under `--by time` the unit is the **task merged with its clone group**, and tasks with equal
+///   timestamps go to the same side (a tie is one unit, so mutants of one snapshot stay together).
 pub fn make_split(
     index: &[TaskIndexRow],
     by: SplitBy,
     fractions: SplitFractions,
     seed: u64,
 ) -> SplitManifest {
-    // Group tasks into atomic units: a clone group is one unit; a task with no clone group is its
-    // own unit. A unit never crosses a boundary.
+    // The unit of each task, as a canonical key. Under repo the unit is the lineage, but a clone
+    // group that spans lineages merges them: union-find over (task, clone group, lineage).
     let mut unit_of: BTreeMap<String, String> = BTreeMap::new();
-    for row in index {
-        let unit = row
-            .clone_group
-            .clone()
-            .unwrap_or_else(|| format!("task:{}", row.task));
-        unit_of.insert(row.task.to_string(), unit);
+    match by {
+        SplitBy::Repo => {
+            // Union-find over the lineage names, merging every lineage a clone group touches.
+            let mut parent: BTreeMap<String, String> = BTreeMap::new();
+            for row in index {
+                parent
+                    .entry(row.lineage.clone())
+                    .or_insert_with(|| row.lineage.clone());
+            }
+            fn find(parent: &mut BTreeMap<String, String>, x: &str) -> String {
+                let mut root = x.to_string();
+                while parent[&root] != root {
+                    root = parent[&root].clone();
+                }
+                // Path compression.
+                let mut cur = x.to_string();
+                while parent[&cur] != cur {
+                    let next = parent[&cur].clone();
+                    parent.insert(cur.clone(), root.clone());
+                    cur = next;
+                }
+                root
+            }
+            // Every clone group merges the lineages of its members.
+            let mut group_lineages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for row in index {
+                if let Some(g) = &row.clone_group {
+                    group_lineages
+                        .entry(g.clone())
+                        .or_default()
+                        .insert(row.lineage.clone());
+                }
+            }
+            for lineages in group_lineages.values() {
+                let mut it = lineages.iter();
+                if let Some(first) = it.next() {
+                    let first_root = find(&mut parent, first);
+                    for other in it {
+                        let other_root = find(&mut parent, other);
+                        if other_root != first_root {
+                            parent.insert(other_root, first_root.clone());
+                        }
+                    }
+                }
+            }
+            for row in index {
+                let root = find(&mut parent, &row.lineage);
+                unit_of.insert(row.task.to_string(), format!("lineage:{root}"));
+            }
+        }
+        SplitBy::Time => {
+            // The unit is the task merged with its clone group; tasks with equal timestamps are one
+            // unit too, so a tie never crosses a boundary.
+            let mut parent: BTreeMap<String, String> = BTreeMap::new();
+            for row in index {
+                let key = format!("task:{}", row.task);
+                parent.entry(key.clone()).or_insert(key);
+            }
+            // Merge a clone group's tasks.
+            let mut group_tasks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for row in index {
+                if let Some(g) = &row.clone_group {
+                    group_tasks
+                        .entry(g.clone())
+                        .or_default()
+                        .push(format!("task:{}", row.task));
+                }
+            }
+            // Merge tasks that share a timestamp.
+            let mut ts_tasks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for row in index {
+                ts_tasks
+                    .entry(row.timestamp.clone())
+                    .or_default()
+                    .push(format!("task:{}", row.task));
+            }
+            fn find(parent: &mut BTreeMap<String, String>, x: &str) -> String {
+                let mut root = x.to_string();
+                while parent[&root] != root {
+                    root = parent[&root].clone();
+                }
+                let mut cur = x.to_string();
+                while parent[&cur] != cur {
+                    let next = parent[&cur].clone();
+                    parent.insert(cur.clone(), root.clone());
+                    cur = next;
+                }
+                root
+            }
+            let merge = |parent: &mut BTreeMap<String, String>, members: &[String]| {
+                let mut it = members.iter();
+                if let Some(first) = it.next() {
+                    let first_root = find(parent, first);
+                    for other in it {
+                        let other_root = find(parent, other);
+                        if other_root != first_root {
+                            parent.insert(other_root, first_root.clone());
+                        }
+                    }
+                }
+            };
+            for members in group_tasks.values() {
+                merge(&mut parent, members);
+            }
+            for members in ts_tasks.values() {
+                merge(&mut parent, members);
+            }
+            for row in index {
+                let key = format!("task:{}", row.task);
+                let root = find(&mut parent, &key);
+                unit_of.insert(row.task.to_string(), format!("unit:{root}"));
+            }
+        }
     }
 
-    // The unit's sort key: under time, the earliest timestamp in the unit; under repo, the lineage.
+    // The unit's sort key: under time, the earliest timestamp in the unit; under repo, the unit's
+    // canonical name (the lineage root).
     let mut unit_key: BTreeMap<String, String> = BTreeMap::new();
-    let mut unit_lineage: BTreeMap<String, String> = BTreeMap::new();
     for row in index {
         let unit = &unit_of[&row.task.to_string()];
         let key = match by {
             SplitBy::Time => row.timestamp.clone(),
-            SplitBy::Repo => row.lineage.clone(),
+            SplitBy::Repo => unit.clone(),
         };
         unit_key
             .entry(unit.clone())
@@ -160,30 +274,19 @@ pub fn make_split(
                 }
             })
             .or_insert(key);
-        unit_lineage.insert(unit.clone(), row.lineage.clone());
     }
 
     // Order the units. Under time: by the unit's earliest timestamp. Under repo: by a seeded
-    // shuffle of the distinct lineages, then by lineage name for determinism within a lineage.
+    // shuffle of the distinct units, then by unit name for determinism.
     let mut units: Vec<String> = unit_key.keys().cloned().collect();
     match by {
         SplitBy::Time => units.sort_by(|a, b| unit_key[a].cmp(&unit_key[b]).then(a.cmp(b))),
         SplitBy::Repo => {
-            let mut lineages: Vec<String> = unit_lineage.values().cloned().collect();
-            lineages.sort();
-            lineages.dedup();
+            // Deterministic seeded shuffle of the distinct units: sort first, then shuffle, so the
+            // result does not depend on the order the units were discovered.
+            units.sort();
             let mut rng = SplitMix64::new(seed);
-            rng.shuffle(&mut lineages);
-            let rank: BTreeMap<String, usize> = lineages
-                .iter()
-                .enumerate()
-                .map(|(i, l)| (l.clone(), i))
-                .collect();
-            units.sort_by(|a, b| {
-                rank[&unit_lineage[a]]
-                    .cmp(&rank[&unit_lineage[b]])
-                    .then(a.cmp(b))
-            });
+            rng.shuffle(&mut units);
         }
     }
 
@@ -745,6 +848,180 @@ mod tests {
         )
         .unwrap();
         assert!(ds.rows.iter().all(|r| r.task != task(&[0])));
+    }
+
+    /// A2: under `--by repo` the unit is the whole lineage, merged with every lineage a clone group
+    /// touches. On the fixture every clone group spans several lineages, so the union is one unit
+    /// and the split cannot leak a lineage across a boundary. Before the fix, `make_split` cut at a
+    /// unit count after ordering by lineage, so all 12 lineages landed on two or more sides and
+    /// `fit` refused with 12 boundary leaks.
+    #[test]
+    fn a2_repo_split_keeps_every_lineage_on_one_side() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m4");
+        let index = read_task_index(&path.join("tasks.jsonl")).expect("tasks.jsonl is readable");
+        assert!(!index.is_empty(), "the fixture has tasks");
+        for seed in 1..=8u64 {
+            let split = make_split(
+                &index,
+                SplitBy::Repo,
+                SplitFractions {
+                    calibrate: 0.2,
+                    holdout: 0.2,
+                },
+                seed,
+            );
+            // Every lineage is on exactly one side.
+            let mut lineage_sides: BTreeMap<String, BTreeSet<Side>> = BTreeMap::new();
+            for row in &index {
+                lineage_sides
+                    .entry(row.lineage.clone())
+                    .or_default()
+                    .insert(split.assignments[&row.task.to_string()]);
+            }
+            for (lineage, sides) in &lineage_sides {
+                assert_eq!(
+                    sides.len(),
+                    1,
+                    "A2: seed {seed}: lineage {lineage} is on {} sides",
+                    sides.len()
+                );
+            }
+            // Every clone group is on exactly one side.
+            let mut group_sides: BTreeMap<String, BTreeSet<Side>> = BTreeMap::new();
+            for row in &index {
+                if let Some(g) = &row.clone_group {
+                    group_sides
+                        .entry(g.clone())
+                        .or_default()
+                        .insert(split.assignments[&row.task.to_string()]);
+                }
+            }
+            for (g, sides) in &group_sides {
+                assert_eq!(
+                    sides.len(),
+                    1,
+                    "A2: seed {seed}: clone group {g} is on {} sides",
+                    sides.len()
+                );
+            }
+        }
+    }
+
+    /// A2: the fixture under `--by repo` for seeds 1 through 8 gives a dataset that `fit` accepts —
+    /// the boundary probe is clean.
+    #[test]
+    fn a2_repo_split_on_the_fixture_passes_the_boundary_probe() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m4");
+        let index = read_task_index(&path.join("tasks.jsonl")).expect("tasks.jsonl is readable");
+        for seed in 1..=8u64 {
+            let split = make_split(
+                &index,
+                SplitBy::Repo,
+                SplitFractions {
+                    calibrate: 0.2,
+                    holdout: 0.2,
+                },
+                seed,
+            );
+            // Build a dataset whose rows carry the split's sides, then run the boundary probe.
+            let ds = Dataset {
+                rows: index
+                    .iter()
+                    .map(|r| Row {
+                        id: Hash::of(&[r.task.to_string().as_bytes()]),
+                        task: r.task,
+                        commitment: EventId(Hash::of(&[b"c"])),
+                        index: 0,
+                        action: ActionKind::ProposePatch,
+                        family: r.family.clone(),
+                        lineage: r.lineage.clone(),
+                        side: split.assignments[&r.task.to_string()],
+                        features: FeatureVector { values: Vec::new() },
+                        label: Some(true),
+                        evidence: Vec::new(),
+                        generator_raw: None,
+                        operator_raw: None,
+                        controller_logged: None,
+                    })
+                    .collect(),
+                split,
+                spec: spec_for_families(&["cal".to_string()]),
+                data_root: Hash::of(&[b"d"]),
+                training_root: Hash::of(&[b"t"]),
+                source_root: Hash::of(&[b"s"]),
+            };
+            let report = crate::probes::probe_boundary(&ds, &index);
+            assert!(
+                report.is_clean(),
+                "A2: seed {seed}: fit refuses the tool's own --by repo split: {:?}",
+                report.leaks
+            );
+        }
+    }
+
+    /// A5: under `--by time` the unit is the task merged with its clone group, and tasks with equal
+    /// timestamps go to the same side. Before the fix, ties were cut and `fit` refused the tool's
+    /// own split for ties of 2-5 tasks (mutants of one snapshot share a timestamp).
+    #[test]
+    fn a5_tied_timestamps_go_to_the_same_side() {
+        let mut events = Vec::new();
+        let mut index = Vec::new();
+        let mut labels = Vec::new();
+        // 10 tasks in 4 tied groups of 3,3,3,1, each group a distinct timestamp. With fractions
+        // 0.25/0.25 the cut falls inside the second group (nfit=4), so the old code split a tie.
+        let sizes = [3usize, 3, 3, 1];
+        let mut i = 0u8;
+        for (g, size) in sizes.iter().enumerate() {
+            for _ in 0..*size {
+                let t = task(&[200 + i]);
+                events.extend(session(t, &[200 + i], 0.9));
+                let ts = format!("2024-01-{:02}T00:00:00Z", g + 1);
+                index.push(index_row(t, "fam", "repo-a", &ts));
+                labels.push(label(t, true));
+                i += 1;
+            }
+        }
+        let ds = build_dataset(
+            &events,
+            &index,
+            &labels,
+            "operator",
+            SplitConfig {
+                by: SplitBy::Time,
+                fractions: SplitFractions {
+                    calibrate: 0.25,
+                    holdout: 0.25,
+                },
+                seed: 7,
+            },
+            Hash::of(&[b"src"]),
+        )
+        .unwrap();
+        // Every task sharing a timestamp is on the same side.
+        let mut ts_sides: BTreeMap<String, BTreeSet<Side>> = BTreeMap::new();
+        for r in &ds.rows {
+            let ts = index
+                .iter()
+                .find(|i| i.task == r.task)
+                .expect("index row")
+                .timestamp
+                .clone();
+            ts_sides.entry(ts).or_default().insert(r.side);
+        }
+        for (ts, sides) in &ts_sides {
+            assert_eq!(
+                sides.len(),
+                1,
+                "A5: tasks tied at {ts} are on {} sides",
+                sides.len()
+            );
+        }
+        let report = crate::probes::probe_boundary(&ds, &index);
+        assert!(
+            report.is_clean(),
+            "A5: fit refuses the tool's own --by time split for tied timestamps: {:?}",
+            report.leaks
+        );
     }
 
     #[test]
