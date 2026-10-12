@@ -396,12 +396,20 @@ pub fn run_one(
         Err(e) => return Err(e.into()),
     };
 
-    // (4b) D6: a Tier 0 budget stop ends *this* task, not the batch. The driver has already
-    // recorded `Stop(budget)`; close the task and record it as rejected without running the
-    // oracle — the attempt is over, so there is nothing for the oracle to judge. The batch
-    // continues with the next task.
-    if report.stopped_on_budget {
-        ctx.close("stop:budget")?;
+    // (4b) D6: a Tier 0 stop ends *this* task, not the batch. The driver has already
+    // recorded `Stop(budget)` (or `Stop(blocked)` for a read-before-test refusal, F2); close the
+    // task and record it as rejected without running the oracle — the attempt is over, so there
+    // is nothing for the oracle to judge. The batch continues with the next task.
+    if report.stopped_on_budget || report.stopped_on_tier0 {
+        let close_reason = if report.stopped_on_budget {
+            "stop:budget".to_string()
+        } else {
+            format!(
+                "stop:blocked:{}",
+                report.tier0_reason.as_deref().unwrap_or("tier 0 refusal")
+            )
+        };
+        ctx.close(close_reason)?;
         let state_root_at_end = ctx.head_root()?.to_hex();
         return Ok(TaskResult {
             task: task.id.clone(),

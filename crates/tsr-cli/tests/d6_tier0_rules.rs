@@ -55,9 +55,8 @@ fn task_json(id: &str, family: &str, flipped: &str) -> serde_json::Value {
 /// A rules session that inspects the failing assertion and its call site, runs the failing test,
 /// then spends 100 tool-minutes in one step — past the profile's 30 — and tries to stop.
 ///
-/// The controller checks the budget at the *start* of each step, so the overspending step is
-/// committed and the following `stop` step is the one the controller refuses with
-/// `BudgetExhausted`.
+/// The controller refuses the step that would cross the budget (D6, F1), so the 100-minute step is
+/// the one refused with `BudgetExhausted` and the following `stop` step never runs.
 fn overspending_session() -> serde_json::Value {
     serde_json::json!({
         "name": "d6-overspend",
@@ -96,6 +95,63 @@ fn overspending_session() -> serde_json::Value {
                 "forecast": null, "forecast_event": null, "dispatch": false,
                 "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
                 "tool_minutes": 0, "wall_clock_ms": 0
+            }
+        ]
+    })
+}
+
+/// A rules session whose *last* step is the one that crosses the budget (D6, F1).
+///
+/// The defect: the controller checked `spent >= budget` before adding the step's minutes, so the
+/// crossing step was committed and only a later step was refused. With no later step, the session
+/// was accepted at 101 tool-minutes against the profile's 30, with 0 denials.
+fn overspending_last_session() -> serde_json::Value {
+    serde_json::json!({
+        "name": "d6-overspend-last",
+        "steps": [
+            {
+                "kind": "inspect",
+                "args": { "arg": "inspect_path", "path": "src/parser.rs" },
+                "forecast": 0.9, "forecast_event": "test_pass", "dispatch": false,
+                "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
+                "tool_minutes": 0, "wall_clock_ms": 0
+            },
+            {
+                "kind": "inspect",
+                "args": { "arg": "inspect_path", "path": "tests/parser.rs" },
+                "forecast": 0.9, "forecast_event": "test_pass", "dispatch": false,
+                "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
+                "tool_minutes": 0, "wall_clock_ms": 0
+            },
+            {
+                "kind": "run_approved_test",
+                "args": { "arg": "test_id", "id": "cargo-test-parser" },
+                "forecast": 0.4, "forecast_event": "test_pass", "dispatch": true,
+                "exit_code": 101, "duration_ms": 1200, "generator_tokens": 0,
+                "tool_minutes": 1, "wall_clock_ms": 1200
+            },
+            {
+                "kind": "inspect",
+                "args": { "arg": "inspect_path", "path": "src/parser.rs" },
+                "forecast": 0.9, "forecast_event": "test_pass", "dispatch": false,
+                "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
+                "tool_minutes": 100, "wall_clock_ms": 0
+            }
+        ]
+    })
+}
+
+/// A rules session that runs the failing test with no inspect: a read-before-test refusal (D6, F2).
+fn read_before_test_violation_session() -> serde_json::Value {
+    serde_json::json!({
+        "name": "d6-read-before-test",
+        "steps": [
+            {
+                "kind": "run_approved_test",
+                "args": { "arg": "test_id", "id": "cargo-test-parser" },
+                "forecast": 0.4, "forecast_event": "test_pass", "dispatch": true,
+                "exit_code": 101, "duration_ms": 1200, "generator_tokens": 0,
+                "tool_minutes": 1, "wall_clock_ms": 1200
             }
         ]
     })
@@ -339,5 +395,171 @@ fn d6_batch_continues_after_a_budget_stop() {
     assert!(
         results.contains("d6-first") && results.contains("d6-second"),
         "D6: both tasks must be recorded; results: {results}"
+    );
+}
+
+/// D6 (F1): a rules-mode session whose *last* step crosses the budget is stopped with
+/// `Stop(budget)` and `TaskClosed`, and is not accepted.
+///
+/// The defect: the controller checked `spent >= budget` before adding the step's minutes, so the
+/// crossing step was committed and only a later step was refused. With no later step, the session
+/// was accepted at 101 tool-minutes against the profile's 30, with 0 denials.
+#[test]
+fn d6_rules_budget_stop_refuses_the_crossing_step() {
+    let ws = workspace();
+    let scratch = ws.join("target/d6-budget-crossing");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let manifest = scratch.join("tasks.jsonl");
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}\n",
+            task_json(
+                "d6-crossing",
+                "parser",
+                "parser::tests::handles_empty_input"
+            )
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("session-rules.json"),
+        serde_json::to_string_pretty(&overspending_last_session()).unwrap(),
+    )
+    .unwrap();
+    let out = scratch.join("out");
+    let profile = ws.join("profiles/default.toml");
+
+    let output = Command::new(tsr_bin())
+        .args([
+            "task",
+            "run",
+            "--mode",
+            "rules",
+            "--tasks",
+            manifest.to_str().unwrap(),
+            "--driver",
+            "scripted",
+            "--out",
+            out.to_str().unwrap(),
+            "--profile",
+            profile.to_str().unwrap(),
+            "--scripted-runner",
+        ])
+        .output()
+        .expect("run tsr");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "D6 (F1): a budget stop must not abort the batch; got {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+
+    let events = events_of(&out, "d6-crossing");
+    assert!(
+        has_stop(&events, "budget"),
+        "D6 (F1): the task must end with Stop(budget); events: {events:#?}"
+    );
+    assert!(
+        has_task_closed(&events),
+        "D6 (F1): the task must be closed with TaskClosed; events: {events:#?}"
+    );
+
+    let results = std::fs::read_to_string(out.join("results-rules.jsonl")).unwrap();
+    assert!(
+        !results.contains("\"accepted\""),
+        "D6 (F1): a budget-stopped task must not be accepted; results: {results}"
+    );
+}
+
+/// D6 (F2): a read-before-test refusal ends *that* task and the batch continues with the next.
+///
+/// The defect: the refusal returned `Err` from `drive`, which `run_one` propagated, aborting the
+/// whole batch with no results file and no second task run.
+#[test]
+fn d6_batch_continues_after_a_read_before_test_refusal() {
+    let ws = workspace();
+    let scratch = ws.join("target/d6-read-before-test");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let manifest = scratch.join("tasks.jsonl");
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}\n{}\n",
+            task_json("d6-bad", "parser", "parser::tests::handles_empty_input"),
+            task_json("d6-good", "lexer", "lexer::tests::tokenizes_unicode"),
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir_all(scratch.join("sessions")).unwrap();
+    std::fs::write(
+        scratch.join("sessions/d6-bad-rules.json"),
+        serde_json::to_string_pretty(&read_before_test_violation_session()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("sessions/d6-good-rules.json"),
+        serde_json::to_string_pretty(&within_budget_session("lexer")).unwrap(),
+    )
+    .unwrap();
+    let out = scratch.join("out");
+    let profile = ws.join("profiles/default.toml");
+
+    let output = Command::new(tsr_bin())
+        .args([
+            "task",
+            "run",
+            "--mode",
+            "rules",
+            "--tasks",
+            manifest.to_str().unwrap(),
+            "--driver",
+            "scripted",
+            "--out",
+            out.to_str().unwrap(),
+            "--profile",
+            profile.to_str().unwrap(),
+            "--scripted-runner",
+        ])
+        .output()
+        .expect("run tsr");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "D6 (F2): a read-before-test refusal must not abort the batch; got {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+
+    // The first task ended on the Tier 0 refusal and was closed.
+    let first = events_of(&out, "d6-bad");
+    assert!(
+        has_stop(&first, "blocked"),
+        "D6 (F2): the first task must end with Stop(blocked); events: {first:#?}"
+    );
+    assert!(
+        has_task_closed(&first),
+        "D6 (F2): the first task must be closed; events: {first:#?}"
+    );
+
+    // The second task ran to completion.
+    let second = events_of(&out, "d6-good");
+    assert!(
+        has_task_closed(&second),
+        "D6 (F2): the second task must have run and closed; events: {second:#?}"
+    );
+
+    // Both tasks appear in the results file.
+    let results = std::fs::read_to_string(out.join("results-rules.jsonl")).unwrap();
+    assert!(
+        results.contains("d6-bad") && results.contains("d6-good"),
+        "D6 (F2): both tasks must be recorded; results: {results}"
     );
 }

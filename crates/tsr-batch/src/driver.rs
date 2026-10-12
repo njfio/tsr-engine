@@ -105,6 +105,14 @@ pub struct DriverReport {
     /// and the attempt ended there. The caller closes the task and does not run the oracle.
     #[serde(default)]
     pub stopped_on_budget: bool,
+    /// Whether the attempt ended on a Tier 0 refusal other than the budget (D6, F2): a
+    /// read-before-test refusal ends *this* task — it is closed as rejected and the batch
+    /// continues with the next task — rather than aborting the whole batch.
+    #[serde(default)]
+    pub stopped_on_tier0: bool,
+    /// The Tier 0 refusal's reason, when [`DriverReport::stopped_on_tier0`] is set.
+    #[serde(default)]
+    pub tier0_reason: Option<String>,
 }
 
 /// One recorded denial.
@@ -388,8 +396,12 @@ impl Tier0Controller {
     /// Check a step against the Tier 0 policy. Returns `Ok(())` when the step may proceed, or a
     /// [`Tier0Error`] when the policy refuses it.
     pub fn check(&mut self, step: &ScriptedStep) -> Result<(), Tier0Error> {
-        // Rule 2: stop on budget. A step that would spend past the budget stops the attempt.
-        if self.spent >= self.budget {
+        // Rule 2: stop on budget. The step that would *cross* the budget is refused, not the step
+        // after it (D6, F1): checking `spent >= budget` before adding the step's minutes let the
+        // crossing step be committed, so a session whose overspending step was last was accepted.
+        // The check is `spent + step.tool_minutes > budget`, so a step that exactly fits is
+        // allowed and the first step that would exceed the budget stops the attempt.
+        if self.spent.saturating_add(step.tool_minutes) > self.budget {
             self.stopped_on_budget = true;
             return Err(Tier0Error::BudgetExhausted {
                 spent: self.spent,
@@ -514,15 +526,25 @@ impl Driver for ScriptedDriver {
                         // D6: a budget stop ends *this* attempt with `Stop(budget)`. It is not an
                         // error that aborts the batch: the driver records the Stop, marks the
                         // report, and returns, so `run_one` closes the task and the batch moves on
-                        // to the next task. A read-before-test refusal is still an error (the
-                        // session is malformed, not merely out of budget).
+                        // to the next task.
                         Err(Tier0Error::BudgetExhausted { .. }) => {
                             ctx.stop("budget")?;
                             report.stopped = true;
                             report.stopped_on_budget = true;
                             return Ok(report);
                         }
-                        Err(e) => return Err(e.into()),
+                        // D6 (F2): a read-before-test refusal is the same class — it ends *this*
+                        // task, not the batch. The controller records `Stop(blocked)` with the
+                        // refusal's reason, marks the report, and returns; `run_one` closes the
+                        // task as rejected and the batch continues with the next task. Before this
+                        // fix the refusal returned `Err`, which aborted the whole batch.
+                        Err(e @ Tier0Error::ReadBeforeTest { .. }) => {
+                            ctx.stop("blocked")?;
+                            report.stopped = true;
+                            report.stopped_on_tier0 = true;
+                            report.tier0_reason = Some(e.to_string());
+                            return Ok(report);
+                        }
                     }
                 }
             }

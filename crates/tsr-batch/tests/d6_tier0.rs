@@ -253,16 +253,70 @@ fn d6_the_controller_is_behind_the_driver_trait() {
         "system 1 gates nothing and runs no Tier 0 policy"
     );
 
-    // Rules mode with the controller: the same session is refused at the test step.
+    // Rules mode with the controller: the same session is refused at the test step. D6 (F2): the
+    // refusal ends *this* task — the driver records `Stop(blocked)` and returns Ok with the report
+    // marked, so the batch continues with the next task — rather than returning Err and aborting
+    // the whole batch.
     let rules = ScriptedDriver::new(Mode::Rules, session).with_tier0(scripted_repo(), 60);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    let err = rules
+    let report = rules
         .drive(&mut ctx, task)
-        .expect_err("D6: rules mode refuses the test before the assertion is read");
+        .expect("D6 (F2): a read-before-test refusal ends the task, it does not abort the batch");
     assert!(
-        matches!(err, tsr_batch::driver::DriverError::Tier0(_)),
-        "expected a Tier0 driver error, got {err:?}"
+        report.stopped_on_tier0,
+        "D6 (F2): the report marks the Tier 0 refusal"
+    );
+    assert!(
+        report.tier0_reason.is_some(),
+        "D6 (F2): the refusal's reason is recorded"
+    );
+    assert!(
+        report.denials.is_empty(),
+        "the refusal is a Tier 0 stop, not a gate denial"
+    );
+}
+
+/// D6 (F1): the step that would *cross* the budget is refused, not the step after it.
+///
+/// The defect: `check` tested `spent >= budget` before adding the step's minutes, so the crossing
+/// step was committed and only a later step was refused. A session whose overspending step was
+/// last was therefore accepted at 101 tool-minutes against a budget of 30, with 0 denials.
+#[test]
+fn d6_budget_stop_refuses_the_crossing_step() {
+    let repo = scripted_repo();
+    // A budget of 1 tool-minute. The first test step spends exactly 1 (allowed: 0 + 1 > 1 is
+    // false). The *next* step is the crossing step and must be refused, even though it is last.
+    let mut controller = Tier0Controller::new(repo, 1);
+    controller
+        .check(&ScriptedStep::inspect("src/parser.rs", 0.9))
+        .unwrap();
+    controller
+        .check(&ScriptedStep::inspect("src/lib.rs", 0.9))
+        .unwrap();
+    controller
+        .check(&ScriptedStep::run_test("cargo-test-parser", 0.4, 101))
+        .expect("the first test fits the budget exactly");
+
+    // The crossing step: 1 + 1 > 1, so it is refused before it is committed.
+    let err = controller
+        .check(&ScriptedStep::run_test("cargo-test-parser", 0.85, 0))
+        .expect_err("D6 (F1): the step that would cross the budget must be refused");
+    match err {
+        Tier0Error::BudgetExhausted { spent, budget } => {
+            assert_eq!(budget, 1);
+            assert_eq!(spent, 1, "the crossing step was not committed");
+        }
+        other => panic!("expected BudgetExhausted, got {other:?}"),
+    }
+    assert!(
+        controller.stopped_on_budget(),
+        "D6 (F1): the controller records that it stopped on budget"
+    );
+    assert_eq!(
+        controller.spent(),
+        1,
+        "D6 (F1): the refused step's minutes were not added to the spend"
     );
 }
 
