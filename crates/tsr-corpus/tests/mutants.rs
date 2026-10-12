@@ -13,10 +13,10 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tsr_corpus::mine::{SuiteReport, TestVerdict, REPORT_FILE};
+use tsr_corpus::mine::{SuiteReport, TestVerdict};
 use tsr_corpus::mutants::{
     family_of, mutants, parse_list, parse_outcomes, read_list, read_outcomes, MutantsError,
-    MutantsOptions, LIST_FILE, OUTCOMES_FILE,
+    MutantsOptions, LIST_FILE, MUTANTS_OUT_DIR, OUTCOMES_FILE,
 };
 use tsr_corpus::{Limits, RunResult, Runner};
 
@@ -25,7 +25,12 @@ const OUTCOMES_SAMPLE: &str =
     include_str!("../../../fixtures/m3/cargo-mutants-outcomes-sample.json");
 
 /// A runner that answers the list run with the sample array and the kill run with the sample
-/// outcomes, writing both the outcomes file and the suite report inside the snapshot.
+/// outcomes, writing the outcomes file and one per-scenario log inside the snapshot.
+///
+/// The log for each scenario is written at that scenario's own `log_path`, in cargo test's
+/// `test <name> ... FAILED` shape, carrying the `report`'s failing tests. This is the real
+/// cargo-mutants layout: each scenario has its own log, so a caught mutant's failing tests come
+/// from its own kill run (D9a).
 struct ReportRunner {
     list: Vec<u8>,
     outcomes: Vec<u8>,
@@ -42,24 +47,41 @@ impl ReportRunner {
             calls: RefCell::new(Vec::new()),
         }
     }
+
+    /// The cargo-test-shaped log body for the report's failing tests.
+    fn log_body(&self) -> String {
+        let mut body = String::new();
+        for test in &self.report.tests {
+            let verdict = if test.passed { "ok" } else { "FAILED" };
+            body.push_str(&format!("test {} ... {}\n", test.name, verdict));
+        }
+        body
+    }
 }
 
 impl Runner for ReportRunner {
     fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
         self.calls.borrow_mut().push(argv.to_vec());
-        if argv.iter().any(|a| a == "--list") {
+        if argv.iter().any(|a| a.contains("--list")) {
             // The list run writes mutants.out/mutants.json inside the snapshot.
             let path = snapshot.join(LIST_FILE);
             fs::create_dir_all(path.parent().unwrap()).expect("mkdir mutants.out");
             fs::write(&path, &self.list).expect("write list");
             return RunResult::from_output(0, &self.list, b"", 1);
         }
-        // The kill run: write the outcomes file and the suite report inside the snapshot.
+        // The kill run: write the outcomes file and one log per scenario at its own log_path.
         let path = snapshot.join(OUTCOMES_FILE);
         fs::create_dir_all(path.parent().unwrap()).expect("mkdir mutants.out");
         fs::write(&path, &self.outcomes).expect("write outcomes");
-        let body = serde_json::to_vec(&self.report).expect("serializable");
-        fs::write(snapshot.join(REPORT_FILE), &body).expect("write report");
+        let lab = parse_outcomes(&self.outcomes).expect("parse outcomes");
+        let body = self.log_body();
+        for outcome in &lab.outcomes {
+            if let Some(rel) = outcome.log_path.as_deref() {
+                let log = snapshot.join(MUTANTS_OUT_DIR).join(rel);
+                fs::create_dir_all(log.parent().unwrap()).expect("mkdir log dir");
+                fs::write(&log, &body).expect("write log");
+            }
+        }
         RunResult::from_output(0, &self.outcomes, b"", 1)
     }
 }
@@ -179,8 +201,8 @@ fn caught_mutants_become_tasks() {
     // Both runs went through the runner, in order: list then kill.
     let calls = runner.calls.borrow();
     assert_eq!(calls.len(), 2);
-    assert!(calls[0].iter().any(|a| a == "--list"));
-    assert!(!calls[1].iter().any(|a| a == "--list"));
+    assert!(calls[0].iter().any(|a| a.contains("--list")));
+    assert!(!calls[1].iter().any(|a| a.contains("--list")));
 }
 
 /// A missed-only run yields no tasks and an empty tasks.jsonl.
@@ -300,7 +322,8 @@ fn outcomes_with_file(file: &str) -> String {
                         "genre": "FnValue"
                     }
                 },
-                "summary": "CaughtMutant"
+                "summary": "CaughtMutant",
+                "log_path": "log/x.log"
             }
         ],
         "total_mutants": 1,
@@ -497,4 +520,279 @@ fn real_cargo_mutants_run() {
     )
     .expect("mutants");
     assert!(report_out.tasks > 0, "expected at least one caught mutant");
+}
+
+// ---------------------------------------------------------------------------------------------
+// D9: per-mutant failing tests, exit codes, mutant list source, real unified diff
+// ---------------------------------------------------------------------------------------------
+
+/// A runner that answers the list run with `list`, the kill run with `outcomes`, and writes a
+/// per-mutant log for each scenario at its own `log_path` inside the snapshot.
+///
+/// `logs` maps a scenario's `log_path` to the cargo-test output that scenario's kill run wrote.
+/// This is the real cargo-mutants shape: each scenario's test output lives in its own file under
+/// `mutants.out/`, named by the scenario's `log_path`.
+struct PerMutantLogRunner {
+    list: Vec<u8>,
+    outcomes: Vec<u8>,
+    logs: Vec<(String, String)>,
+    kill_exit: i32,
+}
+
+impl Runner for PerMutantLogRunner {
+    fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+        if argv.iter().any(|a| a.contains("--list")) {
+            let path = snapshot.join(LIST_FILE);
+            fs::create_dir_all(path.parent().unwrap()).expect("mkdir mutants.out");
+            fs::write(&path, &self.list).expect("write list");
+            return RunResult::from_output(0, &self.list, b"", 1);
+        }
+        let path = snapshot.join(OUTCOMES_FILE);
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir mutants.out");
+        fs::write(&path, &self.outcomes).expect("write outcomes");
+        for (rel, body) in &self.logs {
+            let log = snapshot.join("mutants.out").join(rel);
+            fs::create_dir_all(log.parent().unwrap()).expect("mkdir log dir");
+            fs::write(&log, body).expect("write log");
+        }
+        RunResult::from_output(self.kill_exit, &self.outcomes, b"", 1)
+    }
+}
+
+/// Build an `outcomes.json` with two caught mutants, each with its own `log_path`.
+fn two_caught_with_logs() -> String {
+    serde_json::json!({
+        "outcomes": [
+            {
+                "scenario": {"Mutant": {
+                    "name": "src/lib.rs:2:5: replace add -> i32 with 0",
+                    "package": "partial", "file": "src/lib.rs",
+                    "span": {"start": {"line": 2, "column": 5}, "end": {"line": 2, "column": 6}},
+                    "replacement": "0", "genre": "FnValue"
+                }},
+                "summary": "CaughtMutant",
+                "log_path": "log/mutant_a.log"
+            },
+            {
+                "scenario": {"Mutant": {
+                    "name": "src/lib.rs:2:7: replace + with - in add",
+                    "package": "partial", "file": "src/lib.rs",
+                    "span": {"start": {"line": 2, "column": 7}, "end": {"line": 2, "column": 8}},
+                    "replacement": "-", "genre": "BinaryOperator"
+                }},
+                "summary": "CaughtMutant",
+                "log_path": "log/mutant_b.log"
+            }
+        ],
+        "total_mutants": 2, "caught": 2
+    })
+    .to_string()
+}
+
+/// D9(a): each mutant task carries the failing tests of ITS OWN kill run, not one shared report.
+///
+/// Pre-fix, `mutants` read a single `<snapshot>/.tsr-suite-report.json` for every mutant, so two
+/// mutants killed by different tests both carried the same `failing_tests`. The fix reads each
+/// scenario's own `log_path` log inside `mutants.out/` and parses the failing test names from it.
+#[test]
+fn d9_each_mutant_carries_its_own_failing_tests() {
+    let repo = tmpdir("d9-per-mutant");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: two_caught_with_logs().into_bytes(),
+        logs: vec![
+            (
+                "log/mutant_a.log".to_string(),
+                "running 2 tests\n\
+                 test tests::add_works ... FAILED\n\
+                 test tests::sub_works ... ok\n\
+                 \n\
+                 failures:\n    tests::add_works\n"
+                    .to_string(),
+            ),
+            (
+                "log/mutant_b.log".to_string(),
+                "running 2 tests\n\
+                 test tests::add_works ... ok\n\
+                 test tests::sub_works ... FAILED\n\
+                 \n\
+                 failures:\n    tests::sub_works\n"
+                    .to_string(),
+            ),
+        ],
+        kill_exit: 0,
+    };
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(report_out.tasks, 2, "two caught mutants");
+
+    let body = fs::read_to_string(out.join("tasks.jsonl")).expect("tasks.jsonl");
+    let tasks: Vec<serde_json::Value> = body
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("task json"))
+        .collect();
+    assert_eq!(tasks.len(), 2);
+
+    let mut failing: Vec<Vec<String>> = tasks
+        .iter()
+        .map(|t| {
+            t["failing_tests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        })
+        .collect();
+    failing.sort();
+    assert_eq!(
+        failing,
+        vec![
+            vec!["tests::add_works".to_string()],
+            vec!["tests::sub_works".to_string()],
+        ],
+        "each mutant carries the failing tests of its own kill run, not one shared report"
+    );
+}
+
+/// D9(b): a cargo-mutants exit code that means "some mutants missed" is NOT a failure.
+///
+/// cargo-mutants documents its exit codes in `src/exit_code.rs`: 0 = `Success` (all mutants
+/// caught), 1 = `Usage`, 2 = `FoundProblems` (one or more mutants were not caught by tests),
+/// 3 = `Timeout`, 4 = `BaselineFailed`, 5 = `FilterDiffMismatch`, 6 = `FilterDiffInvalid`,
+/// 70 = `Software`. Only 0, 2 and 3 mean the run itself completed. Pre-fix, `mutants` treated any
+/// non-zero exit as a failure, so a run that missed some mutants (exit 2) errored instead of
+/// yielding the caught mutants' tasks.
+#[test]
+fn d9_found_problems_exit_is_not_a_failure() {
+    let repo = tmpdir("d9-exit-2");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: two_caught_with_logs().into_bytes(),
+        logs: vec![
+            (
+                "log/mutant_a.log".to_string(),
+                "test tests::add_works ... FAILED\n".to_string(),
+            ),
+            (
+                "log/mutant_b.log".to_string(),
+                "test tests::sub_works ... FAILED\n".to_string(),
+            ),
+        ],
+        // 2 = FoundProblems: some mutants were missed. The run still completed.
+        kill_exit: 2,
+    };
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner)
+        .expect("exit 2 (FoundProblems) must not be a failure");
+    assert_eq!(report_out.tasks, 2, "the caught mutants still yield tasks");
+}
+
+/// D9(b): a genuine cargo-mutants failure exit (5 = Failure) IS an error.
+#[test]
+fn d9_failure_exit_is_an_error() {
+    let repo = tmpdir("d9-exit-5");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: two_caught_with_logs().into_bytes(),
+        logs: vec![],
+        // 5 = Failure: the run itself failed.
+        kill_exit: 5,
+    };
+    let err = mutants(&repo, &out, &MutantsOptions::default(), &runner)
+        .expect_err("exit 5 (Failure) must be an error");
+    assert!(matches!(err, MutantsError::Runner(_)), "{err:?}");
+}
+
+/// D9(c): the mutant list is read from where the invocation actually writes it.
+///
+/// `cargo mutants --list --json` writes the JSON array to **stdout** (cargo-mutants `main.rs`
+/// `print!("{}", list_mutants(...))`), and the [`Runner`] returns only digests, not stdout bytes.
+/// So the list argv must redirect that stdout into `mutants.out/mutants.json` inside the snapshot,
+/// which is the file [`read_list`] reads. Pre-fix, `LIST_ARGV` was `cargo mutants --list --json`
+/// with no redirect, so the file `read_list` expects was never written: the doc and the code
+/// disagreed.
+#[test]
+fn d9_list_argv_writes_the_file_read_list_reads() {
+    let argv = MutantsOptions::default().list_argv;
+    let joined = argv.join(" ");
+    assert!(
+        joined.contains("--list") && joined.contains("--json"),
+        "the list run still asks cargo-mutants for JSON: {joined}"
+    );
+    assert!(
+        joined.contains(LIST_FILE),
+        "the list argv must write {LIST_FILE} inside the snapshot, the file read_list reads: {joined}"
+    );
+    assert!(
+        joined.contains('>'),
+        "the list argv must redirect cargo-mutants' stdout into {LIST_FILE}: {joined}"
+    );
+}
+
+/// D9(d): the stored reversal is a real unified diff, not a placeholder header.
+///
+/// Pre-fix, `reversal_diff` emitted `@@ mutant <op> @@`, which is not a unified-diff hunk header
+/// and cannot be applied by `git apply`/`patch`. The fix emits a real `@@ -<line>,1 +<line>,1 @@`
+/// hunk header with the mutated line removed and the original line added.
+#[test]
+fn d9_reversal_is_a_real_unified_diff() {
+    let repo = tmpdir("d9-diff");
+    fs::create_dir_all(repo.join("src")).expect("mkdir src");
+    fs::write(
+        repo.join("src/lib.rs"),
+        "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+    )
+    .expect("write source");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: two_caught_with_logs().into_bytes(),
+        logs: vec![
+            (
+                "log/mutant_a.log".to_string(),
+                "test tests::add_works ... FAILED\n".to_string(),
+            ),
+            (
+                "log/mutant_b.log".to_string(),
+                "test tests::sub_works ... FAILED\n".to_string(),
+            ),
+        ],
+        kill_exit: 0,
+    };
+    mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+
+    let cas = out.join("cas");
+    let mut saw_hunk = false;
+    for entry in fs::read_dir(&cas).expect("cas dir") {
+        let entry = entry.expect("cas entry");
+        let text =
+            String::from_utf8_lossy(&fs::read(entry.path()).expect("cas object")).into_owned();
+        if !text.contains("--- a/") {
+            continue;
+        }
+        assert!(
+            text.contains("+++ b/"),
+            "a unified diff has a +++ header: {text}"
+        );
+        // A real hunk header is `@@ -<start>,<len> +<start>,<len> @@`.
+        let hunk = text
+            .lines()
+            .find(|l| l.starts_with("@@"))
+            .unwrap_or_else(|| panic!("no hunk header in reversal: {text}"));
+        assert!(
+            hunk.starts_with("@@ -") && hunk.contains(" +") && hunk.ends_with(" @@"),
+            "hunk header is not a real unified-diff header: {hunk}"
+        );
+        assert!(
+            !hunk.contains("mutant"),
+            "the placeholder `@@ mutant <op> @@` header is not a unified diff: {hunk}"
+        );
+        saw_hunk = true;
+    }
+    assert!(
+        saw_hunk,
+        "at least one reversal diff was written to the CAS"
+    );
 }

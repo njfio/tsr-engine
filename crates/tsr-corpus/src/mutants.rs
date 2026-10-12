@@ -11,7 +11,10 @@
 //!
 //! ## The real cargo-mutants shapes (24.x)
 //!
-//! `cargo mutants --list --json` writes a JSON **array** of mutant descriptors to stdout. Each
+//! `cargo mutants --list --json` writes a JSON **array** of mutant descriptors to **stdout**
+//! (cargo-mutants `main.rs`: `print!("{}", list_mutants(...))`). The [`Runner`] returns only
+//! output *digests*, not the bytes, so the list argv redirects that stdout into
+//! `mutants.out/mutants.json` inside the snapshot — the file [`read_list`] reads. Each
 //! descriptor is `{name, package, file, function, span, replacement, genre, diff}` where
 //! `function` is an object (`{function_name, return_type, span}`) or null, and `span` is
 //! `{start: {line, column}, end: {line, column}}`. The mutation operator is `genre` (an enum such
@@ -33,10 +36,22 @@
 //! ## The failing-test convention
 //!
 //! [`RunResult`] carries only exit codes and output digests, so the *names* of the tests that
-//! failed under the mutant cannot come from the [`Runner`]'s return value. As in [`crate::mine`],
-//! the suite invocation writes a machine-readable report inside the snapshot at
-//! `<snapshot>/.tsr-suite-report.json` (`{"tests": [{"name", "passed"}]}`), and `mutants` reads it
-//! after the run. A **missing** report is an error, never a silently empty failing set.
+//! failed under a mutant cannot come from the [`Runner`]'s return value. cargo-mutants writes each
+//! scenario's test output to its own file under `mutants.out/`, named by the scenario's
+//! `log_path`; `mutants` reads **that** file for each caught mutant and parses the failing test
+//! names from cargo test's `test <name> ... FAILED` lines. Each task therefore carries the failing
+//! tests of its own kill run, not one shared report. A **missing** log for a caught mutant is an
+//! error, never a silently empty failing set.
+//!
+//! ## cargo-mutants exit codes
+//!
+//! cargo-mutants documents its exit codes in `src/exit_code.rs` (and README "Exit codes"):
+//! `0` = `Success` (all mutants caught), `1` = `Usage` (wrong arguments; also Clap's value),
+//! `2` = `FoundProblems` (one or more mutants were not caught by tests), `3` = `Timeout` (a test
+//! timed out), `4` = `BaselineFailed` (the tests already fail in the unmutated tree), `5` =
+//! `FilterDiffMismatch`, `6` = `FilterDiffInvalid`, `70` = `Software` (internal error). Only `0`,
+//! `2` and `3` mean the run itself completed — a run that missed some mutants (exit `2`) is **not**
+//! a failure of the command. [`kill_run_ok`] encodes that.
 
 use std::fs;
 use std::path::Path;
@@ -44,11 +59,19 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tsr_domain::{Hash, Horizon, OutcomeDef, OutcomeDefId};
 
-use crate::mine::read_report;
 use crate::{digest, Limits, Runner};
 
 /// The argv that lists mutants as JSON.
-pub const LIST_ARGV: &[&str] = &["cargo", "mutants", "--list", "--json"];
+///
+/// `cargo mutants --list --json` prints the JSON array to **stdout**, and the [`Runner`] returns
+/// only digests, so the argv redirects that stdout into [`LIST_FILE`] inside the snapshot — the
+/// file [`read_list`] reads. This is the one place the doc and the code agree on where the list
+/// lives (D9c).
+pub const LIST_ARGV: &[&str] = &[
+    "sh",
+    "-c",
+    "cargo mutants --list --json > mutants.out/mutants.json",
+];
 
 /// The argv that runs the kill run.
 pub const RUN_ARGV: &[&str] = &["cargo", "mutants"];
@@ -58,6 +81,9 @@ pub const LIST_FILE: &str = "mutants.out/mutants.json";
 
 /// The file the kill run writes inside the snapshot.
 pub const OUTCOMES_FILE: &str = "mutants.out/outcomes.json";
+
+/// The directory cargo-mutants writes its per-scenario logs into, relative to the snapshot.
+pub const MUTANTS_OUT_DIR: &str = "mutants.out";
 
 /// The oracle's name, versioned like every other outcome definition (B7).
 pub const ORACLE_NAME: &str = "mutant_reverted_and_suite_no_regression";
@@ -154,6 +180,11 @@ pub struct ScenarioOutcome {
     pub scenario: Scenario,
     /// `Success`, `CaughtMutant`, `MissedMutant`, `Unviable`, `Failure`, `Timeout`.
     pub summary: String,
+    /// The path, relative to the snapshot, of the log cargo-mutants wrote for this scenario's test
+    /// run. Each scenario has its own log, so a caught mutant's failing tests come from its own
+    /// kill run (D9a).
+    #[serde(default)]
+    pub log_path: Option<String>,
 }
 
 /// A scenario: the baseline build, or a mutant.
@@ -333,6 +364,73 @@ pub fn read_outcomes(snapshot: &Path) -> Result<LabOutcome, MutantsError> {
     parse_outcomes(&bytes)
 }
 
+/// Whether a cargo-mutants kill-run exit code means the run itself completed.
+///
+/// cargo-mutants documents its exit codes in `src/exit_code.rs` (and README "Exit codes"):
+/// `0` = `Success` (all mutants caught), `1` = `Usage` (wrong arguments; also Clap's value),
+/// `2` = `FoundProblems` (one or more mutants were not caught by tests), `3` = `Timeout` (a test
+/// timed out), `4` = `BaselineFailed` (the tests already fail in the unmutated tree), `5` =
+/// `FilterDiffMismatch`, `6` = `FilterDiffInvalid`, `70` = `Software` (internal error).
+///
+/// A run that missed some mutants (exit `2`) or timed out (exit `3`) still completed and wrote its
+/// outcomes — that is **not** a failure of the command (D9b). Only `0`, `2` and `3` are accepted; a
+/// spawn error is reported by the [`Runner`] as exit `127` and is not accepted here.
+pub fn kill_run_ok(exit: i32) -> bool {
+    matches!(exit, 0 | 2 | 3)
+}
+
+/// Parse the failing test names from a cargo test log.
+///
+/// cargo test prints one `test <name> ... FAILED` line per failing test (and `... ok` for a pass).
+/// The names are returned sorted and deduplicated. A log with no `FAILED` line yields an empty
+/// list — the caller decides whether that is an error.
+pub fn parse_failing_tests(log: &str) -> Vec<String> {
+    let mut names: Vec<String> = log
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("test ")?;
+            let (name, verdict) = rest.rsplit_once(" ... ")?;
+            if verdict.trim() == "FAILED" {
+                Some(name.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Read the failing tests of one scenario's own kill run from its `log_path` inside the snapshot.
+///
+/// Each scenario in `outcomes.json` carries its own `log_path`; reading that file gives the tests
+/// that failed under **that** mutant, not a shared report (D9a). A caught mutant with no
+/// `log_path`, or whose log is missing, is an error — never a silently empty failing set.
+pub fn read_failing_tests(
+    snapshot: &Path,
+    outcome: &ScenarioOutcome,
+) -> Result<Vec<String>, MutantsError> {
+    let Some(rel) = outcome.log_path.as_deref() else {
+        return Err(MutantsError::MissingReport(format!(
+            "caught mutant {} has no log_path in {OUTCOMES_FILE}",
+            outcome
+                .mutant()
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )));
+    };
+    let path = snapshot.join(MUTANTS_OUT_DIR).join(rel);
+    let text = fs::read_to_string(&path).map_err(|e| {
+        MutantsError::MissingReport(format!(
+            "no kill-run log at {} for a caught mutant: {e}",
+            path.display()
+        ))
+    })?;
+    Ok(parse_failing_tests(&text))
+}
+
 /// The reversal diff for a mutant: the unified diff that restores the original source line.
 ///
 /// cargo-mutants does not emit the reversal itself, so it is reconstructed from the descriptor:
@@ -340,6 +438,11 @@ pub fn read_outcomes(snapshot: &Path) -> Result<LabOutcome, MutantsError> {
 /// repository at the mutated snapshot. When the original cannot be read, the reversal is the
 /// descriptor's own text (the mutation), which is still a stable, content-addressed record of what
 /// must change.
+///
+/// The result is a **real unified diff** (D9d): `--- a/<file>` / `+++ b/<file>` headers and a
+/// `@@ -<line>,1 +<line>,1 @@` hunk header with the mutated line removed and the original line
+/// added, so `git apply`/`patch` can apply it. The pre-fix placeholder `@@ mutant <op> @@` was not
+/// a hunk header and could not be applied.
 pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
     let original = mutant
         .line()
@@ -350,10 +453,13 @@ pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
     } else {
         mutant.replacement.clone()
     };
+    // The hunk header names the 1-based line the mutation is on. A descriptor with no span still
+    // gets a valid header at line 1.
+    let line = mutant.line().unwrap_or(1);
     format!(
-        "--- a/{file}\n+++ b/{file}\n@@ mutant {op} @@\n-{mutated}\n+{original}\n",
+        "--- a/{file}\n+++ b/{file}\n@@ -{line},1 +{line},1 @@\n-{mutated}\n+{original}\n",
         file = mutant.file,
-        op = mutant.operator(),
+        line = line,
         mutated = mutated.trim_end(),
         original = original.trim_end(),
     )
@@ -454,8 +560,10 @@ pub fn family_of(mutant: &MutantDescriptor) -> String {
 
 /// Run `cargo mutants` for `repo` into `out`, writing `tasks.jsonl` and the CAS.
 ///
-/// Both the list and the kill run go through the [`Runner`]; the failing tests are read from the
-/// suite report the kill run writes inside the snapshot (see the module docs).
+/// Both the list and the kill run go through the [`Runner`]. The list run writes
+/// `mutants.out/mutants.json` inside the snapshot; the kill run writes `mutants.out/outcomes.json`
+/// and one log per scenario. Each caught mutant's failing tests are read from **its own** log
+/// (D9a), and a kill-run exit that means "some mutants missed" is not a failure (D9b).
 pub fn mutants(
     repo: &Path,
     out: &Path,
@@ -479,17 +587,17 @@ pub fn mutants(
     }
     let listed = read_list(repo)?;
 
-    // The kill run: outcomes.json inside the snapshot names the caught mutants; the suite report
-    // names the tests that failed under the mutant.
+    // The kill run: outcomes.json inside the snapshot names the caught mutants, and each scenario's
+    // own log names the tests that failed under it. Exit 2 (`FoundProblems`: some mutants missed)
+    // and exit 3 (`Timeout`) mean the run completed; only a genuine failure is an error (D9b).
     let run = runner.run(repo, &opts.run_argv, &opts.limits);
-    if !run.succeeded() {
+    if !kill_run_ok(run.exit) {
         return Err(MutantsError::Runner(format!(
-            "cargo mutants exited {}",
+            "cargo mutants exited {} (not a completed run)",
             run.exit
         )));
     }
     let lab = read_outcomes(repo)?;
-    let report = read_report(repo)?;
 
     let mut report_out = MutantsReport {
         repo: repo_str.clone(),
@@ -515,7 +623,8 @@ pub fn mutants(
         if !is_safe_descriptor_path(repo, &mutant.file) {
             report_out.skipped_unsafe_descriptor += 1;
         }
-        let failing: Vec<String> = report.failed().into_iter().collect();
+        // The failing tests come from THIS mutant's own kill-run log, not one shared report (D9a).
+        let failing = read_failing_tests(repo, outcome)?;
         let reversal = reversal_diff(repo, mutant);
         let reversal_digest = digest(reversal.as_bytes());
         crate::mine::write_cas(&cas, &reversal_digest, reversal.as_bytes())
