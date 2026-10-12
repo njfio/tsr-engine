@@ -400,15 +400,19 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
     // task's timestamp a pure function of its global position, so a block layout would put only
     // the last family on the late side of a forward-time split. Round-robin the (family, i) pairs
     // so every side of a `--by time` split sees all four families.
+    // A9/A10/B11: spread each family evenly across the whole range, so a small family is not
+    // confined to the first timestamps. Task `i` of a family of `n` gets position
+    // `i * total / n`; the sort is stable, so families keep their declared order on ties. The
+    // fourth family has 20 tasks, so under the acceptance split (`--by time --calibrate 0.2
+    // --holdout 0.2 --seed 7`) every side holds tasks of all four families.
+    let total: usize = FAMILIES.iter().map(|f| f.tasks).sum();
     let mut plan_order: Vec<(Family, usize)> = Vec::new();
-    let max_tasks = FAMILIES.iter().map(|f| f.tasks).max().unwrap_or(0);
-    for i in 0..max_tasks {
-        for family in FAMILIES {
-            if i < family.tasks {
-                plan_order.push((family, i));
-            }
+    for family in FAMILIES {
+        for i in 0..family.tasks {
+            plan_order.push((family, i));
         }
     }
+    plan_order.sort_by_key(|(family, i)| i * total / family.tasks);
 
     for (task_index, (family, i)) in plan_order.into_iter().enumerate() {
         {
@@ -481,7 +485,10 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
 
             // The gated decisions.
             for d in 0..plan.decisions {
-                let insp = plan.inspections + d as u64;
+                // A9/A10/B11: the generator forecasts at the task's own inspection count, the
+                // same state the label `task_accepted` is drawn from (line 322), so each family's
+                // documented distortion holds at every decision position.
+                let insp = plan.inspections;
                 // The gated action kind cycles so all three gated kinds appear.
                 let kind = match d % 3 {
                     0 => ActionKind::RunApprovedTest,
@@ -796,8 +803,143 @@ mod tests {
         }
     }
 
-    /// The overconfident family is §B8's example: the generator says ~0.9 where the family succeeds
-    /// ~0.4 with little inspected.
+    /// A9/A10/B11: the generator's p and the label's true probability come from the same state for
+    /// every decision, so each family's documented distortion holds at every decision position.
+    ///
+    /// The header model makes both `p_true` and `p_generator` functions of the task's inspection
+    /// count alone, and no inspection is logged between decisions, so within one task the
+    /// generator's raw p must be the same at every decision position and must equal
+    /// `p_generator(family, inspections)`. Before the fix the generator forecast at
+    /// `inspections + d` while the label was drawn at `inspections`, so the "calibrated" family was
+    /// overconfident after the first decision and the controller's measured gain was inflated.
+    #[test]
+    fn a9_a10_b11_generator_and_label_share_one_state_per_decision() {
+        let dir = std::env::temp_dir().join(format!("tsr-m4-samestate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir is creatable");
+        let db = dir.join("corpus.db");
+        let corpus = generate_fixtures(&db, &dir.join("fixtures")).expect("generates");
+
+        let store = Store::open(&db).expect("the store opens");
+        let events = store.all().expect("the log reads");
+        let rows = crate::decision::decision_rows(&events);
+        let labels = crate::decision::resolve_labels(&events, &corpus.labels, OPERATOR)
+            .expect("the labels resolve");
+
+        // The family and inspection count per task, from the corpus rows.
+        let mut family_of: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for row in &corpus.tasks {
+            family_of.insert(row.task.to_string(), row.family.clone());
+        }
+        // Count the inspections before the first decision, per task, from the log.
+        let mut inspections_of: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
+        for (_, ev) in &events {
+            if let EventKind::Proposed { candidate } = &ev.kind {
+                if candidate.kind == ActionKind::Inspect {
+                    *inspections_of.entry(ev.task.to_string()).or_default() += 1;
+                }
+            }
+        }
+        let label_of: std::collections::BTreeMap<String, bool> = labels
+            .iter()
+            .filter_map(|l| match l.label {
+                crate::decision::Label::True => Some((l.task.to_string(), true)),
+                crate::decision::Label::False => Some((l.task.to_string(), false)),
+                _ => None,
+            })
+            .collect();
+
+        // (1) Within a task, the generator's raw p is constant across decision positions.
+        let mut by_task: std::collections::BTreeMap<String, Vec<f64>> =
+            std::collections::BTreeMap::new();
+        for dr in &rows {
+            if let Some(p) = dr.generator_raw() {
+                by_task.entry(dr.task.to_string()).or_default().push(p);
+            }
+        }
+        assert!(
+            !by_task.is_empty(),
+            "some decisions have a generator forecast"
+        );
+        for (task, ps) in &by_task {
+            let first = ps[0];
+            for p in ps {
+                assert!(
+                    (p - first).abs() < 1e-12,
+                    "A9/A10/B11: task {task} forecasts at different states across decisions: {ps:?}"
+                );
+            }
+        }
+
+        // (2) Per (family, inspection count) — the decision position — the generator's p matches
+        // `p_generator(family, inspections)` and the label rate matches `p_true(family,
+        // inspections)`, within a stated tolerance. Grouping by the inspection count is what makes
+        // the check meaningful: a family's tasks have different inspection counts, so a mean over
+        // the whole family would not equal any single model value.
+        let mut gen_sum: std::collections::BTreeMap<(String, u64), (f64, usize)> =
+            std::collections::BTreeMap::new();
+        let mut label_sum: std::collections::BTreeMap<(String, u64), (usize, usize)> =
+            std::collections::BTreeMap::new();
+        for dr in &rows {
+            let task = dr.task.to_string();
+            let Some(family) = family_of.get(&task).cloned() else {
+                continue;
+            };
+            let insp = inspections_of.get(&task).copied().unwrap_or(0);
+            let model = FAMILIES.iter().find(|f| f.name == family).unwrap();
+            if let Some(p) = dr.generator_raw() {
+                let e = gen_sum.entry((family.clone(), insp)).or_default();
+                e.0 += p;
+                e.1 += 1;
+                assert!(
+                    (p - p_generator(model, insp)).abs() < 1e-12,
+                    "A9/A10/B11: {family} generator p {p} != p_generator({insp}) {}",
+                    p_generator(model, insp)
+                );
+            }
+        }
+        // The label is per task, so count each task once — a task with four decisions must not
+        // weigh four times in the rate.
+        for (task, label) in &label_of {
+            let Some(family) = family_of.get(task).cloned() else {
+                continue;
+            };
+            let insp = inspections_of.get(task).copied().unwrap_or(0);
+            let e = label_sum.entry((family, insp)).or_default();
+            e.0 += usize::from(*label);
+            e.1 += 1;
+        }
+        assert!(
+            !gen_sum.is_empty(),
+            "some decisions have a generator forecast"
+        );
+        for ((family, insp), (sum, n)) in &gen_sum {
+            let model = FAMILIES.iter().find(|f| f.name == *family).unwrap();
+            let mean = sum / *n as f64;
+            assert!(
+                (mean - p_generator(model, *insp)).abs() < 0.05,
+                "A9/A10/B11: {family}@insp={insp} mean generator p {mean} vs model {}",
+                p_generator(model, *insp)
+            );
+        }
+        for ((family, insp), (hits, n)) in &label_sum {
+            // The label is a Bernoulli draw, so the observed rate only approaches `p_true` as the
+            // sample grows. The tolerance is a three-sigma binomial bound on the rate, stated here
+            // and in the module header: `3 * sqrt(p(1-p)/n)`, floored at 0.05 so a tiny sample is
+            // not held to a bound tighter than the draw can meet.
+            let model = FAMILIES.iter().find(|f| f.name == *family).unwrap();
+            let p = p_true(model, *insp);
+            let rate = *hits as f64 / *n as f64;
+            let tol = (3.0 * (p * (1.0 - p) / *n as f64).sqrt()).max(0.05);
+            assert!(
+                (rate - p).abs() <= tol,
+                "A9/A10/B11: {family}@insp={insp} label rate {rate} (n={n}) vs model {p} (tol {tol})"
+            );
+        }
+    }
+
     #[test]
     fn the_overconfident_family_is_the_b8_example() {
         let over = FAMILIES.iter().find(|f| f.name == "overconfident").unwrap();
