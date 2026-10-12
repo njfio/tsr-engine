@@ -288,6 +288,64 @@ fn d10_pipe_evidence_censors_never_reviewed() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// N1 — the last Stop decides.
+// ---------------------------------------------------------------------------------------------
+
+/// N1: an early `Stop { operator }` must not censor the session for good. The task's state at its
+/// close is decided by its *last* Stop: `Stop { operator }` → `Executed` → `Stop { done }` →
+/// accepted resolves true, not censored.
+#[test]
+fn n1_last_stop_decides() {
+    let mut log = Vec::new();
+    push(
+        &mut log,
+        EventKind::TaskOpened { task: task() },
+        Source::Rules,
+    );
+    // The hook writes `Stop { operator }` on any turn with `stop_hook_active` (hook.rs:331-335).
+    push(
+        &mut log,
+        EventKind::Stop {
+            reason: "operator".into(),
+        },
+        Source::Rules,
+    );
+    // The work then runs and succeeds.
+    let candidate = Candidate::new(
+        ActionKind::ProposePatch,
+        Source::Generator,
+        Hash::of(&[b"n1-args"]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("a valid candidate");
+    push(
+        &mut log,
+        EventKind::Executed {
+            candidate: candidate.id,
+            exit_code: Some(0),
+            log_digest: None,
+            duration_ms: 0,
+        },
+        Source::Rules,
+    );
+    // The session closes with a later `Stop { done }`.
+    push(
+        &mut log,
+        EventKind::Stop {
+            reason: "done".into(),
+        },
+        Source::Rules,
+    );
+    label(&mut log, LabelStatus::Observed);
+    assert_eq!(
+        resolve_common(&log),
+        Resolution::True,
+        "the last Stop decides: Stop{{operator}} then Stop{{done}} with an accepted diff resolves true"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // D11 — the residual's sign.
 // ---------------------------------------------------------------------------------------------
 

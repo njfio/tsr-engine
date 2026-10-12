@@ -86,6 +86,9 @@ pub struct TaskFacts {
     /// True when a `Stop { reason: "operator" }` event exists: an operator stop for external
     /// reasons, which censors the common decision event (B7).
     pub operator_stop: bool,
+    /// The reason of the *last* `Stop` event seen, if any. N1: the last Stop decides the task's
+    /// state at its close, so a later `Stop { done }` supersedes an earlier `Stop { operator }`.
+    pub last_stop: Option<String>,
     /// True when a `Stop { reason: "budget" }` or `TaskClosed { reason: "budget" }` event exists:
     /// a budget ceiling was breached, so the common decision event resolves false (B7).
     pub budget_breached: bool,
@@ -140,6 +143,11 @@ impl TaskFacts {
                     // R3: the hook writes `Stop { done | operator }` and never `TaskClosed`, so a
                     // hook-recorded forecast could never resolve. A `Stop { done }` is the task's
                     // close (its criteria were met); `Stop { operator }` is an operator stop.
+                    //
+                    // N1: the *last* Stop decides. The hook writes a Stop on every turn, with
+                    // `operator` whenever `stop_hook_active` is set, so an early `Stop { operator }`
+                    // must not censor a session that later closes with `Stop { done }`.
+                    f.last_stop = Some(reason.clone());
                     if reason == "operator" {
                         f.operator_stop = true;
                     }
@@ -324,7 +332,14 @@ fn resolve_diff_accepted(
 
 fn resolve_common(def: &NamedEvent, facts: &TaskFacts) -> (Resolution, Vec<tsr_domain::EventId>) {
     // §B7: censored on an operator stop for external reasons, whether or not the task has closed.
-    if facts.operator_stop {
+    // N1: the *last* Stop decides. A later `Stop { done | budget }` supersedes an earlier
+    // `Stop { operator }`; only when no Stop was recorded does a `TaskClosed { operator }` decide.
+    let operator_stop = match facts.last_stop.as_deref() {
+        Some("operator") => true,
+        Some(_) => false,
+        None => facts.operator_stop,
+    };
+    if operator_stop {
         return (Resolution::Censored, facts.evidence.clone()).pipe_evidence(def, facts.closed);
     }
     if !facts.closed {
