@@ -505,9 +505,17 @@ fn the_report_uses_engineering_names_and_a_calibrator_version() {
     );
 }
 
-/// §B7/§B8: on held_out rows the controller's calibrated p beats the generator's raw p — the paired
-/// difference (controller minus generator) is wholly below zero, overall and for the overconfident
-/// family, whose generator is miscalibrated by construction.
+/// §B7/§B8, B4/B5/B6, DoD: the paired difference (controller minus generator) on held_out rows,
+/// per task, with the 90% cluster-bootstrap interval over lineage.
+///
+/// On the honest corpus (items (2) and (7): the generator's p and the label share one state, and
+/// every forecaster is scored on the same comparison set with the task as the unit) the controller's
+/// advantage is NOT conclusive: the point estimate is negative (the controller is better on average)
+/// but the interval spans zero, overall and for the overconfident family. The calibrated family is
+/// conclusive and POSITIVE — the controller is worse there. This test asserts those measured numbers
+/// rather than the pre-repair claim that the controller beats the generator conclusively; the DoD
+/// allows exactly this ("if that no longer holds once the corpus and the scoring are honest, the test
+/// is changed to assert what the corrected numbers show"), and docs/m4-evidence.md says so plainly.
 #[test]
 fn the_controller_beats_the_generator_on_held_out() {
     let dir = temp_dir("beats");
@@ -529,16 +537,19 @@ fn the_controller_beats_the_generator_on_held_out() {
         .take_while(|l| !l.starts_with("population"))
         .collect::<Vec<_>>()
         .join("\n");
-    for key in ["all tasks=", "overconfident tasks="] {
+
+    // Parse `mean=brier=<m> [<lo>, <hi>] <verdict>` for one family key.
+    let parse = |key: &str| -> (f64, f64, f64, String) {
         let line = paired
             .lines()
             .find(|l| l.contains(key))
             .unwrap_or_else(|| panic!("no `{key}` line in:\n{paired}"));
-        assert!(
-            line.contains("conclusive"),
-            "`{key}` must be conclusive:\n{line}"
-        );
-        // The interval is `[lo, hi]`; both bounds must be below zero.
+        let mean: f64 = line
+            .split("mean=brier=")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("no mean in `{line}`"));
         let lo_hi = line
             .split('[')
             .nth(1)
@@ -547,9 +558,45 @@ fn the_controller_beats_the_generator_on_held_out() {
         let (lo, hi) = lo_hi.split_once(',').expect("lo, hi");
         let lo: f64 = lo.trim().parse().unwrap();
         let hi: f64 = hi.trim().parse().unwrap();
-        assert!(
-            hi < 0.0,
-            "`{key}` interval must be wholly below zero, got [{lo}, {hi}]"
-        );
-    }
+        let verdict = if line.contains("INCONCLUSIVE") {
+            "INCONCLUSIVE"
+        } else if line.contains("conclusive") {
+            "conclusive"
+        } else {
+            "interval n/a"
+        };
+        (mean, lo, hi, verdict.to_string())
+    };
+
+    // Overall: the controller is better on average (mean < 0) but the interval spans zero.
+    let (mean, lo, hi, verdict) = parse("all tasks=");
+    assert!(
+        mean < 0.0,
+        "the controller is better on average overall, got mean={mean}"
+    );
+    assert!(
+        lo < 0.0 && hi > 0.0,
+        "the overall interval spans zero on the honest corpus, got [{lo}, {hi}]"
+    );
+    assert_eq!(verdict, "INCONCLUSIVE", "overall verdict");
+
+    // The overconfident family: same shape — better on average, not conclusive.
+    let (mean, lo, hi, verdict) = parse("overconfident tasks=");
+    assert!(
+        mean < 0.0,
+        "the controller is better on average for the overconfident family, got mean={mean}"
+    );
+    assert!(
+        lo < 0.0 && hi > 0.0,
+        "the overconfident interval spans zero on the honest corpus, got [{lo}, {hi}]"
+    );
+    assert_eq!(verdict, "INCONCLUSIVE", "overconfident verdict");
+
+    // The calibrated family is conclusive and positive: the controller is worse there.
+    let (mean, lo, hi, verdict) = parse("calibrated tasks=");
+    assert!(
+        mean > 0.0 && lo > 0.0,
+        "the calibrated family's interval is wholly above zero, got mean={mean} [{lo}, {hi}]"
+    );
+    assert_eq!(verdict, "conclusive", "calibrated verdict");
 }
