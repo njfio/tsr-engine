@@ -156,6 +156,12 @@ pub fn run_one(
     let state_dir = config.out.join("state").join(&task.id);
     std::fs::create_dir_all(&state_dir)?;
     let store_path = state_dir.join(format!("{}.sqlite", mode.system()));
+    // D10: re-running into an existing `--out` starts from an empty store. A
+    // leftover store from a previous run would make `state_root_at_start` the
+    // old head, so the run would not be the fresh, isolated session B9 requires.
+    if store_path.exists() {
+        std::fs::remove_file(&store_path)?;
+    }
     let store = Store::open(&store_path)?;
     let state_root_at_start = store.head_root()?.to_hex();
 

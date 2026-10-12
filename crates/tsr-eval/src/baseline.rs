@@ -100,6 +100,9 @@ pub struct Report {
     pub lineages: usize,
     /// Tasks present in only one system, as `(task, systems)`.
     pub unpaired: Vec<(String, Vec<&'static str>)>,
+    /// Paired tasks excluded from the completion metric because at least one
+    /// system reported them `Unavailable` (D10).
+    pub unavailable_excluded: usize,
     /// The per-metric results, in `ALL_METRICS` order.
     pub metrics: Vec<MetricResult>,
 }
@@ -130,6 +133,12 @@ impl Report {
             for (task, systems) in &self.unpaired {
                 s.push_str(&format!("  {} (only in {})\n", task, systems.join(", ")));
             }
+        }
+        if self.unavailable_excluded > 0 {
+            s.push_str(&format!(
+                "unavailable tasks excluded from completion: {}\n",
+                self.unavailable_excluded
+            ));
         }
         s.push('\n');
 
@@ -312,16 +321,43 @@ fn report_from(rd: &ResultsDir, pair_by: PairBy, seed: u64, resamples: usize) ->
     let paired = rd.paired_task_ids();
     let unpaired = rd.unpaired_task_ids();
 
+    // D10: a task either system reported `Unavailable` is excluded from the
+    // completion metric (it is not a non-completion), and the count is reported.
+    let completion_paired: Vec<String> = paired
+        .iter()
+        .filter(|t| {
+            let unavail = |s: &crate::results::SystemResults| {
+                s.by_task
+                    .get(*t)
+                    .map(crate::results::is_unavailable)
+                    .unwrap_or(false)
+            };
+            !unavail(&rd.record) && !unavail(&rd.rules)
+        })
+        .cloned()
+        .collect();
+    let unavailable_excluded = paired.len() - completion_paired.len();
+
     let mut metrics_out = Vec::new();
 
     for spec in ALL_METRICS {
         let (record, rules, diff) = match spec.key {
             k if k == crate::metrics::COMPLETION_RATE.key => {
                 let v = |r: &tsr_batch::results::TaskResult| if is_accepted(r) { 1.0 } else { 0.0 };
-                let clusters = paired_clusters(rd, &paired, v);
+                let clusters = paired_clusters(rd, &completion_paired, v);
                 (
-                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RECORD, v)),
-                    Some(mean_over(rd, &paired, crate::results::SYSTEM_RULES, v)),
+                    Some(mean_over(
+                        rd,
+                        &completion_paired,
+                        crate::results::SYSTEM_RECORD,
+                        v,
+                    )),
+                    Some(mean_over(
+                        rd,
+                        &completion_paired,
+                        crate::results::SYSTEM_RULES,
+                        v,
+                    )),
                     Some(cluster_bootstrap(&clusters, seed, resamples)),
                 )
             }
@@ -380,6 +416,7 @@ fn report_from(rd: &ResultsDir, pair_by: PairBy, seed: u64, resamples: usize) ->
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
         unpaired,
+        unavailable_excluded,
         metrics: metrics_out,
     }
 }

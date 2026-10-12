@@ -260,6 +260,37 @@ fn state_root_at_start_is_the_empty_store_root() {
 }
 
 #[test]
+fn d10_rerunning_into_an_existing_out_starts_from_an_empty_store() {
+    // D10: re-running into an existing `--out` must start from empty stores.
+    // Pre-fix, `Store::open` reused the leftover sqlite file, so the second
+    // run's `state_root_at_start` was the first run's end root, not the empty
+    // store's root.
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let runner = ok_runner();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let first = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    let second = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let empty = Store::open_in_memory()
+        .unwrap()
+        .head_root()
+        .unwrap()
+        .to_hex();
+    assert_eq!(
+        second.state_root_at_start, empty,
+        "the second run must start from an empty store, not the first run's end root"
+    );
+    assert_ne!(
+        second.state_root_at_start, first.state_root_at_end,
+        "the second run must not inherit the first run's store"
+    );
+}
+
+#[test]
 #[ignore = "needs Claude Code and a container runtime; the operator runs it on a host that has both"]
 fn claude_code_driver_runs_on_a_host() {
     let task = &tasks()[0];

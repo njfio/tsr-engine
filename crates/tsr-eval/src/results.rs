@@ -82,11 +82,12 @@ impl ResultsDir {
                     })
                 }
             };
-            if slot.by_task.insert(row.task.clone(), row).is_some() {
+            let dup_task = row.task.clone();
+            if slot.by_task.insert(dup_task.clone(), row).is_some() {
                 // D10: name the duplicate row's task, not the last key in the map.
                 return Err(EvalError::DuplicateTask {
                     system: slot.system.clone(),
-                    task: row.task.clone(),
+                    task: dup_task,
                     path: path.clone(),
                 });
             }
@@ -167,11 +168,12 @@ fn read_one_system(dir: &Path, system: &str) -> Result<SystemResults, EvalError>
                 path: path.clone(),
             });
         }
-        if out.by_task.insert(row.task.clone(), row).is_some() {
+        let dup_task = row.task.clone();
+        if out.by_task.insert(dup_task.clone(), row).is_some() {
             // D10: name the duplicate row's task, not the last key in the map.
             return Err(EvalError::DuplicateTask {
                 system: system.to_string(),
-                task: row.task.clone(),
+                task: dup_task,
                 path: path.clone(),
             });
         }
@@ -193,6 +195,14 @@ pub fn is_accepted(r: &TaskResult) -> bool {
         Some(v) => v.accepted,
         None => false,
     }
+}
+
+/// Whether a result is `Unavailable` — the driver could not run the task at all
+/// (no sandbox, no toolchain). D10: such a task is excluded from the completion
+/// metric rather than counted as a non-completion, and the report says how many
+/// were excluded.
+pub fn is_unavailable(r: &TaskResult) -> bool {
+    r.outcome == Outcome::Unavailable
 }
 
 #[cfg(test)]

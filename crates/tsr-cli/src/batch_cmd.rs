@@ -49,8 +49,11 @@ fn run_inner(
         other => return Err(format!("unknown --mode `{other}` (want record|rules)")),
     };
 
-    let profile = Profile::load(Path::new("profiles/default.toml"))
-        .map_err(|e| format!("loading profiles/default.toml: {e}"))?;
+    // D10: the profile is resolved from the repository root, not the working
+    // directory, so `tsr task run` behaves the same wherever it is invoked.
+    let profile_path = repo_root().join("profiles/default.toml");
+    let profile = Profile::load(&profile_path)
+        .map_err(|e| format!("loading {}: {e}", profile_path.display()))?;
 
     let tasks =
         read_tasks(tasks_path).map_err(|e| format!("reading {}: {e}", tasks_path.display()))?;
@@ -133,6 +136,23 @@ fn run_inner(
         unavailable
     );
     Ok(std::process::ExitCode::SUCCESS)
+}
+
+/// The repository root: the nearest ancestor of the working directory that
+/// holds `profiles/default.toml`, falling back to the crate's own manifest
+/// directory (D10). A `tsr task run` invoked from a subdirectory therefore
+/// still finds the operator's standing profile.
+fn repo_root() -> std::path::PathBuf {
+    if let Ok(cwd) = std::env::current_dir() {
+        for dir in cwd.ancestors() {
+            if dir.join("profiles/default.toml").is_file() {
+                return dir.to_path_buf();
+            }
+        }
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .to_path_buf()
 }
 
 /// Load one session per task, in the order the manifest names them.
