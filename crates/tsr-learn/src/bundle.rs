@@ -111,7 +111,7 @@ impl Bundle {
         let support =
             crate::support::support(&self.spec, &self.support_index, &row.family, &row.features);
         let calibrated = match self.population.get(&row.family) {
-            Some(count) => {
+            Some(_) => {
                 let p = crate::isotonic::apply_isotonic(&self.isotonic, raw);
                 let probability = tsr_domain::Probability::new(p).map_err(|e| {
                     LearnError::Invalid(format!("calibrated p {p} is not a probability: {e}"))
@@ -119,7 +119,13 @@ impl Bundle {
                 Some(tsr_domain::Calibrated {
                     p: probability,
                     calibrator: self.manifest.calibrator.clone(),
-                    population: format!("{}={count}", row.family),
+                    // B14: the population names every family in it, not only the row's.
+                    population: self
+                        .population
+                        .iter()
+                        .map(|(f, n)| format!("{f}={n}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
                 })
             }
             None => None,
@@ -811,6 +817,30 @@ mod tests {
         );
         assert_eq!(applied.support.episodes, 0, "no same-family rows");
         let _ = id;
+    }
+
+    /// B14: the `Calibrated.population` names every family in the bundle's population, not only
+    /// the row's own family.
+    #[test]
+    fn b14_population_names_every_family_in_it() {
+        let ds = dataset();
+        let ddir = tmpdir("ds-pop");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out-pop");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let mut b = load_bundle(&out).unwrap();
+        // Add a second family to the population; the row's own family is still `calibrated`.
+        b.population.insert("other".to_string(), 42);
+        let mut v = vec![0.0; b.spec.names.len()];
+        v[0] = 1.0;
+        let r = row("calibrated", v, Some(true), Side::HeldOut, 903);
+        let applied = b.apply(&r).unwrap();
+        let cal = applied.calibrated.as_ref().expect("calibrated family");
+        assert!(
+            cal.population.contains("calibrated=") && cal.population.contains("other=42"),
+            "B14: the population names every family in it, got {}",
+            cal.population
+        );
     }
 
     /// B7: a row whose feature length differs from the head's is refused, not zipped.

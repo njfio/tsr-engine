@@ -448,16 +448,20 @@ fn b7_train_apply_prints_raw_and_calibrated_p_and_support() {
     );
     let text = String::from_utf8_lossy(&apply.stdout);
     assert!(
-        text.contains("raw_p="),
-        "B7: apply prints each row's raw p:\n{text}"
+        text.contains("raw p="),
+        "R7: apply prints each row's raw p as `raw p=<value>`:\n{text}"
     );
     assert!(
         text.contains("support="),
         "B7: apply prints each row's support:\n{text}"
     );
     assert!(
-        text.contains("calibrator=") || text.contains("uncalibrated"),
-        "B7: apply prints p with its calibrator version or uncalibrated:\n{text}"
+        text.contains("uncalibrated") || text.contains("features@v1"),
+        "R7: apply prints p with its calibrator version or uncalibrated:\n{text}"
+    );
+    assert!(
+        !text.contains("raw_p=") && !text.contains("p=p="),
+        "R7: apply must not print `raw_p=` or `p=p=`:\n{text}"
     );
     // B9: a held_out read is logged.
     let log = data.join("holdout-access.jsonl");

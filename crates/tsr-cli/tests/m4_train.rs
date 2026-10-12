@@ -600,3 +600,55 @@ fn the_controller_beats_the_generator_on_held_out() {
     );
     assert_eq!(verdict, "conclusive", "calibrated verdict");
 }
+
+/// R4: `tsr train apply` must refuse a dataset that does not belong to the bundle, exactly as
+/// `report` does — a foreign split digest or feature spec is not the bundle's evaluation set.
+#[test]
+fn apply_refuses_a_foreign_dataset() {
+    let dir = temp_dir("apply-foreign");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+
+    // A dataset built from a different seed has a different split digest.
+    let other = dir.join("other");
+    let (ev, tk, lb) = regenerate(&dir);
+    let (code, _, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "8",
+        "--out",
+        other.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "foreign dataset builds: {err}");
+
+    let (code, out, err) = run(&[
+        "train",
+        "apply",
+        b.to_str().unwrap(),
+        "--dataset",
+        other.to_str().unwrap(),
+        "--side",
+        "held_out",
+    ]);
+    assert_eq!(
+        code, 2,
+        "R4: apply refuses a foreign dataset:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("split digest") || err.contains("feature"),
+        "R4: the refusal names the split digest or feature spec: {err}"
+    );
+}

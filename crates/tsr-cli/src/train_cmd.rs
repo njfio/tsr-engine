@@ -432,6 +432,11 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
             return std::process::ExitCode::from(1);
         }
     };
+    // R4: refuse a dataset that does not belong to the bundle, exactly as report does.
+    if let Err(e) = tsr_learn::report::check_dataset_matches_bundle(&b, &ds) {
+        eprintln!("tsr train apply: {e}");
+        return std::process::ExitCode::from(2);
+    }
     let want: Option<tsr_learn::dataset::Side> = match side {
         "held_out" => Some(tsr_learn::dataset::Side::HeldOut),
         "fit" => Some(tsr_learn::dataset::Side::Fit),
@@ -467,7 +472,7 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
         };
         let calibrated = match &applied.calibrated {
             Some(c) => format!(
-                "p={} calibrator={}",
+                "{} ({})",
                 tsr_learn::report::proxy("p", c.p.get()),
                 c.calibrator
             ),
@@ -477,7 +482,7 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
             "row {} family {} {} {} support={}",
             r.id.to_hex(),
             r.family,
-            tsr_learn::report::proxy("raw_p", applied.raw_p),
+            tsr_learn::report::proxy("raw p", applied.raw_p),
             calibrated,
             applied.support.episodes
         );
