@@ -543,12 +543,12 @@ order-invariant), `f2_*`/`a2_*` (clone groups inside one lineage), `f3_*`/`f8_*`
 
 ### What the operator runs
 
-The operator's own log lives in `.tsr/tsr.db` (the store the hooks write). To fit a bundle from it
-into a new directory:
+The operator's own log lives in `.tsr/tsr.db` — the store the hooks write, and the default of
+`--store`. To fit a bundle from it into a new directory:
 
 ```
 $ tsr train dataset \
-    --events .tsr/events.jsonl \
+    --store .tsr/tsr.db \
     --tasks .tsr/tasks.jsonl \
     --labels .tsr/labels.jsonl \
     --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out .tsr/m4-data
@@ -557,6 +557,9 @@ $ tsr train report .tsr/m4-models --dataset .tsr/m4-data
 $ tsr train verify .tsr/m4-models --rebuild .tsr/m4-data
 $ tsr train apply .tsr/m4-models --dataset .tsr/m4-data --side held_out
 ```
+
+`--store` defaults to `TSR_DB` / `.tsr/tsr.db`; `--events <file>` is the alternative for a log
+already exported to JSONL.
 
 `--tasks` is required (F9/B3). An empty `tasks.jsonl` turns probe (a) off; an empty or truncated
 `events.jsonl` panics with exit 2 naming the file. `fit` accepts an empty calibrate or fit slice and
