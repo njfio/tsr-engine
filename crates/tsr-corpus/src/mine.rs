@@ -385,11 +385,55 @@ pub fn read_cas(cas: &Path, digest_hex: &str) -> Result<Vec<u8>, MineError> {
 /// `git worktree add` refuses ("is a tree, not a commit"). `git archive <tree-ish>` accepts a tree
 /// id, so the copy is written by extracting the archive into a fresh directory: the suite run
 /// against it sees exactly the tree that revision names. `git` reads history and writes the working
-/// tree; it executes nothing from the repository. An existing checkout at `dest` is reused.
+/// tree; it executes nothing from the repository.
+///
+/// **The result is exactly the snapshot's tree** (D4, R1). A pre-existing `dest` is *replaced*, not
+/// reused: an empty directory, or a directory a previous run's session edited, is not the snapshot,
+/// and returning it would make the disposable copy neither fresh nor the snapshot (PRD §B10: the
+/// disposable copy is the only writable mount). The old directory is moved aside and removed only
+/// after the new tree has been extracted, so a failed extraction leaves the previous copy intact
+/// rather than a half-written one. The call is therefore idempotent in the sense that matters: the
+/// same `(repo, sha, dest)` always ends with `dest` holding the snapshot's tree.
 pub fn materialize(repo: &Path, sha: &str, dest: &Path) -> Result<PathBuf, MineError> {
-    if dest.exists() {
-        return Ok(dest.to_path_buf());
+    // R1: a pre-existing `dest` is not "already materialised". Move it aside so the extraction below
+    // writes a fresh copy; it is removed only once the new tree is in place.
+    let stale = if dest.exists() {
+        let stale = stale_path(dest);
+        let _ = fs::remove_dir_all(&stale);
+        fs::rename(dest, &stale).map_err(MineError::Io)?;
+        Some(stale)
+    } else {
+        None
+    };
+    match extract(repo, sha, dest) {
+        Ok(()) => {
+            if let Some(stale) = stale {
+                let _ = fs::remove_dir_all(&stale);
+            }
+            Ok(dest.to_path_buf())
+        }
+        Err(e) => {
+            // The extraction failed: put the previous copy back so `dest` is not left half-written.
+            let _ = fs::remove_dir_all(dest);
+            if let Some(stale) = stale {
+                let _ = fs::rename(&stale, dest);
+            }
+            Err(e)
+        }
     }
+}
+
+/// The sibling path a pre-existing `dest` is moved to while a fresh copy is extracted.
+fn stale_path(dest: &Path) -> PathBuf {
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    dest.with_file_name(format!(".{name}.stale"))
+}
+
+/// Extract `sha`'s tree into `dest` (which must not exist yet).
+fn extract(repo: &Path, sha: &str, dest: &Path) -> Result<(), MineError> {
     fs::create_dir_all(dest).map_err(MineError::Io)?;
     // `git archive <tree-ish>` accepts a tree id as well as a commit; `git worktree add` does not.
     // The archive is piped into `tar -x` in `dest`, so the copy is a plain directory with no
@@ -419,7 +463,7 @@ pub fn materialize(repo: &Path, sha: &str, dest: &Path) -> Result<PathBuf, MineE
             dest.display()
         )));
     }
-    Ok(dest.to_path_buf())
+    Ok(())
 }
 
 /// The tree id of a commit: `git rev-parse <sha>^{tree}`. This is what a task's `parent_snapshot`

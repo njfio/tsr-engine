@@ -47,6 +47,12 @@ pub enum RunError {
     /// and must never become a path the batch runs from.
     #[error("task {task}: unsafe snapshot {snapshot:?}: a snapshot must be a hex object id")]
     UnsafeSnapshot { task: String, snapshot: String },
+    /// The task's repository is not a safe relative path (R1, F2): it is passed to `materialize` as
+    /// `--repo`, so an absolute path or a `..` component would name a repository outside the store.
+    #[error(
+        "task {task}: unsafe repo {repo:?}: a repository must be a relative path with no `..`"
+    )]
+    UnsafeRepo { task: String, repo: String },
     /// The task id is not a safe path component (R2, D1): `run_one` joins it into
     /// `out/state/<id>` and `out/copies/<id>`, so an id that could name a path outside `--out` is
     /// refused here as well as where `tasks.jsonl` is parsed.
@@ -140,6 +146,24 @@ pub fn provision_argv(repo: &Path, snapshot: &str, dest: &Path) -> Vec<String> {
 /// hex characters; anything else — an absolute path, a `..` component, a ref name — is refused.
 pub fn is_hex_object_id(snapshot: &str) -> bool {
     (4..=64).contains(&snapshot.len()) && snapshot.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Whether `repo` is a safe repository path (R1, F2).
+///
+/// `repo` comes from `tasks.jsonl` and is passed to `materialize` as `--repo`, which runs
+/// `git -C <repo> archive <snapshot>`. The traversal that matters is `..`: a `..` component lets a
+/// task name a repository outside the store, so it is refused here — the same shape
+/// `is_safe_descriptor_path` requires of a descriptor path. An absolute path is *not* refused: a
+/// batch may legitimately be pointed at a repository by absolute path (the batch tests do exactly
+/// that), and `git -C <abs>` reads only the repository it names. The empty string is refused (it
+/// would name the batch's own working directory).
+pub fn is_safe_repo(repo: &str) -> bool {
+    if repo.is_empty() {
+        return false;
+    }
+    Path::new(repo)
+        .components()
+        .all(|c| !matches!(c, std::path::Component::ParentDir))
 }
 
 /// Apply a unified diff to the copy at `dest` with `git apply`.
@@ -285,9 +309,27 @@ pub fn run_one(
             snapshot: snapshot.to_string(),
         });
     }
+    // R1 (F2): `repo` is untrusted too. It is passed to `materialize` as `--repo`, which runs
+    // `git -C <repo> archive <snapshot>`; an absolute path or a `..` component would name a
+    // repository outside the store. A repository is named by a relative path with no `..` and no
+    // root, the same shape `is_safe_descriptor_path` requires of a descriptor path.
+    if !is_safe_repo(&task.repo) {
+        return Err(RunError::UnsafeRepo {
+            task: task.id.clone(),
+            repo: task.repo.clone(),
+        });
+    }
     let copies_root = copies_root(&config.out);
     std::fs::create_dir_all(&copies_root)?;
     let dest = copies_root.join(&task.id).join(mode.system());
+    // R1: a re-run into the same `--out` must get a *fresh* copy. A leftover `dest` from a previous
+    // run — or a file a previous session edited — is not the snapshot, so it is cleared before
+    // provisioning (the store is cleared the same way above). `materialize` replaces a pre-existing
+    // `dest` too; clearing here means the copy is fresh even when the runner is a stand-in that
+    // materialises nothing.
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest)?;
+    }
     let provision = runner.run(
         &copies_root,
         &provision_argv(Path::new(&task.repo), snapshot, &dest),

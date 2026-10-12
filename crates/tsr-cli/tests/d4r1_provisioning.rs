@@ -179,3 +179,157 @@ fn d4_record_mode_provisions_from_a_batch_owned_root() {
         "D4: the batch-owned copies root must exist after a run; stderr: {stderr}"
     );
 }
+
+/// D4, R1: `tsr corpus materialize` into a `--out` that already holds a session's edits replaces
+/// them with the snapshot's tree.
+///
+/// Pre-fix `materialize` returned `Ok(dest)` as soon as `dest` existed, without extracting the
+/// snapshot, so a second materialize into the same `--out` left whatever was there — a session edit
+/// or a poisoned file — in place. PRD §B10 requires the disposable copy to be a copy of the
+/// snapshot and the only writable mount, so a stale `dest` is not a copy at all.
+///
+/// This is the reviewer's exact reproduction, driven through the built binary: materialize a tree
+/// into a fresh `--out`, write `SESSION-EDIT` into a file and plant a new file, materialize the same
+/// tree into the same `--out` again, and assert the snapshot's content is back and the planted file
+/// is gone.
+#[test]
+fn d4r1_materialize_does_not_keep_a_poisoned_dest() {
+    let ws = workspace();
+    let scratch = ws.join("target/d4r1-poison");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    // A real one-commit repository, so the snapshot is a real tree id.
+    let repo = scratch.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(repo.join("x.txt"), "REAL-SNAPSHOT-CONTENT\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    let tree = git(&["rev-parse", "HEAD^{tree}"]);
+
+    let out = scratch.join("out");
+    let materialize = || {
+        Command::new(tsr_bin())
+            .args([
+                "corpus",
+                "materialize",
+                "--repo",
+                repo.to_str().unwrap(),
+                "--snapshot",
+                &tree,
+                "--out",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run tsr")
+    };
+
+    let first = materialize();
+    assert!(
+        first.status.success(),
+        "first materialize must succeed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(out.join("x.txt")).unwrap(),
+        "REAL-SNAPSHOT-CONTENT\n"
+    );
+
+    // A session edits a file and plants a new one in the disposable copy.
+    std::fs::write(out.join("x.txt"), "SESSION-EDIT\n").unwrap();
+    std::fs::write(out.join("poison.txt"), "POISONED\n").unwrap();
+
+    let second = materialize();
+    assert!(
+        second.status.success(),
+        "second materialize must succeed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(out.join("x.txt")).unwrap(),
+        "REAL-SNAPSHOT-CONTENT\n",
+        "D4,R1: a second materialize must restore the snapshot's tree, not keep the session's edit"
+    );
+    assert!(
+        !out.join("poison.txt").exists(),
+        "D4,R1: a second materialize must not keep a file the snapshot does not have"
+    );
+    // No half-written sibling is left behind by the replace.
+    let leftovers: Vec<_> = std::fs::read_dir(&scratch)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("stale"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "D4,R1: no stale directory may be left behind, found {leftovers:?}"
+    );
+}
+
+/// R1 (F2): a `tasks.jsonl` naming a repository that escapes the store exits 2 and mounts nothing.
+///
+/// `repo` is passed to `materialize` as `--repo`, which runs `git -C <repo> archive <snapshot>`; a
+/// `..` component lets a task name a repository outside the store. The refusal is the repo check,
+/// which fires before any session is loaded.
+#[test]
+fn r1_traversing_repo_exits_2_and_mounts_nothing() {
+    let ws = workspace();
+    let scratch = ws.join("target/d4r1-repo");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let manifest = scratch.join("tasks.jsonl");
+    let mut task = task_json("r1-repo", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+    task["repo"] = serde_json::json!("../../etc");
+    std::fs::write(&manifest, format!("{task}\n")).unwrap();
+    let out = scratch.join("out");
+
+    let output = Command::new(tsr_bin())
+        .args([
+            "task",
+            "run",
+            "--mode",
+            "rules",
+            "--tasks",
+            manifest.to_str().unwrap(),
+            "--driver",
+            "claude-code",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run tsr");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "R1: an unsafe repo must exit 2, got {:?}; stderr: {stderr}",
+        output.status.code()
+    );
+    assert!(
+        stderr.contains("unsafe repo"),
+        "R1: the refusal must name the unsafe repo; stderr: {stderr}"
+    );
+    assert!(
+        !out.join("copies").join("r1-repo").exists(),
+        "R1: no copy may be mounted for an unsafe repo"
+    );
+}
