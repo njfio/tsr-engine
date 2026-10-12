@@ -321,6 +321,50 @@ fn container_argv_mounts_the_store_directory_read_only_when_inside_the_workspace
             .any(|a| a == "type=bind,src=/work/sub,dst=/work/sub,readonly"),
         "a TSR_DB inside the workspace mounts its parent read-only: {v:?}"
     );
+    // A *relative* `TSR_DB` (the README's `.tsr/tsr.db` form) is resolved against the workspace:
+    // comparing the raw relative path against the absolute workspace would drop the mount.
+    let v =
+        exec::container_argv_with_store(Runtime::Docker, ws, &argv, Some(Path::new(".tsr/tsr.db")));
+    assert!(
+        v.iter()
+            .any(|a| a == "type=bind,src=/work/.tsr,dst=/work/.tsr,readonly"),
+        "a relative TSR_DB inside the workspace mounts its parent read-only: {v:?}"
+    );
+    let v =
+        exec::container_argv_with_store(Runtime::Docker, ws, &argv, Some(Path::new("sub/tsr.db")));
+    assert!(
+        v.iter()
+            .any(|a| a == "type=bind,src=/work/sub,dst=/work/sub,readonly"),
+        "a relative TSR_DB in a subdirectory mounts its parent read-only: {v:?}"
+    );
+}
+
+/// A relative `TSR_DB` whose parent is the workspace itself is refused (exit 2), exactly like the
+/// absolute form: the workspace cannot be mounted read-only over its own writable mount.
+#[test]
+fn a_relative_tsr_db_equal_to_the_workspace_is_refused() {
+    let ws = scratch("rel-ws-refusal");
+    std::fs::create_dir_all(&ws).expect("scratch workspace");
+    let bin = fake_docker(&scratch("rel-ws-refusal-bin"), true, true, 1);
+    let out = std::process::Command::new(tsr_bin())
+        .args(["exec", "--", "echo", "hi"])
+        .current_dir(&ws)
+        .env("PATH", path_with(&bin))
+        .env("TSR_DB", "tsr.db")
+        .env("TSR_SESSION", "s")
+        .output()
+        .expect("run tsr exec");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a relative TSR_DB equal to the workspace is refused: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("must not be the workspace"),
+        "the refusal names the reason: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A `TSR_DB` outside the workspace is not mounted: the container has no path to it.

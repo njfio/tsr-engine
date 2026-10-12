@@ -207,6 +207,10 @@ pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Opt
             _ => workspace.join(crate::store_path::DEFAULT_DB),
         },
     };
+    // A relative `TSR_DB` (the README's documented `.tsr/tsr.db` form) is resolved against the
+    // workspace, which is absolute (`main.rs` uses `current_dir()`): comparing the raw path against
+    // an absolute workspace would never match and would silently drop the read-only mount.
+    let db = resolve_against(&db, workspace);
     let dir = db.parent()?.to_path_buf();
     if dir == workspace {
         return None;
@@ -215,6 +219,16 @@ pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Opt
         Some(dir)
     } else {
         None
+    }
+}
+
+/// Resolve `p` against `base` when it is relative, leaving an absolute `p` untouched. Purely
+/// lexical (no filesystem access), so it works for a store directory that does not exist yet.
+fn resolve_against(p: &Path, base: &Path) -> PathBuf {
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        base.join(p)
     }
 }
 /// What a [`Runner`] observed: the process exit code and the combined log bytes.
@@ -397,6 +411,9 @@ pub fn store_dir_is_workspace(workspace: &Path) -> bool {
         Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => workspace.join(crate::store_path::DEFAULT_DB),
     };
+    // Resolve a relative `TSR_DB` against the absolute workspace before comparing (see
+    // `store_dir_inside_workspace`): otherwise `TSR_DB=tsr.db` would not be refused.
+    let db = resolve_against(&db, workspace);
     db.parent().map(|d| d == workspace).unwrap_or(false)
 }
 
