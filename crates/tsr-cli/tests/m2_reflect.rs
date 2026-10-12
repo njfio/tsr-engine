@@ -31,6 +31,9 @@ fn candidate_id(seed: u8) -> CandidateId {
     CandidateId(Hash::of(&[b"m2-reflect-candidate".as_slice(), &[seed]]))
 }
 
+/// The task's intent, recorded as a task-scoped preference (the desired condition at open).
+const INTENT: &str = "make the parser accept trailing commas";
+
 /// A forecast about the common decision event, by one forecaster, with a raw probability.
 fn forecast(seed: u8, source: Forecaster, raw: f64) -> Forecast {
     Forecast {
@@ -65,11 +68,25 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
     // A family-scoped preference tags the episode's family (the fold reads the first
     // `Scope::Family` in log order as the task's family).
     let ledger = tsr_ledger::Ledger::new(store);
+    let contrast = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"family-contrast"])),
+        from_return: tsr_domain::EventId(Hash::of(&[b"family-return"])),
+        unmet: vec![(
+            tsr_domain::CriterionId(Hash::of(&[b"family-criterion"])),
+            tsr_domain::UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: Vec::new(),
+    };
+    ledger
+        .record_contrast(t, Vec::new(), contrast.clone(), "unix:1")
+        .unwrap();
     ledger
         .expand(
             t,
             Vec::new(),
-            ContrastId(Hash::of(&[b"family-contrast"])),
+            contrast.id,
             "work in the parser family stays within its budget",
             tsr_domain::Scope::Family("parser".to_string()),
             Vec::new(),
@@ -79,7 +96,37 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
         )
         .unwrap();
 
-    // The operator's intent, as an experience note.
+    // The task's intent: a task-scoped preference recorded through the Filter (D9). The Mirror's
+    // Desire section takes its intent from this, not from an operator note.
+    let intent_contrast = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"intent-contrast"])),
+        from_return: tsr_domain::EventId(Hash::of(&[b"intent-return"])),
+        unmet: vec![(
+            tsr_domain::CriterionId(Hash::of(&[b"intent-criterion"])),
+            tsr_domain::UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: Vec::new(),
+    };
+    ledger
+        .record_contrast(t, Vec::new(), intent_contrast.clone(), "unix:1")
+        .unwrap();
+    ledger
+        .expand(
+            t,
+            Vec::new(),
+            intent_contrast.id,
+            INTENT,
+            tsr_domain::Scope::Task(*t),
+            Vec::new(),
+            Vec::new(),
+            Source::Operator,
+            "unix:1",
+        )
+        .unwrap();
+
+    // The operator's experience note: a note, never the task's intent.
     store
         .append(&Event::new(
             *t,
@@ -87,7 +134,7 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
             Source::Operator,
             EventKind::Observed {
                 observation: Observation::Experience {
-                    note: "make the parser accept trailing commas".to_string(),
+                    note: "friction: the sandbox took four minutes".to_string(),
                 },
             },
             "unix:1",
@@ -316,7 +363,13 @@ fn json_carries_the_five_sections_with_raw_p_and_uncalibrated() {
     let mirror = build_mirror(&t, &events, root);
 
     // The five sections are present.
-    assert!(mirror.desire.intent.is_some(), "desire carries the intent");
+    // D9: the intent is the task's own intent (the task-scoped preference recorded at open),
+    // not the operator's experience note.
+    assert_eq!(
+        mirror.desire.intent.as_deref(),
+        Some(INTENT),
+        "desire carries the task's intent"
+    );
     assert!(
         !mirror.imagination.candidates.is_empty(),
         "imagination lists the candidates"
