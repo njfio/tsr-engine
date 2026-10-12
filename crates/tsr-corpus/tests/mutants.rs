@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 
 use tsr_corpus::mine::{SuiteReport, TestVerdict};
 use tsr_corpus::mutants::{
-    family_of, mutants, parse_list, parse_outcomes, read_list, read_outcomes, reversal_diff,
-    MutantsError, MutantsOptions, LIST_FILE, MUTANTS_OUT_DIR, OUTCOMES_FILE,
+    base_tree, family_of, mutants, mutation_diff, parse_list, parse_outcomes, read_list,
+    read_outcomes, reversal_diff, MutantsError, MutantsOptions, LIST_FILE, MUTANTS_OUT_DIR,
+    OUTCOMES_FILE,
 };
 use tsr_corpus::{Limits, RunResult, Runner};
 
@@ -103,6 +104,10 @@ fn report(passed: &[&str], failed: &[&str]) -> SuiteReport {
     SuiteReport { tests }
 }
 
+/// The unmutated source the cargo-mutants sample's descriptors mutate: `src/lib.rs` with the
+/// `add`/`is_positive` functions the sample's diffs are written against.
+const BASE_SOURCE: &str = "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\npub fn is_positive(n: i32) -> bool {\n    n > 0\n}\n\n#[cfg(test)]\nmod tests {\n";
+
 fn tmpdir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "tsr-mutants-{tag}-{}-{}",
@@ -114,6 +119,33 @@ fn tmpdir(tag: &str) -> PathBuf {
     ));
     fs::create_dir_all(&dir).expect("tmpdir");
     dir
+}
+
+/// A real git repository with the sample's base source committed (D4).
+///
+/// `tsr corpus mutants` records the tree id of the repository HEAD as each task's base snapshot and
+/// builds each reversal by `git diff` between the mutated copy and the base copy, so a mutants run
+/// needs a repository with a HEAD and a committed source tree. This helper builds one: `src/lib.rs`
+/// holds [`BASE_SOURCE`], committed so `git rev-parse HEAD^{tree}` names a real tree.
+fn git_repo(tag: &str) -> PathBuf {
+    let repo = tmpdir(tag);
+    fs::create_dir_all(repo.join("src")).expect("mkdir src");
+    fs::write(repo.join("src/lib.rs"), BASE_SOURCE).expect("write base source");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-A"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    repo
 }
 
 /// The list sample parses into ten descriptors with the real field names.
@@ -150,7 +182,7 @@ fn outcomes_sample_parses() {
 /// A caught mutant yields a task with family `(operator, crate)`; a missed mutant yields none.
 #[test]
 fn caught_mutants_become_tasks() {
-    let repo = tmpdir("caught");
+    let repo = git_repo("caught");
     let out = repo.join("out");
     let runner = ReportRunner::new(
         LIST_SAMPLE,
@@ -208,7 +240,7 @@ fn caught_mutants_become_tasks() {
 /// A missed-only run yields no tasks and an empty tasks.jsonl.
 #[test]
 fn missed_mutants_yield_no_tasks() {
-    let repo = tmpdir("missed");
+    let repo = git_repo("missed");
     let out = repo.join("out");
     // Keep only the missed scenarios from the sample.
     let lab: serde_json::Value = serde_json::from_str(OUTCOMES_SAMPLE).unwrap();
@@ -269,7 +301,7 @@ fn list_failure_is_an_error() {
             RunResult::exit_only(1)
         }
     }
-    let repo = tmpdir("list-fail");
+    let repo = git_repo("list-fail");
     let err = mutants(
         &repo,
         &repo.join("out"),
@@ -291,7 +323,7 @@ fn family_names_operator_and_crate() {
 /// Dump the fixture sample's `tasks.jsonl` for the evidence record. Run with `--nocapture`.
 #[test]
 fn dump_fixture_tasks_jsonl() {
-    let repo = tmpdir("dump");
+    let repo = git_repo("dump");
     let out = repo.join("out");
     let runner = ReportRunner::new(
         LIST_SAMPLE,
@@ -347,7 +379,7 @@ fn absolute_descriptor_file_does_not_leak_host_bytes() {
     let host_line = host_text.lines().next().unwrap_or("").to_string();
     assert!(!host_line.is_empty(), "host file has a first line");
 
-    let repo = tmpdir("abs-file");
+    let repo = git_repo("abs-file");
     let out = repo.join("out");
     let runner = ReportRunner::new(
         LIST_SAMPLE,
@@ -355,7 +387,12 @@ fn absolute_descriptor_file_does_not_leak_host_bytes() {
         report(&["t"], &["t"]),
     );
     let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
-    assert_eq!(report_out.tasks, 1, "the caught mutant still yields a task");
+    // D4: every mutant task must carry a provisionable mutation diff. An untrusted descriptor
+    // cannot produce one, so it is skipped rather than recorded as a task.
+    assert_eq!(
+        report_out.tasks, 0,
+        "an untrusted descriptor yields no task"
+    );
     assert_eq!(
         report_out.skipped_unsafe_descriptor, 1,
         "the untrusted descriptor is flagged as skipped"
@@ -378,7 +415,7 @@ fn absolute_descriptor_file_does_not_leak_host_bytes() {
 /// A descriptor whose `file` escapes the repo with `..` must not read a sibling file into the CAS.
 #[test]
 fn parent_dir_descriptor_file_does_not_leak_sibling_bytes() {
-    let repo = tmpdir("dotdot-file");
+    let repo = git_repo("dotdot-file");
     // A secret one level above the repo, exactly as the reviewer reproduced.
     let secret = repo.parent().expect("parent").join(format!(
         "SECRET-{}-{}.txt",
@@ -399,7 +436,8 @@ fn parent_dir_descriptor_file_does_not_leak_sibling_bytes() {
         report(&["t"], &["t"]),
     );
     let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
-    assert_eq!(report_out.tasks, 1);
+    // D4: a descriptor that cannot produce a provisionable mutation diff is skipped, not a task.
+    assert_eq!(report_out.tasks, 0, "a `..` descriptor yields no task");
     assert_eq!(
         report_out.skipped_unsafe_descriptor, 1,
         "the `..` descriptor is flagged as skipped"
@@ -428,7 +466,7 @@ fn parent_dir_descriptor_file_does_not_leak_sibling_bytes() {
 /// resolved and refuses any path whose resolved form leaves the root or passes through a symlink.
 #[test]
 fn d1_symlinked_descriptor_file_does_not_leak_host_bytes() {
-    let repo = tmpdir("symlink-file");
+    let repo = git_repo("symlink-file");
     // A secret outside the repo, and a committed symlink inside it pointing at the secret.
     let secret = repo.parent().expect("parent").join(format!(
         "D1-SECRET-{}-{}.txt",
@@ -450,7 +488,8 @@ fn d1_symlinked_descriptor_file_does_not_leak_host_bytes() {
         report(&["t"], &["t"]),
     );
     let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
-    assert_eq!(report_out.tasks, 1, "the caught mutant still yields a task");
+    // D4: a descriptor that cannot produce a provisionable mutation diff is skipped, not a task.
+    assert_eq!(report_out.tasks, 0, "a symlinked descriptor yields no task");
     assert_eq!(
         report_out.skipped_unsafe_descriptor, 1,
         "the symlinked descriptor is flagged as skipped"
@@ -473,9 +512,24 @@ fn d1_symlinked_descriptor_file_does_not_leak_host_bytes() {
 /// A legitimate relative descriptor `file` still reads the source line (the fix must not weaken it).
 #[test]
 fn relative_descriptor_file_still_reads_the_source_line() {
-    let repo = tmpdir("rel-file");
+    let repo = git_repo("rel-file");
     fs::create_dir_all(repo.join("src")).expect("mkdir src");
     fs::write(repo.join("src/lib.rs"), "fn f() -> u32 { 0 }\n").expect("write source");
+    // The fallback mutation diff is read from the base tree the copy is materialised from, so the
+    // rewritten source must be committed for the base tree to carry it.
+    git(&repo, &["add", "-A"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "rewrite",
+        ],
+    );
     let out = repo.join("out");
     let runner = ReportRunner::new(
         LIST_SAMPLE,
@@ -596,7 +650,7 @@ fn two_caught_with_logs() -> String {
 /// scenario's own `log_path` log inside `mutants.out/` and parses the failing test names from it.
 #[test]
 fn d9_each_mutant_carries_its_own_failing_tests() {
-    let repo = tmpdir("d9-per-mutant");
+    let repo = git_repo("d9-per-mutant");
     let out = repo.join("out");
     let runner = PerMutantLogRunner {
         list: LIST_SAMPLE.as_bytes().to_vec(),
@@ -665,7 +719,7 @@ fn d9_each_mutant_carries_its_own_failing_tests() {
 /// yielding the caught mutants' tasks.
 #[test]
 fn d9_found_problems_exit_is_not_a_failure() {
-    let repo = tmpdir("d9-exit-2");
+    let repo = git_repo("d9-exit-2");
     let out = repo.join("out");
     let runner = PerMutantLogRunner {
         list: LIST_SAMPLE.as_bytes().to_vec(),
@@ -691,7 +745,7 @@ fn d9_found_problems_exit_is_not_a_failure() {
 /// D9(b): a genuine cargo-mutants failure exit (5 = Failure) IS an error.
 #[test]
 fn d9_failure_exit_is_an_error() {
-    let repo = tmpdir("d9-exit-5");
+    let repo = git_repo("d9-exit-5");
     let out = repo.join("out");
     let runner = PerMutantLogRunner {
         list: LIST_SAMPLE.as_bytes().to_vec(),
@@ -778,7 +832,7 @@ fn r2_absolute_log_path_does_not_leak_host_bytes() {
     let host_line = host_text.lines().next().unwrap_or("").to_string();
     assert!(!host_line.is_empty(), "host file has a first line");
 
-    let repo = tmpdir("r2-abs-log");
+    let repo = git_repo("r2-abs-log");
     let out = repo.join("out");
     let runner = PerMutantLogRunner {
         list: LIST_SAMPLE.as_bytes().to_vec(),
@@ -804,7 +858,7 @@ fn r2_absolute_log_path_does_not_leak_host_bytes() {
 /// refuses any `log_path` with a `..` component.
 #[test]
 fn r2_parent_dir_log_path_does_not_leak_sibling_bytes() {
-    let repo = tmpdir("r2-parent-log");
+    let repo = git_repo("r2-parent-log");
     // A file beside mutants.out, inside the snapshot: `../secret.log` would reach it.
     fs::write(repo.join("secret.log"), "test leaked::secret ... FAILED\n").expect("write secret");
     let out = repo.join("out");
@@ -840,7 +894,7 @@ fn r2_symlinked_log_path_does_not_leak_host_bytes() {
     let host_line = host_text.lines().next().unwrap_or("").to_string();
     assert!(!host_line.is_empty(), "host file has a first line");
 
-    let repo = tmpdir("r2-symlink-log");
+    let repo = git_repo("r2-symlink-log");
     let log_dir = repo.join(MUTANTS_OUT_DIR).join("log");
     fs::create_dir_all(&log_dir).expect("mkdir log dir");
     std::os::unix::fs::symlink(host, log_dir.join("x.log")).expect("symlink log");
@@ -869,7 +923,7 @@ fn r2_symlinked_log_path_does_not_leak_host_bytes() {
 /// and its failing test names land in `tasks.jsonl`.
 #[test]
 fn r2_relative_log_path_still_reads_its_own_log() {
-    let repo = tmpdir("r2-rel-log");
+    let repo = git_repo("r2-rel-log");
     let out = repo.join("out");
     let runner = PerMutantLogRunner {
         list: LIST_SAMPLE.as_bytes().to_vec(),
@@ -899,7 +953,7 @@ fn r2_relative_log_path_still_reads_its_own_log() {
 /// hunk header with the mutated line removed and the original line added.
 #[test]
 fn d9_reversal_is_a_real_unified_diff() {
-    let repo = tmpdir("d9-diff");
+    let repo = git_repo("d9-diff");
     fs::create_dir_all(repo.join("src")).expect("mkdir src");
     fs::write(
         repo.join("src/lib.rs"),
@@ -1026,14 +1080,18 @@ fn d9_list_argv_runs_on_a_fresh_checkout() {
 
 /// D9(f): the reversal is built from the descriptor's own `diff` and applies to the mutated file.
 ///
+/// D9: the reversal is a real `git diff` between the mutated copy and the base copy, so it applies
+/// to the mutated copy by construction.
+///
 /// Pre-fix, `reversal_diff` reconstructed the reversal from the descriptor's `replacement` and the
 /// source line at the span, which for a `BinaryOperator` mutant (`replacement = "-"`) produced
 /// `-`/`-`/`+    a + b` — a diff `git apply --check` refuses against the mutated file. The fix
-/// reverses the descriptor's own `diff` field (the mutation cargo-mutants actually applied), so the
-/// reversal applies cleanly.
+/// materialises the base tree, applies the mutation diff, and takes `git diff` between the mutated
+/// copy and the base copy.
 ///
-/// This test materialises the fixture's mutated `src/lib.rs` in a real git repo, writes the
-/// reversal `reversal_diff` returns, and runs `git apply --check` on it.
+/// This test builds a real repository with the sample's base source committed, materialises the
+/// mutated copy, writes the reversal `reversal_diff` returns, and runs `git apply --check` on it
+/// against the mutated copy.
 #[test]
 fn d9_reversal_applies_to_the_mutated_file() {
     let listed = parse_list(LIST_SAMPLE.as_bytes()).expect("parse list");
@@ -1045,42 +1103,35 @@ fn d9_reversal_applies_to_the_mutated_file() {
         .expect("the BinaryOperator mutant is in the sample");
     assert_eq!(mutant.replacement, "-");
 
-    let repo = tmpdir("d9-reversal-apply");
-    fs::create_dir_all(repo.join("src")).expect("mkdir src");
-    // The mutated file, exactly as the descriptor's own diff leaves it.
-    fs::write(
-        repo.join("src/lib.rs"),
-        "pub fn add(a: i32, b: i32) -> i32 {\n    a - /* ~ changed by cargo-mutants ~ */ b\n}\n\npub fn is_positive(n: i32) -> bool {\n    n > 0\n}\n\n#[cfg(test)]\nmod tests {\n",
-    )
-    .expect("write mutated source");
-    git(&repo, &["init", "-q"]);
-    git(&repo, &["add", "-A"]);
+    let repo = git_repo("d9-reversal-apply");
+    let base = base_tree(&repo);
+    assert!(!base.is_empty(), "the repository has a HEAD tree");
+    let mutation = mutation_diff(&repo, &base, mutant).expect("the descriptor carries a diff");
+
+    // Materialise the mutated copy the way provisioning does: the base tree with the mutation
+    // applied.
+    let mutated = repo.join("mutated");
+    tsr_corpus::mine::materialize(&repo, &base, &mutated).expect("materialise base");
+    let patch = repo.join("mutation.patch");
+    fs::write(&patch, &mutation).expect("write mutation patch");
     git(
-        &repo,
-        &[
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-qm",
-            "mutated",
-        ],
+        &mutated,
+        &["apply", "--whitespace=nowarn", &patch.display().to_string()],
     );
 
-    let reversal = reversal_diff(&repo, mutant);
-    let patch = repo.join("reversal.patch");
-    fs::write(&patch, &reversal).expect("write patch");
+    let reversal = reversal_diff(&repo, &base, &mutation).expect("a reversal is produced");
+    let reversal_patch = repo.join("reversal.patch");
+    fs::write(&reversal_patch, &reversal).expect("write reversal patch");
     let check = std::process::Command::new("git")
         .arg("-C")
-        .arg(&repo)
+        .arg(&mutated)
         .args(["apply", "--check"])
-        .arg(&patch)
+        .arg(&reversal_patch)
         .output()
         .expect("git apply --check");
     assert!(
         check.status.success(),
-        "the reversal must apply to the mutated file; git apply --check said: {}\npatch:\n{reversal}",
+        "the reversal must apply to the mutated copy; git apply --check said: {}\npatch:\n{reversal}",
         String::from_utf8_lossy(&check.stderr)
     );
 }

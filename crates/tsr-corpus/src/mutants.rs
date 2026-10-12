@@ -241,8 +241,15 @@ pub struct MutantTask {
     pub repo: String,
     /// Digest of the mutated snapshot: the kill run's stdout digest under the mutant.
     pub mutated_snapshot: String,
+    /// The base snapshot the mutant's copy is materialised from: the tree id of the repository HEAD
+    /// the mutant was generated against (D4). `mutated_snapshot` is only a descriptor digest and
+    /// names nothing materialisable, so the copy is this base tree with `mutation_diff` applied.
+    pub base_snapshot: String,
     /// The tests that failed under the mutant, sorted.
     pub failing_tests: Vec<String>,
+    /// CAS digest of the mutation diff (D4): the diff cargo-mutants applied to the base tree. The
+    /// disposable copy is the base snapshot with this applied.
+    pub mutation_diff: String,
     /// CAS digest of the reversal diff (the diff that reverts the mutation).
     pub reversal_diff: String,
     /// Family: `(mutation operator, crate)` (B9).
@@ -451,139 +458,6 @@ pub fn read_failing_tests(
     Ok(parse_failing_tests(&text))
 }
 
-/// The reversal diff for a mutant: the unified diff that restores the original source line.
-///
-/// cargo-mutants does not emit the reversal itself, but its descriptor carries the `diff` it
-/// actually applied (the mutation). Reversing that diff — swapping the `-`/`+` lines of each hunk
-/// and the `-`/`+` file headers — yields a diff that applies to the mutated file (D9f). The
-/// descriptor's `diff` is preferred because it is the mutation as cargo-mutants wrote it; the
-/// `replacement`/span reconstruction is only a fallback for a descriptor with no `diff`.
-///
-/// The result is a **real unified diff** (D9d): `--- a/<file>` / `+++ b/<file>` headers and a
-/// `@@ -<line>,1 +<line>,1 @@` hunk header with the mutated line removed and the original line
-/// added, so `git apply`/`patch` can apply it. The pre-fix placeholder `@@ mutant <op> @@` was not
-/// a hunk header and could not be applied.
-pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
-    if let Some(diff) = mutant.diff.as_deref() {
-        if let Some(reversed) = reverse_unified_diff(diff) {
-            return reversed;
-        }
-    }
-    let original = mutant
-        .line()
-        .and_then(|n| read_source_line(repo, &mutant.file, n))
-        .unwrap_or_default();
-    let mutated = if mutant.replacement.is_empty() {
-        mutant.name.clone()
-    } else {
-        mutant.replacement.clone()
-    };
-    // The hunk header names the 1-based line the mutation is on. A descriptor with no span still
-    // gets a valid header at line 1.
-    let line = mutant.line().unwrap_or(1);
-    format!(
-        "--- a/{file}\n+++ b/{file}\n@@ -{line},1 +{line},1 @@\n-{mutated}\n+{original}\n",
-        file = mutant.file,
-        line = line,
-        mutated = mutated.trim_end(),
-        original = original.trim_end(),
-    )
-}
-
-/// Reverse a unified diff: swap the `-`/`+` file headers and, in every hunk, swap the `-` and `+`
-/// lines. Returns `None` if `diff` is not a unified diff this can reverse (no `@@` hunk, or a hunk
-/// with no `-`/`+` pair), so the caller falls back to the span reconstruction.
-///
-/// cargo-mutants writes its mutation diff with `--- <file>` / `+++ <description>` headers and
-/// `@@ -a,b +c,d @@` hunks; reversing it produces `--- a/<file>` / `+++ b/<file>` and the inverse
-/// hunk, which `git apply` accepts against the mutated file (D9f).
-fn reverse_unified_diff(diff: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut saw_hunk = false;
-    let mut old_header: Option<String> = None;
-    // The lines of the hunk being reversed, in order. A unified diff lists a run of `-` lines
-    // followed by a run of `+` lines at each change; reversing swaps the two runs in place, so the
-    // context lines keep their position.
-    let mut hunk: Vec<(char, String)> = Vec::new();
-    let flush = |out: &mut String, hunk: &mut Vec<(char, String)>| {
-        let mut i = 0;
-        while i < hunk.len() {
-            match hunk[i].0 {
-                '-' => {
-                    // A run of removed lines: collect it, then the run of added lines that follows.
-                    let mut removed: Vec<String> = Vec::new();
-                    while i < hunk.len() && hunk[i].0 == '-' {
-                        removed.push(hunk[i].1.clone());
-                        i += 1;
-                    }
-                    let mut added: Vec<String> = Vec::new();
-                    while i < hunk.len() && hunk[i].0 == '+' {
-                        added.push(hunk[i].1.clone());
-                        i += 1;
-                    }
-                    // Reversed: the added lines become removed, the removed lines become added.
-                    for line in &added {
-                        out.push('-');
-                        out.push_str(line);
-                        out.push('\n');
-                    }
-                    for line in &removed {
-                        out.push('+');
-                        out.push_str(line);
-                        out.push('\n');
-                    }
-                }
-                '+' => {
-                    // A `+` run with no preceding `-` run: it becomes a `-` run.
-                    out.push('-');
-                    out.push_str(&hunk[i].1);
-                    out.push('\n');
-                    i += 1;
-                }
-                _ => {
-                    out.push(' ');
-                    out.push_str(&hunk[i].1);
-                    out.push('\n');
-                    i += 1;
-                }
-            }
-        }
-        hunk.clear();
-    };
-    for line in diff.lines() {
-        if let Some(rest) = line.strip_prefix("--- ") {
-            flush(&mut out, &mut hunk);
-            // The original file header names the file the mutation was applied to; it becomes the
-            // reversed `--- a/<file>` header (git wants `---` before `+++`).
-            old_header = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("+++ ") {
-            flush(&mut out, &mut hunk);
-            // The mutation's description header becomes the reversed `+++ b/<file>` header.
-            let file = old_header
-                .clone()
-                .unwrap_or_else(|| rest.trim().to_string());
-            out.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
-        } else if line.starts_with("@@") {
-            flush(&mut out, &mut hunk);
-            out.push_str(line);
-            out.push('\n');
-            saw_hunk = true;
-        } else if let Some(rest) = line.strip_prefix('-') {
-            hunk.push(('-', rest.to_string()));
-        } else if let Some(rest) = line.strip_prefix('+') {
-            hunk.push(('+', rest.to_string()));
-        } else if let Some(rest) = line.strip_prefix(' ') {
-            hunk.push((' ', rest.to_string()));
-        }
-    }
-    flush(&mut out, &mut hunk);
-    if saw_hunk {
-        Some(out)
-    } else {
-        None
-    }
-}
-
 /// Read the 1-based `line` of `file` under `repo`, if it exists.
 ///
 /// `file` comes from a mutant descriptor parsed out of the repository under test, so it is
@@ -591,16 +465,6 @@ fn reverse_unified_diff(diff: &str) -> Option<String> {
 /// symlink would escape `repo` and read a host file (security review F1, D1). Such a descriptor is
 /// rejected — the reversal diff then falls back to the descriptor's own text, which is still a
 /// stable content-addressed record.
-fn read_source_line(repo: &Path, file: &str, line: u64) -> Option<String> {
-    if !is_safe_descriptor_path(repo, file) {
-        return None;
-    }
-    let text = fs::read_to_string(repo.join(file)).ok()?;
-    text.lines()
-        .nth((line as usize).saturating_sub(1))
-        .map(str::to_string)
-}
-
 /// Whether `file` is a safe relative path under a repository root: not absolute, and with no `..`
 /// component. A descriptor whose `file` fails this is untrusted and must not be joined onto the
 /// host repository path.
@@ -672,6 +536,242 @@ pub fn mutated_snapshot_digest(mutant: &MutantDescriptor) -> String {
     digest(&payload)
 }
 
+/// The tree id of the repository's HEAD: the base snapshot a mutant's copy is materialised from
+/// (D4). `git rev-parse HEAD^{tree}` reads history and executes nothing from the repository.
+///
+/// A repository with no HEAD (an empty repository, or a `git` that fails) yields an empty string;
+/// the caller refuses to write a task whose base snapshot is empty, because such a task cannot be
+/// provisioned.
+pub fn base_tree(repo: &Path) -> String {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD^{tree}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// The mutation diff cargo-mutants applied to the base tree, as a real unified diff (D4).
+///
+/// The descriptor's own `diff` field is the mutation as cargo-mutants wrote it. When it is present
+/// and non-empty it is returned verbatim: it is the diff that was actually applied, so applying it
+/// to the base tree reproduces the mutated tree by construction. When the descriptor carries no
+/// `diff`, the mutation is reconstructed from the span and replacement as a one-line hunk against
+/// the base source line, which is the same shape `git apply` accepts.
+///
+/// Returns `None` when neither the descriptor's `diff` nor a readable base source line is available:
+/// a task whose mutation cannot be expressed as a diff must not be written, because its copy could
+/// not be provisioned.
+/// Rewrite a cargo-mutants descriptor diff's `---`/`+++` headers to `a/<file>` / `b/<file>`.
+///
+/// cargo-mutants writes `--- src/lib.rs` and `+++ replace add -> i32 with 0`: the `+++` line is a
+/// human description, not a path, so `git apply` reads it as the target file and refuses the patch
+/// (`error: replace add -> i32 with 0: No such file or directory`). Only the two header lines are
+/// rewritten; every hunk line is left byte-for-byte as cargo-mutants wrote it.
+fn normalize_diff_headers(diff: &str, file: &str) -> String {
+    let mut out = String::new();
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("--- ") {
+            // Keep a `a/`-prefixed path if cargo-mutants already wrote one; otherwise name the file.
+            let path = rest.strip_prefix("a/").unwrap_or(rest);
+            out.push_str(&format!("--- a/{path}\n"));
+        } else if line.starts_with("+++ ") {
+            out.push_str(&format!("+++ b/{file}\n"));
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+pub fn mutation_diff(repo: &Path, base_tree: &str, mutant: &MutantDescriptor) -> Option<String> {
+    if let Some(diff) = mutant.diff.as_deref() {
+        if !diff.trim().is_empty() {
+            // cargo-mutants writes the descriptor's `diff` with a `--- <file>` header but a
+            // `+++ <description>` header (`+++ replace add -> i32 with 0`), which is not a path:
+            // `git apply` reads the `+++` line as the target and refuses the patch. Rewrite both
+            // headers to the repository-relative `a/<file>` / `b/<file>` shape `git apply` expects,
+            // so the mutation diff applies to the base tree by construction.
+            return Some(normalize_diff_headers(diff, &mutant.file));
+        }
+    }
+    // The fallback reconstruction reads the source line from the BASE TREE, not the working tree:
+    // the diff must apply to the base tree the copy is materialised from, and a working tree that
+    // has moved on (or a test that rewrote the file) would produce a diff that cannot apply.
+    let mutated = if mutant.replacement.is_empty() {
+        mutant.name.clone()
+    } else {
+        mutant.replacement.clone()
+    };
+    let line = mutant.line().unwrap_or(1);
+    // A hand-written one-line hunk (`@@ -N,1 +N,1 @@`) is not reliably locatable by `git apply`
+    // when the file has more lines. Produce the diff the way `reversal_diff` does: materialise the
+    // base tree, edit the line, and take `git diff --no-index` between the edited copy and the
+    // base copy, so the diff applies to the base tree by construction.
+    let scratch = scratch_dir("mutation");
+    let base = scratch.join("base");
+    let edited = scratch.join("edited");
+    crate::mine::materialize(repo, base_tree, &base).ok()?;
+    crate::mine::materialize(repo, base_tree, &edited).ok()?;
+    let path = edited.join(&mutant.file);
+    let text = fs::read_to_string(&path).ok()?;
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let idx = (line as usize).saturating_sub(1);
+    if idx >= lines.len() {
+        return None;
+    }
+    lines[idx] = mutated.trim_end().to_string();
+    let mut body = lines.join("\n");
+    if text.ends_with('\n') {
+        body.push('\n');
+    }
+    fs::write(&path, body).ok()?;
+    // `git diff --no-index A B` yields the diff that turns A into B, so pass the base first and
+    // the edited copy second: the result transforms the base tree into the mutated one.
+    let out = std::process::Command::new("git")
+        .args([
+            "diff",
+            "--no-index",
+            "--no-color",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+        ])
+        .arg(&base)
+        .arg(&edited)
+        .output()
+        .ok()?;
+    if !out.status.success() && out.status.code() != Some(1) {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(rewrite_no_index_paths(&text, &base, &edited))
+}
+
+/// The reversal diff for a mutant, produced by `git diff` between the mutated copy and the base
+/// copy (D4, D9).
+///
+/// The reversal is **never** built by editing diff text: the base tree is materialised into a
+/// scratch directory, the mutation diff is applied to it, and `git diff --no-index` between the
+/// mutated copy and the base copy yields the reversal. A diff produced this way applies to the
+/// mutated copy by construction, so every reversal passes `git apply --check`.
+///
+/// Returns `None` when the base tree cannot be materialised or the mutation diff does not apply:
+/// the caller then refuses to write the task rather than emitting a reversal that cannot apply.
+pub fn reversal_diff(repo: &Path, base_tree: &str, mutation: &str) -> Option<String> {
+    let scratch = scratch_dir("reversal");
+    let base = scratch.join("base");
+    let mutated = scratch.join("mutated");
+    let result = (|| -> Option<String> {
+        crate::mine::materialize(repo, base_tree, &base).ok()?;
+        crate::mine::materialize(repo, base_tree, &mutated).ok()?;
+        apply_patch(&mutated, mutation)?;
+        // `git diff --no-index` exits 1 when the trees differ, which is the expected case; only a
+        // failure to run it is an error.
+        let out = std::process::Command::new("git")
+            .args([
+                "diff",
+                "--no-index",
+                "--no-color",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+            ])
+            .arg(&mutated)
+            .arg(&base)
+            .output()
+            .ok()?;
+        if !out.status.success() && out.status.code() != Some(1) {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.trim().is_empty() {
+            return None;
+        }
+        Some(rewrite_no_index_paths(&text, &mutated, &base))
+    })();
+    let _ = fs::remove_dir_all(&scratch);
+    result
+}
+
+/// Apply a unified diff to `dir` with `git apply`. Returns `None` when it does not apply.
+fn apply_patch(dir: &Path, diff: &str) -> Option<()> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["apply", "--whitespace=nowarn", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.take()?.write_all(diff.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    out.status.success().then_some(())
+}
+
+/// Rewrite the absolute paths `git diff --no-index` writes into repository-relative `a/`/`b/`
+/// paths, so the reversal applies to the mutated copy with `git apply -C <copy>`.
+///
+/// `git diff --no-index <mutated> <base>` writes `--- a/<mutated>/<file>` / `+++ b/<base>/<file>`
+/// with the scratch directories in the header. Stripping the two scratch prefixes leaves
+/// `--- a/<file>` / `+++ b/<file>`, which is what `git apply` expects against the copy.
+fn rewrite_no_index_paths(diff: &str, mutated: &Path, base: &Path) -> String {
+    // `git diff --no-index` writes `--- a/<mutated>/<file>` / `+++ b/<base>/<file>`. The scratch
+    // directories are absolute, so the prefix is `a/` + an absolute path; `format!("a/{}", …)` would
+    // double the slash and never match. Strip the `a/`/`b/` prefix first, then the scratch root.
+    // `git diff --no-index` strips the leading slash from an absolute path, so the header is
+    // `a/tmp/…/mutated/src/lib.rs` for a scratch root of `/tmp/…/mutated`.
+    let mutated_root = mutated.display().to_string();
+    let mutated_root = mutated_root.trim_start_matches('/').to_string();
+    let base_root = base.display().to_string();
+    let base_root = base_root.trim_start_matches('/').to_string();
+    let mut out = String::new();
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("--- ") {
+            let rest = rest.strip_prefix("a/").unwrap_or(rest);
+            let rest = rest.strip_prefix(&mutated_root).unwrap_or(rest);
+            // The scratch root is absolute, so the remainder is `/src/lib.rs`; keep the leading
+            // slash so the rewritten header is `a/src/lib.rs`, not `asrc/lib.rs`.
+            out.push_str(&format!("--- a/{}\n", rest.trim_start_matches('/')));
+        } else if let Some(rest) = line.strip_prefix("+++ ") {
+            let rest = rest.strip_prefix("b/").unwrap_or(rest);
+            let rest = rest.strip_prefix(&base_root).unwrap_or(rest);
+            out.push_str(&format!("+++ b/{}\n", rest.trim_start_matches('/')));
+        } else if line.starts_with("diff --git ") {
+            // Drop the `diff --git a/<mutated>/… b/<base>/…` line: `git apply` does not need it and
+            // it carries the scratch paths.
+        } else if line.starts_with("index ") || line.starts_with("new file mode") {
+            // Keep index lines out: they name blobs of the scratch trees, not the copy.
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// A fresh scratch directory under the system temp dir, removed by the caller.
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "tsr-mutants-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
 /// The family of a mutant: `(mutation operator, crate)` (B9).
 pub fn family_of(mutant: &MutantDescriptor) -> String {
     format!("({}, {})", mutant.operator(), mutant.package)
@@ -726,12 +826,30 @@ pub fn mutants(
         skipped_not_caught: 0,
         skipped_unsafe_descriptor: 0,
     };
+    // D4: the base snapshot every mutant's copy is materialised from is the tree id of the
+    // repository HEAD the kill run mutated. A repository with no HEAD cannot provision a mutant
+    // task, so a run that produced caught mutants but no base tree is an error rather than a
+    // manifest of unprovisionable tasks.
+    let base = base_tree(repo);
+
+    // The list output (`mutants.json`) is the only place cargo-mutants writes each mutant's
+    // `diff`; `outcomes.json` names the mutant but carries no diff. Look the descriptor up by name
+    // so the mutation diff is the one cargo-mutants actually applied, not a reconstruction.
+    let listed_by_name: std::collections::HashMap<&str, &MutantDescriptor> =
+        listed.iter().map(|m| (m.name.as_str(), m)).collect();
+
     let mut lines: Vec<String> = Vec::new();
 
     for outcome in &lab.outcomes {
-        let Some(mutant) = outcome.mutant() else {
+        let Some(outcome_mutant) = outcome.mutant() else {
             continue;
         };
+        // Prefer the listed descriptor (it carries the diff); fall back to the outcome's own
+        // descriptor when the list did not name it.
+        let mutant = listed_by_name
+            .get(outcome_mutant.name.as_str())
+            .copied()
+            .unwrap_or(outcome_mutant);
         if !outcome.is_caught() {
             report_out.skipped_not_caught += 1;
             continue;
@@ -741,10 +859,37 @@ pub fn mutants(
         // (security review F1, D1).
         if !is_safe_descriptor_path(repo, &mutant.file) {
             report_out.skipped_unsafe_descriptor += 1;
+            // The descriptor is not read at all: no diff, no reversal, no task. Falling through
+            // would read the untrusted path (D1) and fail the whole run.
+            continue;
         }
         // The failing tests come from THIS mutant's own kill-run log, not one shared report (D9a).
         let failing = read_failing_tests(repo, outcome)?;
-        let reversal = reversal_diff(repo, mutant);
+
+        // D4: the mutation diff is the diff cargo-mutants applied to the base tree. It is written
+        // to the corpus's own CAS, so `tsr task run` can read it from beside `tasks.jsonl` and
+        // materialise the mutated copy. A mutant whose mutation cannot be expressed as a diff is
+        // refused: its copy could not be provisioned.
+        let mutation = mutation_diff(repo, &base, mutant).ok_or_else(|| {
+            MutantsError::Runner(format!(
+                "mutant {} has no mutation diff: the descriptor carries no `diff` and its base \
+                 source line could not be read, so its copy cannot be provisioned",
+                mutant.name
+            ))
+        })?;
+        let mutation_digest = digest(mutation.as_bytes());
+        crate::mine::write_cas(&cas, &mutation_digest, mutation.as_bytes())
+            .map_err(MutantsError::from)?;
+
+        // D9: the reversal is a real `git diff` between the mutated copy and the base copy, never
+        // diff text edited by hand, so it applies to the mutated copy by construction.
+        let reversal = reversal_diff(repo, &base, &mutation).ok_or_else(|| {
+            MutantsError::Runner(format!(
+                "mutant {}: the mutation diff does not apply to the base tree {base}, so no \
+                 reversal can be produced",
+                mutant.name
+            ))
+        })?;
         let reversal_digest = digest(reversal.as_bytes());
         crate::mine::write_cas(&cas, &reversal_digest, reversal.as_bytes())
             .map_err(MutantsError::from)?;
@@ -753,7 +898,9 @@ pub fn mutants(
             id: task_id(&repo_str, mutant),
             repo: repo_str.clone(),
             mutated_snapshot: mutated_snapshot_digest(mutant),
+            base_snapshot: base.clone(),
             failing_tests: failing,
+            mutation_diff: mutation_digest,
             reversal_diff: reversal_digest,
             family: family_of(mutant),
             lineage: repo_str.clone(),
