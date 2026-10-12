@@ -188,6 +188,42 @@ enum CorpusCmd {
         #[arg(long)]
         seed: u64,
     },
+    /// Materialise a snapshot into a disposable copy (D4).
+    ///
+    /// The batch runner provisions the copy it drives a session in by asking the sealed sandbox to
+    /// run this command: `tsr corpus materialize --snapshot <sha> --out <dest>`. It is a real
+    /// subcommand so the argv the runner builds names a command that exists.
+    Materialize {
+        /// The snapshot to materialise: a git revision (sha, tag or ref).
+        #[arg(long)]
+        snapshot: String,
+        /// The directory to materialise into.
+        #[arg(long)]
+        out: PathBuf,
+        /// The repository to materialise from (default: the working directory).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+    /// Run the oracle in a materialised copy and report pass/fail (D4).
+    ///
+    /// The batch runner runs the oracle by asking the sealed sandbox to run this command:
+    /// `tsr corpus oracle --snapshot <dir> --tests <csv>` (the flipped tests) or
+    /// `tsr corpus oracle --snapshot <dir> --full-suite` (the regression check). It is a real
+    /// subcommand so the argv the runner builds names a command that exists.
+    Oracle {
+        /// The directory the oracle runs in: the session's copy, not the parent snapshot (D3).
+        #[arg(long)]
+        snapshot: PathBuf,
+        /// The comma-separated test ids to run (the flipped tests).
+        #[arg(long, conflicts_with = "full_suite")]
+        tests: Option<String>,
+        /// Run the full suite instead of a named set of tests.
+        #[arg(long)]
+        full_suite: bool,
+        /// The suite command (default: `cargo test`).
+        #[arg(long)]
+        suite: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -275,6 +311,17 @@ fn main() -> ExitCode {
                 holdout,
                 seed,
             } => corpus_cmd::split_cmd(dir, by, holdout, seed),
+            CorpusCmd::Materialize {
+                snapshot,
+                out,
+                repo,
+            } => corpus_cmd::materialize_cmd(repo.as_deref(), &snapshot, &out),
+            CorpusCmd::Oracle {
+                snapshot,
+                tests,
+                full_suite,
+                suite,
+            } => corpus_cmd::oracle_cmd(&snapshot, tests.as_deref(), full_suite, suite.as_deref()),
         },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),

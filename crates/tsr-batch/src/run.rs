@@ -40,6 +40,9 @@ pub enum RunError {
     Driver(#[from] DriverError),
     #[error("profile: {0}")]
     Profile(#[from] tsr_policy::profile::ProfileError),
+    /// The disposable copy was never materialised: the provisioning run exited non-zero (D4).
+    #[error("provisioning failed: `{argv}` exited {exit}")]
+    ProvisioningFailed { argv: String, exit: i32 },
 }
 
 /// The configuration of a batch run.
@@ -188,6 +191,14 @@ pub fn run_one(
         digest: Hash::of(&[provision.stdout_digest.as_bytes()]),
         source: format!("provision:{}", provision.exit),
     })?;
+    // D4: a non-zero provisioning exit means the copy was never materialised. Proceeding would run
+    // the session and the oracle against a directory that does not hold the snapshot, so refuse.
+    if provision.exit != 0 {
+        return Err(RunError::ProvisioningFailed {
+            argv: provision_argv(task.snapshot(), &dest).join(" "),
+            exit: provision.exit,
+        });
+    }
 
     // (4) Drive the session.
     let report = match driver.drive(&mut ctx, task) {

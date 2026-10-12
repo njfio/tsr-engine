@@ -412,6 +412,33 @@ fn d3_a_session_that_fixes_the_flipped_test_is_accepted() {
     assert!(result.oracle.unwrap().accepted);
 }
 
+/// D4: a non-zero provisioning exit must be refused, not ignored.
+///
+/// The defect: `run_one` recorded `provision:<exit>` as Evidence but never inspected the exit, so a
+/// copy that was never materialised was driven and judged anyway. Before the fix this test fails
+/// because `run_one` returns `Ok`; after it, `run_one` returns `RunError::ProvisioningFailed`.
+#[test]
+fn d4_provisioning_failure_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The provisioning run exits non-zero: the copy was never materialised.
+    let mut runner = ScriptedRunner::ok();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let provision = tsr_batch::run::provision_argv(task.snapshot(), &dest);
+    runner.script(Path::new(task.snapshot()), &provision, RunResult::exit_only(1));
+
+    let err = run_one(task, Mode::Rules, &driver, &runner, &config)
+        .expect_err("a non-zero provisioning exit must be refused");
+    assert!(
+        matches!(err, tsr_batch::run::RunError::ProvisioningFailed { exit: 1, .. }),
+        "expected ProvisioningFailed, got {err:?}"
+    );
+}
+
 /// A runner that records every `(snapshot, argv)` it was asked to run, and answers success.
 struct RecordingRunner {
     calls: std::cell::RefCell<Vec<(PathBuf, Vec<String>)>>,
