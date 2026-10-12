@@ -100,6 +100,12 @@ pub struct MinedTask {
     pub flipped_tests: Vec<String>,
     /// CAS digest of the reference diff (`git diff parent commit`).
     pub hidden_diff: String,
+    /// The repository paths of the files that define this task's oracle tests (D3, item 2): the test
+    /// files the commit's diff touched, and the files whose `#[test]` functions changed. The oracle
+    /// restores these from the snapshot before it judges the copy, so a session cannot pass by
+    /// deleting, editing or renaming its test.
+    #[serde(default)]
+    pub oracle_test_files: Vec<String>,
     /// Family: the crate the touched paths belong to, or a declared mapping.
     pub family: String,
     /// Lineage: the repository (B9).
@@ -273,6 +279,7 @@ pub fn mine(
             parent: parent.clone(),
             commit: commit.clone(),
             parent_snapshot: tree_id(repo, parent)?,
+            oracle_test_files: oracle_test_files(repo, parent, commit, &touched, &flipped)?,
             flipped_tests: flipped,
             hidden_diff,
             family,
@@ -338,6 +345,78 @@ pub fn touched_paths(repo: &Path, parent: &str, commit: &str) -> Result<Vec<Stri
         .filter(|l| !l.is_empty())
         .map(str::to_string)
         .collect())
+}
+
+/// The repository paths of the files that define a task's oracle tests (D3, item 2).
+///
+/// A mined task's oracle is the flipped test, so the files that define it are the test files the
+/// commit's diff touched — a path under a `tests/` directory, a `tests.rs`, or a file whose name
+/// ends in `_test.rs`/`_tests.rs` — together with any touched file whose diff adds or changes a
+/// `#[test]` function. The list is sorted and deduplicated; a task with none is refused at load.
+pub fn oracle_test_files(
+    repo: &Path,
+    parent: &str,
+    commit: &str,
+    touched: &[String],
+    flipped_tests: &[String],
+) -> Result<Vec<String>, MineError> {
+    let mut files: Vec<String> = Vec::new();
+    // (a) The files that hold the flipped tests. The flip commit often changes only the source, so
+    //     the test file is not in the diff; it is found by the test's function name in the parent
+    //     tree, which is the tree the copy is provisioned from.
+    for test in flipped_tests {
+        let Some(name) = test.rsplit("::").next() else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let needle = format!("fn {name}");
+        let out = git(
+            repo,
+            &["grep", "-l", "-F", "-e", &needle, parent, "--", "*.rs"],
+        )?;
+        for line in out.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // `git grep <rev>` prefixes each hit with `<rev>:`, which is stripped here.
+            let path = line.split_once(':').map(|(_, p)| p).unwrap_or(line);
+            files.push(path.to_string());
+        }
+    }
+    // (b) The test files the commit's diff touched, and any touched file whose diff adds or changes
+    //     a `#[test]` function.
+    for path in touched {
+        if is_test_path(path) || diff_has_test(repo, parent, commit, path)? {
+            files.push(path.clone());
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+/// Whether a repository path names a test file by convention.
+fn is_test_path(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    path.contains("/tests/")
+        || path.starts_with("tests/")
+        || name == "tests.rs"
+        || name.ends_with("_test.rs")
+        || name.ends_with("_tests.rs")
+}
+
+/// Whether the diff of `path` between `parent` and `commit` adds or changes a `#[test]` function.
+///
+/// The diff is read with `git diff -U0` and only its added lines are inspected: a `#[test]` that was
+/// already there and untouched is not a change to the oracle.
+fn diff_has_test(repo: &Path, parent: &str, commit: &str, path: &str) -> Result<bool, MineError> {
+    let diff = git(repo, &["diff", "-U0", parent, commit, "--", path])?;
+    Ok(diff
+        .lines()
+        .any(|l| l.starts_with('+') && !l.starts_with("+++") && l.contains("#[test]")))
 }
 
 /// The family of a task: the first declared rule whose prefix matches a touched path, else the

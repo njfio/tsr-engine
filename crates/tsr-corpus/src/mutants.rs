@@ -247,6 +247,11 @@ pub struct MutantTask {
     pub base_snapshot: String,
     /// The tests that failed under the mutant, sorted.
     pub failing_tests: Vec<String>,
+    /// The repository paths of the files that define this task's oracle tests (D3, item 2): the
+    /// files holding the tests that killed the mutant. The oracle restores these from the snapshot
+    /// before it judges the copy, so a session cannot pass by deleting, editing or renaming its test.
+    #[serde(default)]
+    pub oracle_test_files: Vec<String>,
     /// CAS digest of the mutation diff (D4): the diff cargo-mutants applied to the base tree. The
     /// disposable copy is the base snapshot with this applied.
     pub mutation_diff: String,
@@ -913,6 +918,7 @@ pub fn mutants(
             repo: repo_str.clone(),
             mutated_snapshot: mutated_snapshot_digest(mutant),
             base_snapshot: base.clone(),
+            oracle_test_files: oracle_test_files(repo, &failing)?,
             failing_tests: failing,
             mutation_diff: mutation_digest,
             reversal_diff: reversal_digest,
@@ -934,6 +940,64 @@ pub fn mutants(
     // are all read. Remove it so nothing is left behind (N5).
     let _ = fs::remove_dir_all(&copy);
     Ok(report_out)
+}
+
+/// The repository paths of the files that define a mutant task's oracle tests (D3, item 2).
+///
+/// A mutant's oracle is the suite that killed it, so the files that define it are the files holding
+/// the tests that failed under the mutant. Each failing test is a Rust test path
+/// (`module::tests::name`); the file is found by searching the repository's tracked `.rs` files for
+/// the test's function name. A test whose file cannot be found contributes nothing, and a mutant
+/// with no file at all is refused at load rather than judged.
+pub fn oracle_test_files(
+    repo: &Path,
+    failing_tests: &[String],
+) -> Result<Vec<String>, MutantsError> {
+    let tracked = git_lines(repo, &["ls-files", "*.rs"])?;
+    let mut files: Vec<String> = Vec::new();
+    for test in failing_tests {
+        let Some(name) = test.rsplit("::").next() else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let needle = format!("fn {name}");
+        for path in &tracked {
+            let Ok(text) = fs::read_to_string(repo.join(path)) else {
+                continue;
+            };
+            if text.contains(&needle) {
+                files.push(path.clone());
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+/// The lines of a `git` command's stdout, one per line, trimmed and non-empty.
+fn git_lines(repo: &Path, args: &[&str]) -> Result<Vec<String>, MutantsError> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| MutantsError::Runner(format!("could not run git: {e}")))?;
+    if !out.status.success() {
+        return Err(MutantsError::Runner(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 /// The mutant's timestamp: the repository's HEAD commit time, ISO-8601. `git` reads history; it

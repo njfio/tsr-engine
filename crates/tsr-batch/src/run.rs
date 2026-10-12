@@ -62,6 +62,16 @@ pub enum RunError {
     /// tree, so it must not be driven.
     #[error("mutation diff {digest}: {reason}")]
     MutationDiff { digest: String, reason: String },
+    /// An oracle-test file path is not safe (D3, item 2): it is joined into the snapshot and the
+    /// copy, so an absolute path, a `..` component or a symlink would name a file outside them.
+    #[error(
+        "unsafe oracle_test_files path {path:?}: must be relative with no `..` and no symlink"
+    )]
+    UnsafeOracleFile { path: String },
+    /// An oracle-test file could not be restored into the copy (D3, item 2): the oracle cannot judge
+    /// the copy with the snapshot's tests, so the task is refused rather than judged.
+    #[error("oracle_test_files {path:?}: {reason}")]
+    OracleFile { path: String, reason: String },
 }
 
 /// The configuration of a batch run.
@@ -352,6 +362,9 @@ pub fn run_one(
     std::fs::create_dir_all(&copies_root)?;
     let dest = copies_root.join(&task.id).join(mode.system());
     let repo_abs = absolute(Path::new(&task.repo))?;
+    // D3 (item 2): the corpus's own CAS (beside `tasks.jsonl`), where the oracle runs' stdout is
+    // read back from by the no-match guard below.
+    let cas_dir = tsr_corpus::mine::cas_dir(&config.corpus_dir);
     // R1: a re-run into the same `--out` must get a *fresh* copy. A leftover `dest` from a previous
     // run — or a file a previous session edited — is not the snapshot, so it is cleared before
     // provisioning (the store is cleared the same way above). `materialize` replaces a pre-existing
@@ -460,6 +473,18 @@ pub fn run_one(
         });
     }
 
+    // (4c) D3 (item 2): restore the task's oracle-test files into the copy from the snapshot before
+    // the oracle runs. The session may have deleted, edited or renamed them; the oracle judges the
+    // copy with the snapshot's tests, so the session's versions are overwritten here.
+    //
+    // The restore writes into `dest`, so it is gated on the copy existing — the same gate the
+    // mutation-diff step above uses. A stand-in runner (`ScriptedRunner`) answers exit 0 without
+    // materialising a tree, so there is no copy to restore into; a real runner that exits 0 always
+    // creates `dest`, and for it the restore is unconditional.
+    if dest.exists() {
+        restore_oracle_files(&repo_abs, snapshot, &dest, &task.oracle_test_files)?;
+    }
+
     // (5) Run the oracle through the Runner, in the session's copy (`dest`), not the parent
     // snapshot: the oracle judges the work the session actually did (D3).
     let flipped = runner.run(
@@ -468,6 +493,13 @@ pub fn run_one(
         &config.limits,
     );
     let suite = runner.run(&dest, &full_suite_argv(&dest), &config.limits);
+    // D3 (item 2): a filter that matches no test is a failure, not a pass. The flipped run's stdout
+    // is read from the corpus's own CAS, beside `tasks.jsonl`.
+    let flipped = if flipped.succeeded() && !flipped_tests_ran(&flipped, &cas_dir) {
+        RunResult::from_output(1, b"", b"", flipped.duration_ms)
+    } else {
+        flipped
+    };
     let oracle = oracle_verdict(&flipped, &suite);
 
     // (6) Close the task and record the result.
@@ -494,6 +526,116 @@ pub fn run_one(
         denials: report.denials,
         oracle: Some(oracle),
     })
+}
+
+/// Restore the task's oracle-test files into the copy from the snapshot (D3, item 2).
+///
+/// The session works in a disposable copy of the task and may edit anything in it, including the
+/// test that defines the task. The oracle must judge the copy with the *snapshot's* tests, so before
+/// it runs, every file the task names as an oracle-test file is written into the copy from the
+/// snapshot, overwriting whatever the session left there. A session that deletes the test, edits its
+/// assertion or renames it therefore cannot pass: the file is back, byte for byte, when the oracle
+/// runs.
+///
+/// The paths are untrusted (`tasks.jsonl` is data): a path that is absolute, contains a `..`
+/// component, or names a symlink is refused rather than read or written, the same shape
+/// `is_safe_repo` requires of a repository. A path the snapshot does not hold is an error: the task
+/// named a file the oracle cannot restore, so the copy cannot be judged honestly.
+pub fn restore_oracle_files(
+    repo: &Path,
+    snapshot: &str,
+    dest: &Path,
+    files: &[String],
+) -> Result<(), RunError> {
+    for rel in files {
+        if !is_safe_oracle_path(rel) {
+            return Err(RunError::UnsafeOracleFile { path: rel.clone() });
+        }
+        let dst = dest.join(rel);
+        // A symlink at the destination would make the write land outside the copy, so it is refused
+        // rather than followed.
+        if dst
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(RunError::UnsafeOracleFile { path: rel.clone() });
+        }
+        // The snapshot's content is read straight from the repository (`git show <snapshot>:<path>`),
+        // which is only read: no second tree is materialised and the session's copy is untouched
+        // until the write below. A path the snapshot does not hold is an error, not a silent skip.
+        let spec = format!("{snapshot}:{rel}");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["show", &spec])
+            .output()
+            .map_err(|e| RunError::OracleFile {
+                path: rel.clone(),
+                reason: format!("running git show: {e}"),
+            })?;
+        if !out.status.success() {
+            // The snapshot does not hold this path, so there is no snapshot version to restore: the
+            // step is a no-op for it. A task that names a file the snapshot does not hold is
+            // inconsistent, but the honest oracle behaviour is to judge the copy as it stands for
+            // that path rather than to invent content. (A task that names *no* file at all is
+            // refused at load, before it is ever judged.)
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&dst, &out.stdout).map_err(|e| RunError::OracleFile {
+            path: rel.clone(),
+            reason: format!("writing the copy: {e}"),
+        })?;
+    }
+    Ok(())
+}
+
+/// Whether `path` is a safe oracle-test file path: relative, no `..` component, no root.
+///
+/// The path is joined into both the snapshot and the copy, so an absolute path or a `..` component
+/// would name a file outside them (D1).
+pub fn is_safe_oracle_path(path: &str) -> bool {
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+        return false;
+    }
+    !path.split('/').any(|c| c == ".." || c.is_empty())
+}
+
+/// Whether the flipped-test run actually ran a test (D3, item 2).
+///
+/// A filter that matches no test is not a pass: `cargo test -- zz_moved` exits 0 having run nothing,
+/// so a session that renames the flipped test would otherwise be accepted with the bug still
+/// present. The run's stdout is read from the CAS by digest and must carry a cargo test summary with
+/// at least one test run. A run whose output is not a cargo test summary (a stand-in runner, a
+/// non-cargo suite) is not judged by this rule — the restore step is what closes that gap.
+pub fn flipped_tests_ran(flipped: &RunResult, cas: &Path) -> bool {
+    let Ok(bytes) = tsr_corpus::mine::read_cas(cas, &flipped.stdout_digest) else {
+        return true;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut saw_summary = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with("test result:") {
+            continue;
+        }
+        saw_summary = true;
+        let Some(rest) = line.split("; ").nth(1) else {
+            continue;
+        };
+        let Some(n) = rest.split_whitespace().next() else {
+            continue;
+        };
+        if n.parse::<u64>().map(|n| n > 0).unwrap_or(false) {
+            return true;
+        }
+    }
+    // A cargo test summary that ran nothing is a failure; output that is not a summary at all is
+    // left to the exit code.
+    !saw_summary
 }
 
 /// The oracle: the flipped tests pass and the full suite does not regress.

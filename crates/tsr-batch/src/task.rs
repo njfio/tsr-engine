@@ -26,12 +26,19 @@ pub enum TaskError {
     InvalidId { line: usize, id: String },
     /// A mutant task names no base snapshot or no mutation diff (D4): its copy cannot be
     /// provisioned, so it is refused where the manifest is parsed rather than judged later.
-    #[error("mutant task {id:?} on line {line} names no {missing}: its copy cannot be provisioned")]
+    #[error(
+        "mutant task {id:?} on line {line} names no {missing}: its copy cannot be provisioned"
+    )]
     UnprovisionableMutant {
         line: usize,
         id: String,
         missing: &'static str,
     },
+    /// The task names no oracle-test file (D3, item 2). The oracle restores those files from the
+    /// snapshot before it judges the copy, so a task without them could be passed by a session that
+    /// deletes or edits its own test. Such a task is refused here, at load, not judged.
+    #[error("task {id:?} on line {line} names no oracle_test_files: the oracle could not restore its tests")]
+    NoOracleTestFiles { line: usize, id: String },
 }
 
 /// Which corpus produced a task.
@@ -96,6 +103,12 @@ pub struct CorpusTask {
     pub lineage: String,
     /// When the task was mined.
     pub timestamp: String,
+    /// The repository paths of the files that define this task's oracle tests (D3, item 2): the
+    /// test files the commit's diff touched (mined) or the suite that killed the mutant (mutant).
+    /// Before the oracle runs, these files are written into the copy from the snapshot, overwriting
+    /// the session's versions, so a session cannot pass by deleting, editing or renaming its test.
+    #[serde(default)]
+    pub oracle_test_files: Vec<String>,
     /// The oracle, as an outcome definition.
     pub outcome: OutcomeDef,
 }
@@ -180,6 +193,15 @@ pub fn read_tasks(path: &Path) -> Result<Vec<CorpusTask>, TaskError> {
                     missing: "mutation_diff",
                 });
             }
+        }
+        // D3 (item 2): the oracle restores the task's oracle-test files from the snapshot before it
+        // judges the copy. A task that names none cannot be judged honestly — a session could delete
+        // or edit its own test and still pass — so it is refused here, at load, not judged.
+        if task.oracle_test_files.is_empty() {
+            return Err(TaskError::NoOracleTestFiles {
+                line: i + 1,
+                id: task.id,
+            });
         }
         out.push(task);
     }

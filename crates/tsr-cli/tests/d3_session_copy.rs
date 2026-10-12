@@ -66,7 +66,11 @@ fn two_commit_repo(dir: &Path) -> PathBuf {
         "Cargo.toml",
         "[package]\nname = \"demo\"\nversion = \"0.0.1\"\nedition = \"2021\"\n\n[workspace]\n\n[lib]\npath = \"src/lib.rs\"\n",
     );
-    write(&repo, "src/lib.rs", "pub fn add(a: i32, b: i32) -> i32 { a - b }\n");
+    write(
+        &repo,
+        "src/lib.rs",
+        "pub fn add(a: i32, b: i32) -> i32 { a - b }\n",
+    );
     write(
         &repo,
         "tests/demo.rs",
@@ -75,7 +79,11 @@ fn two_commit_repo(dir: &Path) -> PathBuf {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-q", "-m", "root: red test"]);
 
-    write(&repo, "src/lib.rs", "pub fn add(a: i32, b: i32) -> i32 { a + b }\n");
+    write(
+        &repo,
+        "src/lib.rs",
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    );
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-q", "-m", "flip: fix add"]);
 
@@ -107,7 +115,6 @@ fn standin_tsr(dir: &Path, real: &Path) -> PathBuf {
     fs::set_permissions(&path, perms).expect("chmod");
     path
 }
-
 
 /// A stand-in suite the mine run invokes through `tsr exec`: it runs the real `cargo test` in the
 /// snapshot (its cwd) and writes the suite report mine reads, naming the one test `adds`.
@@ -181,8 +188,8 @@ fn d3_session_edits_land_in_the_copy_and_the_oracle_accepts() {
         String::from_utf8_lossy(&mine.stderr)
     );
     let manifest = fs::read_to_string(corpus.join("tasks.jsonl")).expect("tasks.jsonl");
-    let task: serde_json::Value = serde_json::from_str(manifest.lines().next().expect("one task"))
-        .expect("task json");
+    let task: serde_json::Value =
+        serde_json::from_str(manifest.lines().next().expect("one task")).expect("task json");
     let task_id = task["id"].as_str().expect("task id").to_string();
     let flipped = task["flipped_tests"][0]
         .as_str()

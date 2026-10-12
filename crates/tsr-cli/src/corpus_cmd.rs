@@ -133,13 +133,52 @@ pub fn oracle_cmd(
 
     let runner = ExecRunner::new();
     let result = runner.run(snapshot, &argv, &tsr_corpus::Limits::new(600_000, 1 << 20));
-    if result.succeeded() {
-        println!("oracle: pass (exit 0)");
-        ExitCode::SUCCESS
-    } else {
+    if !result.succeeded() {
         println!("oracle: fail (exit {})", result.exit);
-        ExitCode::from(1)
+        return ExitCode::from(1);
     }
+    // D3 (item 2): a filter that matches no test is a failure, not a pass. `cargo test -- zz_moved`
+    // exits 0 having run nothing, so a session that renames the flipped test would otherwise be
+    // accepted with the bug still present. The run's stdout is read back from the CAS by digest and
+    // must carry a cargo test summary with at least one test run.
+    if tests.is_some() && !ran_a_test(&result) {
+        println!("oracle: fail (the filter matched no test)");
+        return ExitCode::from(1);
+    }
+    println!("oracle: pass (exit 0)");
+    ExitCode::SUCCESS
+}
+
+/// Whether a run's stdout carries a cargo test summary with at least one test run.
+///
+/// The stdout is read from the CAS by digest. Output that is not a cargo test summary at all (a
+/// non-cargo suite) is not judged by this rule — the restore step is what closes that gap.
+fn ran_a_test(result: &tsr_corpus::RunResult) -> bool {
+    let Ok(bytes) = tsr_corpus::mine::read_cas(
+        &tsr_corpus::mine::cas_dir(std::path::Path::new(".")),
+        &result.stdout_digest,
+    ) else {
+        return true;
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut saw_summary = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with("test result:") {
+            continue;
+        }
+        saw_summary = true;
+        let Some(rest) = line.split("; ").nth(1) else {
+            continue;
+        };
+        let Some(n) = rest.split_whitespace().next() else {
+            continue;
+        };
+        if n.parse::<u64>().map(|n| n > 0).unwrap_or(false) {
+            return true;
+        }
+    }
+    !saw_summary
 }
 
 /// The argv the oracle runs: the suite command, then the flipped tests after `--`.
