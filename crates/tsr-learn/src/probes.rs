@@ -103,12 +103,6 @@ pub fn probe_post_action(
     for (seq, e) in events {
         by_task.entry(e.task).or_default().push((*seq, e.clone()));
     }
-    // The generator's raw p per commitment, by the same rule `decision_rows` uses.
-    let generator_raw: BTreeMap<EventId, Option<f64>> = crate::decision::decision_rows(events)
-        .into_iter()
-        .map(|dr| (dr.commitment, dr.generator_raw()))
-        .collect();
-
     let mut leaks = Vec::new();
     for row in &ds.rows {
         let Some(index_row) = index_of.get(&row.task) else {
@@ -120,7 +114,27 @@ pub fn probe_post_action(
             .take_while(|(_, e)| e.id != row.commitment)
             .cloned()
             .collect();
-        let raw = generator_raw.get(&row.commitment).copied().flatten();
+        // The generator's raw p is recomputed from the task's log truncated before the
+        // commitment, by the same rule `decision_rows` uses -- so a leak in the pairing itself is
+        // caught, not just a leak in the features. `decision_rows` needs the commitment event to
+        // form a row, so we pass the task's log up to and including it; the pairing is task-local,
+        // so events after the commitment cannot change the result.
+        let upto: Vec<(i64, Event)> = task_events
+            .iter()
+            .take_while(|(_, e)| e.id != row.commitment)
+            .cloned()
+            .chain(std::iter::once(
+                task_events
+                    .iter()
+                    .find(|(_, e)| e.id == row.commitment)
+                    .cloned()
+                    .expect("the commitment is in the task's log"),
+            ))
+            .collect();
+        let raw = crate::decision::decision_rows(&upto)
+            .into_iter()
+            .find(|dr| dr.commitment == row.commitment)
+            .and_then(|dr| dr.generator_raw());
         let recomputed = extractor(&before, index_row, row.action, raw);
         if recomputed.values != row.features.values {
             leaks.push(Leak {
@@ -139,11 +153,13 @@ pub fn probe_post_action(
     ProbeReport { leaks }
 }
 
-/// Probe (b): a single feature that perfectly separates the fit slice's labels fails, named.
+/// Probe (b): a single feature that separates the fit slice's labels perfectly by a threshold
+/// fails, named.
 ///
-/// A feature separates perfectly when, over the fit rows with a resolved label, every row with
-/// label `true` has one value and every row with label `false` has a different value. The feature
-/// is named in the leak.
+/// A feature separates perfectly when, over the fit rows with a resolved label, the largest value
+/// of one label is strictly below the smallest value of the other -- a threshold that puts every
+/// `true` row on one side and every `false` row on the other. Each label may take many values; the
+/// old singleton rule missed a multi-valued separator. The feature is named in the leak.
 pub fn probe_label_reach(ds: &Dataset, spec: &FeatureSpec) -> ProbeReport {
     let fit: Vec<&Row> = ds
         .rows
@@ -155,27 +171,38 @@ pub fn probe_label_reach(ds: &Dataset, spec: &FeatureSpec) -> ProbeReport {
         return ProbeReport { leaks };
     }
     for (i, name) in spec.names.iter().enumerate() {
-        let mut true_vals: BTreeSet<u64> = BTreeSet::new();
-        let mut false_vals: BTreeSet<u64> = BTreeSet::new();
+        let mut true_vals: Vec<f64> = Vec::new();
+        let mut false_vals: Vec<f64> = Vec::new();
         for r in &fit {
             let v = r.features.values.get(i).copied().unwrap_or(0.0);
-            let bits = v.to_bits();
             if r.label == Some(true) {
-                true_vals.insert(bits);
+                true_vals.push(v);
             } else {
-                false_vals.insert(bits);
+                false_vals.push(v);
             }
         }
-        // Perfect separation: the two value sets are disjoint and each is a singleton.
-        if true_vals.len() == 1 && false_vals.len() == 1 && true_vals.is_disjoint(&false_vals) {
+        if true_vals.is_empty() || false_vals.is_empty() {
+            continue;
+        }
+        let t_max = true_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let t_min = true_vals.iter().cloned().fold(f64::INFINITY, f64::min);
+        let f_max = false_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let f_min = false_vals.iter().cloned().fold(f64::INFINITY, f64::min);
+        // A threshold separates perfectly when one label's largest value is strictly below the
+        // other label's smallest value.
+        let separated = t_max < f_min || f_max < t_min;
+        if separated {
+            let (lo, hi) = if t_max < f_min {
+                (t_max, f_min)
+            } else {
+                (f_max, t_min)
+            };
             leaks.push(Leak {
                 probe: Probe::LabelReach,
                 row: format!("feature:{name}"),
                 detail: format!(
-                    "feature {name:?} perfectly separates the fit slice's labels \
-                     (true = {}, false = {})",
-                    f64::from_bits(*true_vals.iter().next().unwrap()),
-                    f64::from_bits(*false_vals.iter().next().unwrap())
+                    "feature {name:?} separates the fit slice's labels by a threshold \
+                     (largest of one label {lo}, smallest of the other {hi})"
                 ),
             });
         }
@@ -287,18 +314,111 @@ pub fn probe_boundary(ds: &Dataset, index: &[TaskIndexRow]) -> ProbeReport {
     ProbeReport { leaks }
 }
 
+/// Probe (c), the split manifest: read `split.json` and check it against the rows' sides, then
+/// recompute the split digest from its assignments.
+///
+/// A forged `split.json` alone -- the rows untouched -- is caught here: the manifest's assignment
+/// for a task must equal the side its rows carry, and the stored digest must equal the digest
+/// recomputed from the rule, the seed and the assignments.
+pub fn probe_split_manifest(ds: &Dataset, split_json: &Path) -> ProbeReport {
+    let mut leaks = Vec::new();
+    let text = match std::fs::read_to_string(split_json) {
+        Ok(t) => t,
+        Err(e) => {
+            leaks.push(Leak {
+                probe: Probe::Boundary,
+                row: "split.json".to_string(),
+                detail: format!("cannot read {}: {e}", split_json.display()),
+            });
+            return ProbeReport { leaks };
+        }
+    };
+    let manifest: crate::dataset::SplitManifest = match serde_json::from_str(&text) {
+        Ok(m) => m,
+        Err(e) => {
+            leaks.push(Leak {
+                probe: Probe::Boundary,
+                row: "split.json".to_string(),
+                detail: format!("{} is not a split manifest: {e}", split_json.display()),
+            });
+            return ProbeReport { leaks };
+        }
+    };
+
+    // The manifest's assignment for every task must equal the side its rows carry.
+    let mut row_sides: BTreeMap<TaskId, BTreeSet<Side>> = BTreeMap::new();
+    for r in &ds.rows {
+        row_sides.entry(r.task).or_default().insert(r.side);
+    }
+    for (task, sides) in &row_sides {
+        let key = task.to_string();
+        match manifest.assignments.get(&key) {
+            Some(side) => {
+                if sides.len() > 1 || !sides.contains(side) {
+                    leaks.push(Leak {
+                        probe: Probe::Boundary,
+                        row: key.clone(),
+                        detail: format!(
+                            "split.json assigns task {key} to {side:?}, but its rows are on {sides:?}"
+                        ),
+                    });
+                }
+            }
+            None => leaks.push(Leak {
+                probe: Probe::Boundary,
+                row: key.clone(),
+                detail: format!("split.json has no assignment for task {key}"),
+            }),
+        }
+    }
+    // Every assignment must name a task the rows carry.
+    for task in manifest.assignments.keys() {
+        if !row_sides.keys().any(|t| &t.to_string() == task) {
+            leaks.push(Leak {
+                probe: Probe::Boundary,
+                row: task.clone(),
+                detail: format!("split.json assigns task {task}, which has no rows"),
+            });
+        }
+    }
+
+    // The stored digest must equal the digest recomputed from the rule, the seed and the
+    // assignments.
+    let recomputed =
+        crate::dataset::split_digest(manifest.by, manifest.seed, &manifest.assignments);
+    if recomputed != manifest.digest {
+        leaks.push(Leak {
+            probe: Probe::Boundary,
+            row: "split.json".to_string(),
+            detail: format!(
+                "split.json digest {} does not match the digest recomputed from its assignments {}",
+                manifest.digest.to_hex(),
+                recomputed.to_hex()
+            ),
+        });
+    }
+    ProbeReport { leaks }
+}
+
 /// Run all three probes over a dataset.
+///
+/// When `split_json` names the dataset's `split.json`, probe (c) also checks the manifest against
+/// the rows' sides and recomputes the split digest.
 pub fn run_all(
     ds: &Dataset,
     events: &[(i64, Event)],
     index: &[TaskIndexRow],
     spec: &FeatureSpec,
     extractor: Extractor<'_>,
+    split_json: Option<&Path>,
 ) -> ProbeReport {
     let mut leaks = Vec::new();
     leaks.extend(probe_post_action(ds, events, index, spec, extractor).leaks);
     leaks.extend(probe_label_reach(ds, spec).leaks);
     leaks.extend(probe_boundary(ds, index).leaks);
+    if let Some(path) = split_json {
+        leaks.extend(probe_split_manifest(ds, path).leaks);
+    }
     ProbeReport { leaks }
 }
 
@@ -510,7 +630,7 @@ mod tests {
         let (ds, events, index) = fixture();
         let families = crate::features::families_from_spec(&ds.spec);
         let extractor = default_extractor(&ds.spec, &families);
-        let report = run_all(&ds, &events, &index, &ds.spec, &extractor);
+        let report = run_all(&ds, &events, &index, &ds.spec, &extractor, None);
         assert!(report.is_clean(), "{:?}", report.leaks);
     }
 
@@ -594,6 +714,150 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A4: probe (b) must flag a feature that separates the fit slice's labels perfectly by a
+    /// *threshold* -- the largest value of one label below the smallest of the other -- even when
+    /// each label takes many values. The old rule (`true_vals.len()==1 && false_vals.len()==1`)
+    /// misses this plant.
+    #[test]
+    fn a4_probe_b_catches_a_multi_valued_threshold_separator() {
+        let (mut ds, _events, _index) = fixture();
+        // Plant a threshold separator into feature 0: every `false` row gets a value in [0, 0.4],
+        // every `true` row a value in [0.6, 1.0]. Each label takes many values, so the old
+        // singleton rule does not fire; the threshold rule must.
+        let mut n = 0u64;
+        for r in ds.rows.iter_mut() {
+            if let Some(l) = r.label {
+                let v = if l {
+                    0.6 + (n % 5) as f64 * 0.1
+                } else {
+                    (n % 5) as f64 * 0.1
+                };
+                r.features.values[0] = v;
+                n += 1;
+            }
+        }
+        let report = probe_label_reach(&ds, &ds.spec);
+        assert!(
+            !report.is_clean(),
+            "A4: a multi-valued threshold separator must be caught"
+        );
+        assert_eq!(report.leaks[0].probe, Probe::LabelReach);
+        assert!(
+            report.leaks[0].row.starts_with("feature:"),
+            "A7: the leak names the feature: {:?}",
+            report.leaks[0]
+        );
+    }
+
+    /// A4: a feature that does *not* separate by threshold (the labels overlap) must pass.
+    #[test]
+    fn a4_probe_b_passes_an_overlapping_feature() {
+        let (mut ds, _events, _index) = fixture();
+        // Feature 0 takes the same values for both labels: no threshold separates them.
+        let mut n = 0u64;
+        for r in ds.rows.iter_mut() {
+            if r.label.is_some() {
+                r.features.values[0] = (n % 5) as f64 * 0.1;
+                n += 1;
+            }
+        }
+        let report = probe_label_reach(&ds, &ds.spec);
+        assert!(
+            report.is_clean(),
+            "A4: an overlapping feature must not be flagged: {:?}",
+            report.leaks
+        );
+    }
+
+    /// A6: probe (c) must read `split.json` and flag a manifest whose assignments disagree with
+    /// the rows' sides -- a forged split.json alone (the rows are untouched) must be caught.
+    #[test]
+    fn a6_probe_c_catches_a_forged_split_json() {
+        let (ds, _events, _index) = fixture();
+        let dir = std::env::temp_dir().join(format!("tsr-learn-split-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Forge: move every held_out task onto the fit side in split.json only.
+        let mut forged = ds.split.clone();
+        for side in forged.assignments.values_mut() {
+            if *side == Side::HeldOut {
+                *side = Side::Fit;
+            }
+        }
+        std::fs::write(
+            dir.join("split.json"),
+            serde_json::to_string_pretty(&forged).unwrap(),
+        )
+        .unwrap();
+        let report = probe_split_manifest(&ds, &dir.join("split.json"));
+        assert!(!report.is_clean(), "A6: a forged split.json must be caught");
+        assert_eq!(report.leaks[0].probe, Probe::Boundary);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A6: probe (c) must recompute the split digest and flag a split.json whose stored digest
+    /// does not match its assignments.
+    #[test]
+    fn a6_probe_c_recomputes_the_split_digest() {
+        let (ds, _events, _index) = fixture();
+        let dir = std::env::temp_dir().join(format!("tsr-learn-digest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut forged = ds.split.clone();
+        forged.digest = Hash::of(&[b"forged"]);
+        std::fs::write(
+            dir.join("split.json"),
+            serde_json::to_string_pretty(&forged).unwrap(),
+        )
+        .unwrap();
+        let report = probe_split_manifest(&ds, &dir.join("split.json"));
+        assert!(
+            !report.is_clean(),
+            "A6: a split.json with a wrong digest must be caught"
+        );
+        assert_eq!(report.leaks[0].probe, Probe::Boundary);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A6: a split.json that agrees with the rows and carries the right digest passes.
+    #[test]
+    fn a6_probe_c_passes_a_faithful_split_json() {
+        let (ds, _events, _index) = fixture();
+        let dir = std::env::temp_dir().join(format!("tsr-learn-ok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("split.json"),
+            serde_json::to_string_pretty(&ds.split).unwrap(),
+        )
+        .unwrap();
+        let report = probe_split_manifest(&ds, &dir.join("split.json"));
+        assert!(report.is_clean(), "{:?}", report.leaks);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A7: a caught probe names the probe, the row id and (for (b)) the feature.
+    #[test]
+    fn a7_a_caught_probe_names_the_probe_row_and_feature() {
+        let (mut ds, _events, _index) = fixture();
+        for r in ds.rows.iter_mut() {
+            if let Some(l) = r.label {
+                r.features.values[0] = if l { 1.0 } else { 0.0 };
+            }
+        }
+        let report = probe_label_reach(&ds, &ds.spec);
+        assert!(!report.is_clean());
+        let leak = &report.leaks[0];
+        assert_eq!(leak.probe, Probe::LabelReach);
+        assert!(
+            leak.row.starts_with("feature:"),
+            "A7: the leak names the feature: {leak:?}"
+        );
+        assert!(
+            leak.detail.contains("feature"),
+            "A7: the detail names the feature: {leak:?}"
+        );
+    }
     #[test]
     fn spec_for_families_is_used_by_the_default_extractor() {
         let spec = spec_for_families(&["a".to_string()]);

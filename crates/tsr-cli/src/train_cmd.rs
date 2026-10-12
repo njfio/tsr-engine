@@ -277,6 +277,24 @@ fn run_dataset(
             return std::process::ExitCode::from(1);
         }
     };
+    // A12: run all three probes before writing anything. A leaking split is refused with exit 2
+    // rather than written and left for `fit` to catch.
+    {
+        let families = tsr_learn::features::families_from_spec(&ds.spec);
+        let extractor = tsr_learn::probes::default_extractor(&ds.spec, &families);
+        let report = tsr_learn::probes::run_all(&ds, &log, &index, &ds.spec, &extractor, None);
+        if !report.is_clean() {
+            for leak in &report.leaks {
+                eprintln!(
+                    "tsr: probe {} caught a leak at {}: {}",
+                    leak.probe.name(),
+                    leak.row,
+                    leak.detail
+                );
+            }
+            return std::process::ExitCode::from(2);
+        }
+    }
     if let Err(e) = write_dataset(&ds, out) {
         eprintln!("tsr: cannot write dataset: {e}");
         return std::process::ExitCode::from(1);
@@ -294,6 +312,19 @@ fn run_dataset(
 }
 
 fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::process::ExitCode {
+    // B3: the probes need the log and the task index. Without them they pass silently (and without
+    // events.jsonl the probe pass panics), so refuse with exit 2 naming the missing file.
+    for name in ["events.jsonl", "tasks.jsonl"] {
+        let path = dataset_dir.join(name);
+        if !path.exists() {
+            eprintln!(
+                "tsr: fit refused: {} is missing from the dataset directory {}",
+                name,
+                dataset_dir.display()
+            );
+            return std::process::ExitCode::from(2);
+        }
+    }
     let floor = support_floor.unwrap_or_else(tsr_learn::support::default_support_floor);
     match tsr_learn::bundle::write_bundle(dataset_dir, out, floor) {
         Ok(id) => {
@@ -324,6 +355,13 @@ fn run_verify(bundle: &Path, rebuild: Option<&Path>) -> std::process::ExitCode {
     }
 }
 
+/// The report path beside the bundle: `<bundle>.report.<ext>`.
+fn report_path(bundle: &Path, ext: &str) -> std::path::PathBuf {
+    let mut s = bundle.as_os_str().to_os_string();
+    s.push(format!(".report.{ext}"));
+    std::path::PathBuf::from(s)
+}
+
 fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::process::ExitCode {
     let b = match tsr_learn::bundle::load_bundle(bundle) {
         Ok(b) => b,
@@ -347,5 +385,19 @@ fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::proc
         }
     };
     print!("{}", tsr_learn::report::render_report(&r, json));
+    // B9: the evaluation report sits beside the bundle as `<bundle>.report.json` (and the text
+    // form when not `--json`), naming the bundle id and the dataset's split digest.
+    let json_path = report_path(bundle, "json");
+    if let Err(e) = std::fs::write(&json_path, tsr_learn::report::render_report(&r, true)) {
+        eprintln!("tsr: cannot write {}: {e}", json_path.display());
+        return std::process::ExitCode::from(1);
+    }
+    if !json {
+        let text_path = report_path(bundle, "txt");
+        if let Err(e) = std::fs::write(&text_path, tsr_learn::report::render_report(&r, false)) {
+            eprintln!("tsr: cannot write {}: {e}", text_path.display());
+            return std::process::ExitCode::from(1);
+        }
+    }
     std::process::ExitCode::SUCCESS
 }
