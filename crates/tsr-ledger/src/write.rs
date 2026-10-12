@@ -126,7 +126,8 @@ impl<'a> Ledger<'a> {
     ) -> Result<EventId, LedgerError> {
         // The id must be the content address of (from_return, unmet, evidence), the same address
         // `Filter::contrast_from_criteria` mints. Refuse otherwise (exit 2).
-        let expected = crate::filter::contrast_id(&contrast.from_return, &contrast.unmet, &contrast.evidence);
+        let expected =
+            crate::filter::contrast_id(&contrast.from_return, &contrast.unmet, &contrast.evidence);
         if expected != contrast.id {
             return Err(LedgerError::ContrastIdMismatch {
                 id: contrast.id,

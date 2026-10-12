@@ -159,7 +159,10 @@ pub fn run(task_hex: &str, text: &str, store_path: Option<&str>) -> ExitCode {
     // to comment on, so refuse (exit 2) naming the path *before* opening — `Store::open` would
     // otherwise create the file and leave it behind on the refusal path.
     if !path.exists() {
-        eprintln!("tsr: no store at {}; a note comments on an existing task", path.display());
+        eprintln!(
+            "tsr: no store at {}; a note comments on an existing task",
+            path.display()
+        );
         return ExitCode::from(2);
     }
     let store = match Store::open(&path) {

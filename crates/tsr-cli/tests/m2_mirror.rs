@@ -11,9 +11,9 @@
 
 use tsr_cli::reflect_cmd::{build_mirror, render_mirror};
 use tsr_domain::{
-    ActionKind, Candidate, CandidateId, CriterionId, Decision, Event,
-    EventKind, Forecast, ForecastId, Forecaster, Hash, Horizon, Probability, Source, Support,
-    TaskId, UnmetKind, Utility,
+    ActionKind, Candidate, CandidateId, CriterionId, Decision, Event, EventKind, Forecast,
+    ForecastId, Forecaster, Hash, Horizon, Probability, Source, Support, TaskId, UnmetKind,
+    Utility,
 };
 use tsr_store::Store;
 
