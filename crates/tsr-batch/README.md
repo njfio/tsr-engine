@@ -48,7 +48,7 @@ runs.
 ```sh
 tsr task run --mode record --tasks /work/corpus/tasks.jsonl --driver claude-code --out /work/run-record
 tsr task run --mode rules  --tasks /work/corpus/tasks.jsonl --driver claude-code --out /work/run-rules
-tsr eval baseline /work/run-record /work/run-rules --pair-by task --seed 1
+tsr eval baseline --record /work/run-record --rules /work/run-rules --pair-by task --seed 1
 ```
 
 The `claude-code` driver needs Claude Code and a container runtime on the host; in this sandbox it
