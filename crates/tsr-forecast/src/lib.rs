@@ -142,10 +142,11 @@ mod tests {
         let facts = TaskFacts::from_events(&[closed("done")])
             .with_label("accepted", tsr_domain::EventId(Hash::of(&[b"l"])));
         assert_eq!(resolve(&f, &facts).resolution, Resolution::True);
-        // Accepted but closed without the criteria met (reason `operator`): false, not true.
+        // Accepted but closed with reason `operator`: an operator close is an external
+        // stop, so the common event is censored, not resolved false (R2).
         let facts = TaskFacts::from_events(&[closed("operator")])
             .with_label("accepted", tsr_domain::EventId(Hash::of(&[b"l"])));
-        assert_eq!(resolve(&f, &facts).resolution, Resolution::False);
+        assert_eq!(resolve(&f, &facts).resolution, Resolution::Censored);
         // Still open: unresolved.
         let facts = TaskFacts::from_events(&[]);
         assert_eq!(resolve(&f, &facts).resolution, Resolution::Unresolved);
