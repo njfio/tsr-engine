@@ -33,6 +33,7 @@ tsr train dataset (--store <db> | --events <events.jsonl>) --tasks <tasks.jsonl>
 tsr train fit <dataset-dir> --out models/<name> [--support-floor <n>]
 tsr train verify <bundle> [--rebuild <dataset-dir>]
 tsr train report <bundle> --dataset <dir> [--seed <n>] [--json]
+tsr train apply <bundle> --dataset <dir> --task <id> --candidate <id>
 ```
 
 ### `tsr train dataset`
@@ -104,6 +105,14 @@ fewer than two lineage clusters. Uncalibrated rows are excluded from the pair an
 A calibrated number prints as `p` with its calibrator version (the bundle id's first 12 hex and
 `features@v1`), a raw one as `raw p`, a missing calibrator as `uncalibrated`. Families and
 forecasters are listed in name order, never by score.
+
+### `tsr train apply`
+
+Scores one commitment against the bundle and prints, for the named task and candidate, the
+calibrated `p=<value> (<calibrator version>)` (or `uncalibrated`), the generator's `raw p=<value>`
+and `support=<n>` — the number of calibrate-slice rows that back the calibrator for the row's
+family. It refuses a foreign dataset (a split digest or feature spec that is not the bundle's) and
+a tampered bundle or row, exiting 2 and naming the file or the row id.
 
 ## The bundle layout
 

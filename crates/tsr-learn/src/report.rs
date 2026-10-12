@@ -50,10 +50,10 @@ pub struct ReliabilityBin {
     pub upper: f64,
     /// The number of rows in the bin.
     pub n: u32,
-    /// The mean forecast of the rows in the bin.
-    pub mean_forecast: f64,
-    /// The observed frequency of the label in the bin.
-    pub observed_frequency: f64,
+    /// The mean forecast of the rows in the bin, or `None` for an empty bin (JSON null).
+    pub mean_forecast: Option<f64>,
+    /// The observed frequency of the label in the bin, or `None` for an empty bin (JSON null).
+    pub observed_frequency: Option<f64>,
 }
 
 /// One forecaster's scores over a set of rows.
@@ -118,6 +118,8 @@ pub struct Report {
     pub paired_by_family: BTreeMap<String, Paired>,
     /// The support floor and the calibrated population.
     pub support_floor: u32,
+    /// F13: the log-loss clip, so `--json` carries it as the text report does.
+    pub log_loss_clip: f64,
     pub population: BTreeMap<String, u32>,
 }
 
@@ -193,10 +195,11 @@ pub fn score(pairs: &[(f64, f64)]) -> Scores {
             let lo = i as f64 / RELIABILITY_BINS as f64;
             let hi = (i + 1) as f64 / RELIABILITY_BINS as f64;
             let n = counts[i];
+            // F10/B4: an empty bin carries no mean and no observed frequency (JSON null), never 0.0.
             let (mean_forecast, observed_frequency) = if n == 0 {
-                (0.0, 0.0)
+                (None, None)
             } else {
-                (sum_p[i] / n as f64, sum_y[i] / n as f64)
+                (Some(sum_p[i] / n as f64), Some(sum_y[i] / n as f64))
             };
             ReliabilityBin {
                 lower: lo,
@@ -339,11 +342,6 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         if ctrl.is_none() {
             uncalibrated += 1;
         }
-        // The operator is scored on the subset where it recorded a forecast, with that n.
-        if let Some(o) = r.operator_raw {
-            op_pairs.push((o, y));
-            fam_op.entry(r.family.clone()).or_default().push((o, y));
-        }
         if let Some(l) = r.controller_logged {
             logged_pairs.push((l, y));
         }
@@ -353,6 +351,12 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
             gen_pairs.push((g, y));
             fam_ctrl.entry(r.family.clone()).or_default().push((c, y));
             fam_gen.entry(r.family.clone()).or_default().push((g, y));
+            // F12: the operator is scored on the comparison rows where it recorded a forecast, so
+            // its n is a subset of the comparison set (not of all scored rows).
+            if let Some(o) = r.operator_raw {
+                op_pairs.push((o, y));
+                fam_op.entry(r.family.clone()).or_default().push((o, y));
+            }
             let key = r.task.0.to_hex();
             let entry = per_task
                 .entry(key.clone())
@@ -480,6 +484,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         paired,
         paired_by_family,
         support_floor: bundle.manifest.support_floor,
+        log_loss_clip: LOG_LOSS_CLIP,
         population: bundle.population.clone(),
     }
 }
@@ -571,13 +576,14 @@ pub fn render_report(r: &Report, json: bool) -> String {
     out.push_str(&format!("support_floor {}\n", r.support_floor));
 
     out.push_str("\nforecasters\n");
+    // F13: forecasters in name order: controller, controller_logged, generator, operator.
     out.push_str(&render_scores("controller", &r.controller));
+    if let Some(l) = &r.controller_logged {
+        out.push_str(&render_scores("controller_logged", l));
+    }
     out.push_str(&render_scores("generator", &r.generator));
     if let Some(o) = &r.operator {
         out.push_str(&render_scores("operator", o));
-    }
-    if let Some(l) = &r.controller_logged {
-        out.push_str(&render_scores("controller_logged", l));
     }
 
     out.push_str("\nfamilies\n");
@@ -633,25 +639,38 @@ fn render_scores(label: &str, s: &Scores) -> String {
     };
     out.push_str(&format!("  {label} n={} {brier} {log_loss}\n", s.n));
     for b in &s.reliability {
-        out.push_str(&format!(
-            "    bin [{:.1},{:.1}) n={} {} {}\n",
-            b.lower,
-            b.upper,
-            b.n,
-            proxy("mean_forecast", b.mean_forecast),
-            proxy("observed_frequency", b.observed_frequency),
-        ));
+        // F10/B4: an empty bin prints `n=0` and no mean or observed value.
+        match (b.mean_forecast, b.observed_frequency) {
+            (Some(m), Some(o)) => out.push_str(&format!(
+                "    bin [{:.1},{:.1}) n={} {} {}\n",
+                b.lower,
+                b.upper,
+                b.n,
+                proxy("mean_forecast", m),
+                proxy("observed_frequency", o),
+            )),
+            _ => out.push_str(&format!(
+                "    bin [{:.1},{:.1}) n={}\n",
+                b.lower, b.upper, b.n
+            )),
+        }
     }
     out
 }
 
 fn render_paired(label: &str, p: &Paired) -> String {
+    // F13: the interval bounds go through Proxy; "interval n/a" prints once (the verdict is empty
+    // when there is no interval, so the phrase is not repeated).
     let interval = match p.interval {
-        Some((lo, hi)) => format!("[{lo:.6}, {hi:.6}]"),
+        Some((lo, hi)) => format!(
+            "[{}, {}]",
+            proxy("interval_lo", lo),
+            proxy("interval_hi", hi)
+        ),
         None => "interval n/a".to_string(),
     };
     let verdict = if p.interval.is_none() {
-        "interval n/a"
+        ""
     } else if p.inconclusive {
         "INCONCLUSIVE"
     } else {
@@ -663,8 +682,13 @@ fn render_paired(label: &str, p: &Paired) -> String {
     } else {
         format!("mean={}", proxy("brier", p.mean))
     };
+    let verdict = if verdict.is_empty() {
+        String::new()
+    } else {
+        format!(" {verdict}")
+    };
     format!(
-        "  {label} tasks={} clusters={} {mean} {interval} {verdict}\n",
+        "  {label} tasks={} clusters={} {mean} {interval}{verdict}\n",
         p.tasks, p.clusters,
     )
 }
@@ -1053,18 +1077,18 @@ mod tests {
         assert!(cal < over, "families in name order: {text}");
     }
 
-    /// A row whose task and lineage are set explicitly, so a test can put several rows in one task.
+    /// A row whose task is set explicitly, so a test can put several rows in one task. The lineage
+    /// follows the task (the paired difference groups by task, not lineage).
     fn row_in_task(
         b: &Bundle,
         family: &str,
-        lineage: &str,
         task: &str,
         signal: f64,
         label: bool,
         gen: f64,
         i: u64,
     ) -> Row {
-        let mut r = row(b, family, lineage, signal, label, gen, i);
+        let mut r = row(b, family, task, signal, label, gen, i);
         r.task = TaskId(Hash::of(&[task.as_bytes()]));
         r
     }
@@ -1254,20 +1278,20 @@ mod tests {
         // The 0.9 bin: n=10, mean forecast 0.9, observed frequency 1.0.
         let hi = bins
             .iter()
-            .find(|b| b.n == 10 && (b.mean_forecast - 0.9).abs() < 1e-9)
+            .find(|b| b.n == 10 && (b.mean_forecast.unwrap() - 0.9).abs() < 1e-9)
             .expect("a bin with n=10 and mean forecast 0.9");
         assert!(
-            (hi.observed_frequency - 1.0).abs() < 1e-9,
-            "the 0.9 bin's observed frequency is 1.0, got {}",
+            (hi.observed_frequency.unwrap() - 1.0).abs() < 1e-9,
+            "the 0.9 bin's observed frequency is 1.0, got {:?}",
             hi.observed_frequency
         );
         let lo = bins
             .iter()
-            .find(|b| b.n == 10 && (b.mean_forecast - 0.1).abs() < 1e-9)
+            .find(|b| b.n == 10 && (b.mean_forecast.unwrap() - 0.1).abs() < 1e-9)
             .expect("a bin with n=10 and mean forecast 0.1");
         assert!(
-            (lo.observed_frequency - 0.0).abs() < 1e-9,
-            "the 0.1 bin's observed frequency is 0.0, got {}",
+            (lo.observed_frequency.unwrap() - 0.0).abs() < 1e-9,
+            "the 0.1 bin's observed frequency is 0.0, got {:?}",
             lo.observed_frequency
         );
 
@@ -1289,6 +1313,130 @@ mod tests {
         assert!(
             !text.contains("support="),
             "B10: a population count must not print as support=:\n{text}"
+        );
+    }
+
+    /// F10/B4: an empty reliability bin prints `n=0` and no mean or observed value, and the JSON
+    /// carries null for both, never 0.0.
+    #[test]
+    fn f10_an_empty_bin_prints_n_zero_and_json_null() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // 20 rows all at signal 1.0 -> controller 0.9, so only the top bin is non-empty.
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            rows.push(row(&b, "calibrated", "l0", 1.0, true, 0.5, i));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        let empty = r
+            .controller
+            .reliability
+            .iter()
+            .find(|b| b.n == 0)
+            .expect("an empty bin");
+        assert!(
+            empty.mean_forecast.is_none(),
+            "F10: an empty bin has no mean"
+        );
+        assert!(
+            empty.observed_frequency.is_none(),
+            "F10: an empty bin has no observed frequency"
+        );
+        let text = render_report(&r, false);
+        assert!(
+            text.contains("bin [0.0,0.1) n=0\n"),
+            "F10: an empty bin prints n=0 and nothing else:\n{text}"
+        );
+        assert!(
+            !text.contains("bin [0.0,0.1) n=0 mean_forecast"),
+            "F10: an empty bin must not print a mean:\n{text}"
+        );
+        let json = render_report(&r, true);
+        assert!(
+            json.contains("\"mean_forecast\": null"),
+            "F10: the JSON carries null for an empty bin's mean:\n{json}"
+        );
+        assert!(
+            !json.contains("\"mean_forecast\": 0.0"),
+            "F10: the JSON must not carry 0.0 for an empty bin:\n{json}"
+        );
+    }
+
+    /// F12: the operator is scored on the comparison rows where it recorded a forecast, so its n
+    /// is a subset of the comparison set (not of all scored rows).
+    #[test]
+    fn f12_the_operator_is_scored_on_the_comparison_rows() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            let mut r = row(&b, "calibrated", "l0", signal, label, 0.5, i);
+            // The operator recorded a forecast on only the first 8 rows.
+            if i < 8 {
+                r.operator_raw = Some(0.6);
+            }
+            rows.push(r);
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        let op = r.operator.as_ref().expect("an operator score");
+        assert_eq!(
+            op.n, 8,
+            "F12: the operator is scored on its 8 comparison rows"
+        );
+        assert_eq!(r.controller.n, 20, "the comparison set is all 20 rows");
+    }
+
+    /// F13/B14: "interval n/a" prints once; the interval bounds go through Proxy; the JSON carries
+    /// the log-loss clip; forecasters print in name order.
+    #[test]
+    fn f13_interval_prints_once_and_json_carries_the_clip() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // One task only: the paired difference has no interval.
+        let mut rows = Vec::new();
+        for i in 0..4u64 {
+            rows.push(row(&b, "calibrated", "l0", 1.0, true, 0.5, i));
+        }
+        let ds = dataset(&b, rows.clone());
+        let r = report(&b, &ds, 7);
+        let text = render_report(&r, false);
+        // F13: 'interval n/a' prints once per paired-difference line (the interval field), not
+        // twice (interval field plus verdict). There is one overall line and one per family.
+        for line in text.lines().filter(|l| l.contains("interval n/a")) {
+            assert_eq!(
+                line.matches("interval n/a").count(),
+                1,
+                "F13: 'interval n/a' prints once on a line:\n{line}"
+            );
+        }
+        assert!(
+            text.contains("interval n/a"),
+            "F13: a single-cluster paired difference prints interval n/a:\n{text}"
+        );
+        let json = render_report(&r, true);
+        assert!(
+            json.contains("\"log_loss_clip\""),
+            "F13: the JSON carries the log-loss clip:\n{json}"
+        );
+        // Forecasters in name order: controller, controller_logged, generator, operator.
+        let mut logged = row(&b, "calibrated", "l0", 1.0, true, 0.5, 99);
+        logged.controller_logged = Some(0.7);
+        logged.operator_raw = Some(0.6);
+        let mut rows2 = rows.clone();
+        rows2.push(logged);
+        let ds2 = dataset(&b, rows2);
+        let r2 = report(&b, &ds2, 7);
+        let text2 = render_report(&r2, false);
+        let ci = text2.find("  controller n=").expect("controller");
+        let cl = text2
+            .find("  controller_logged n=")
+            .expect("controller_logged");
+        let ge = text2.find("  generator n=").expect("generator");
+        let op = text2.find("  operator n=").expect("operator");
+        assert!(
+            ci < cl && cl < ge && ge < op,
+            "F13: forecasters print in name order:\n{text2}"
         );
     }
 }
