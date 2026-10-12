@@ -475,7 +475,9 @@ fn two_sessions_open_the_forecast_lands_in_the_acting_session() {
 #[test]
 fn exec_resolves_the_session_task_and_refuses_without_one() {
     let dir = scratch("exec-session");
-    let db = dir.join("tsr.db");
+    // The store lives in `<dir>/.tsr/tsr.db`, not `<dir>/tsr.db`: a store whose directory *is* the
+    // workspace is refused with exit 2 (review (5)), which would mask the runtime check below.
+    let db = dir.join(".tsr/tsr.db");
     let session = "exec-session-id";
     let cwd = dir.display().to_string();
 

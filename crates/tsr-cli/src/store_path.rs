@@ -19,6 +19,77 @@ pub fn db_path() -> PathBuf {
     }
 }
 
+/// Resolve a store path to an absolute, symlink-resolved path, so two spellings of the same store
+/// compare equal and a symlink is followed.
+///
+/// The rule (repair item 3, review (5)):
+/// 1. a relative `db` is joined to `cwd`;
+/// 2. `.` and `..` are normalised lexically (no filesystem access);
+/// 3. the **longest existing ancestor** is canonicalised — so symlinks resolve — and the
+///    non-existent remainder is re-appended, so a store directory that does not exist yet still
+///    resolves to a stable absolute path.
+///
+/// `cwd` is expected to be absolute (the CLI passes `current_dir()`); a relative `cwd` is left as
+/// given, which only matters for a caller that never touches the filesystem.
+pub fn resolve_store_path(db: &Path, cwd: &Path) -> PathBuf {
+    let joined = if db.is_absolute() {
+        db.to_path_buf()
+    } else {
+        cwd.join(db)
+    };
+    resolve_lexical_and_canonical(&joined)
+}
+
+/// Canonicalise a workspace path the same way [`resolve_store_path`] resolves a store path, so the
+/// workspace used in the containment checks is the real (symlink-resolved) directory.
+pub fn resolve_workspace(ws: &Path) -> PathBuf {
+    resolve_lexical_and_canonical(ws)
+}
+
+/// Normalise `.`/`..` lexically, then canonicalise the longest existing ancestor and re-append the
+/// remainder. See [`resolve_store_path`] for the rule.
+fn resolve_lexical_and_canonical(p: &Path) -> PathBuf {
+    let normalised = normalise(p);
+    let mut existing: &Path = &normalised;
+    let mut remainder: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        match existing.file_name() {
+            Some(name) => {
+                remainder.push(name.to_os_string());
+                match existing.parent() {
+                    Some(parent) if !parent.as_os_str().is_empty() => existing = parent,
+                    _ => break,
+                }
+            }
+            None => break,
+        }
+    }
+    let base = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    let mut out = base;
+    for part in remainder.iter().rev() {
+        out.push(part);
+    }
+    out
+}
+
+/// Normalise `.` and `..` in `p` lexically, without touching the filesystem. A `..` at the root is
+/// dropped (the root has no parent).
+fn normalise(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            Component::Prefix(_) | Component::RootDir => out.push(comp.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(c) => out.push(c),
+        }
+    }
+    out
+}
+
 /// Open the store, creating its parent directory if needed.
 pub fn open_store() -> anyhow::Result<Store> {
     let path = db_path();
@@ -181,4 +252,78 @@ pub fn resolve_task(store: &Store, arg: &str) -> TaskId {
         }
     }
     task_for_name(arg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch directory under the target dir (never `/tmp`, which this host prunes).
+    fn scratch(name: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/store-path-unit")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[cfg(unix)]
+    fn symlink(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("symlink");
+    }
+
+    /// A relative store path is joined to the current directory.
+    #[test]
+    fn relative_store_path_is_joined_to_cwd() {
+        let cwd = scratch("rel-cwd");
+        let got = resolve_store_path(Path::new("data/tsr.db"), &cwd);
+        let want = std::fs::canonicalize(&cwd)
+            .expect("canonicalize cwd")
+            .join("data/tsr.db");
+        assert_eq!(got, want);
+    }
+
+    /// `.` and `..` are normalised lexically before the path is used.
+    #[test]
+    fn dot_and_dotdot_are_normalised() {
+        let cwd = scratch("dotdot");
+        let got = resolve_store_path(Path::new("./.tsr/../.tsr/tsr.db"), &cwd);
+        let want = std::fs::canonicalize(&cwd)
+            .expect("canonicalize cwd")
+            .join(".tsr/tsr.db");
+        assert_eq!(got, want);
+    }
+
+    /// The longest existing ancestor is canonicalised, so a symlinked directory resolves to its
+    /// target and the non-existent remainder is re-appended.
+    #[cfg(unix)]
+    #[test]
+    fn longest_existing_ancestor_is_canonicalised() {
+        let root = scratch("canon");
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).expect("real dir");
+        let link = root.join("link");
+        symlink(&real, &link);
+        // `link` exists and points at `real`; `sub/tsr.db` does not exist yet.
+        let got = resolve_store_path(&link.join("sub/tsr.db"), &root);
+        let real_canon = std::fs::canonicalize(&real).expect("canonicalize real");
+        assert_eq!(got, real_canon.join("sub/tsr.db"));
+    }
+
+    /// A workspace path is canonicalised the same way, so a symlinked workspace compares equal to
+    /// its target.
+    #[cfg(unix)]
+    #[test]
+    fn workspace_is_canonicalised() {
+        let root = scratch("ws-canon");
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).expect("real dir");
+        let link = root.join("link");
+        symlink(&real, &link);
+        assert_eq!(
+            resolve_workspace(&link),
+            std::fs::canonicalize(&real).expect("canonicalize real")
+        );
+    }
 }

@@ -156,7 +156,8 @@ pub fn container_argv_with_store(
     argv: &[String],
     store: Option<&Path>,
 ) -> Vec<String> {
-    let ws = workspace.display().to_string();
+    let ws_path = crate::store_path::resolve_workspace(workspace);
+    let ws = ws_path.display().to_string();
     let mut v: Vec<String> = vec![
         rt.binary().to_string(),
         "run".to_string(),
@@ -184,7 +185,7 @@ pub fn container_argv_with_store(
     // The store's directory, read-only, after the workspace mount and before the image (docker
     // options must precede the image). Only when it lies inside the workspace: a store outside it
     // is not reachable from the container anyway, and mounting it would widen the sandbox.
-    if let Some(dir) = store_dir_inside_workspace(workspace, store) {
+    if let Some(dir) = store_dir_inside_workspace(&ws_path, store) {
         let d = dir.display().to_string();
         v.push("--mount".to_string());
         v.push(format!("type=bind,src={d},dst={d},readonly"));
@@ -200,35 +201,27 @@ pub fn container_argv_with_store(
 /// parent. A store whose directory *is* the workspace is refused by the caller (exit 2) — mounting
 /// the workspace read-only over itself would contradict the writable workspace mount.
 pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Option<PathBuf> {
+    let ws = crate::store_path::resolve_workspace(workspace);
     let db = match store {
         Some(p) => p.to_path_buf(),
         None => match std::env::var_os("TSR_DB") {
             Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => workspace.join(crate::store_path::DEFAULT_DB),
+            _ => ws.join(crate::store_path::DEFAULT_DB),
         },
     };
-    // A relative `TSR_DB` (the README's documented `.tsr/tsr.db` form) is resolved against the
-    // workspace, which is absolute (`main.rs` uses `current_dir()`): comparing the raw path against
-    // an absolute workspace would never match and would silently drop the read-only mount.
-    let db = resolve_against(&db, workspace);
+    // Resolve the store path once (relative → workspace, `.`/`..` normalised, longest existing
+    // ancestor canonicalised so symlinks resolve) before comparing it with the workspace. Comparing
+    // the raw path would drop the read-only mount for every relative or symlinked spelling
+    // (review (5)).
+    let db = crate::store_path::resolve_store_path(&db, &ws);
     let dir = db.parent()?.to_path_buf();
-    if dir == workspace {
+    if dir == ws {
         return None;
     }
-    if dir.starts_with(workspace) {
+    if dir.starts_with(&ws) {
         Some(dir)
     } else {
         None
-    }
-}
-
-/// Resolve `p` against `base` when it is relative, leaving an absolute `p` untouched. Purely
-/// lexical (no filesystem access), so it works for a store directory that does not exist yet.
-fn resolve_against(p: &Path, base: &Path) -> PathBuf {
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        base.join(p)
     }
 }
 /// What a [`Runner`] observed: the process exit code and the combined log bytes.
@@ -407,14 +400,15 @@ pub fn run(
 /// Whether the store file's parent is the workspace itself (`TSR_DB=<workspace>/tsr.db`), which
 /// cannot be mounted read-only over the writable workspace mount.
 pub fn store_dir_is_workspace(workspace: &Path) -> bool {
+    let ws = crate::store_path::resolve_workspace(workspace);
     let db = match std::env::var_os("TSR_DB") {
         Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => workspace.join(crate::store_path::DEFAULT_DB),
+        _ => ws.join(crate::store_path::DEFAULT_DB),
     };
-    // Resolve a relative `TSR_DB` against the absolute workspace before comparing (see
-    // `store_dir_inside_workspace`): otherwise `TSR_DB=tsr.db` would not be refused.
-    let db = resolve_against(&db, workspace);
-    db.parent().map(|d| d == workspace).unwrap_or(false)
+    // Resolve the store path the same way `store_dir_inside_workspace` does (review (5)): otherwise
+    // `TSR_DB=tsr.db` would not be refused.
+    let db = crate::store_path::resolve_store_path(&db, &ws);
+    db.parent().map(|d| d == ws).unwrap_or(false)
 }
 
 /// [`run`] with the container invocation injected. The harness drives this with a [`FakeRunner`] to

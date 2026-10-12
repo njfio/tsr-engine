@@ -112,7 +112,7 @@ fn run_exec(
 fn exec_with_a_docker_cli_but_no_daemon_exits_3_and_records_nothing() {
     let dir = scratch("no-daemon");
     let bin = fake_docker(&dir, true, false, 0);
-    let db = dir.join("tsr.db");
+    let db = dir.join(".tsr/tsr.db");
     let session = "m0-no-daemon";
 
     let out = run_exec(&dir, &bin, &db, session, &["cargo", "test"]);
@@ -139,7 +139,7 @@ fn exec_with_a_docker_cli_but_no_daemon_exits_3_and_records_nothing() {
 fn exec_records_unresolved_when_the_container_does_not_start() {
     let dir = scratch("run-125");
     let bin = fake_docker(&dir, true, true, 125);
-    let db = dir.join("tsr.db");
+    let db = dir.join(".tsr/tsr.db");
     let session = "m0-run-125";
 
     let out = run_exec(&dir, &bin, &db, session, &["cargo", "test"]);
@@ -181,7 +181,7 @@ fn exec_records_unresolved_when_the_container_does_not_start() {
 fn exec_records_executed_with_the_commands_own_exit_code() {
     let dir = scratch("run-1");
     let bin = fake_docker(&dir, true, true, 1);
-    let db = dir.join("tsr.db");
+    let db = dir.join(".tsr/tsr.db");
     let session = "m0-run-1";
 
     let out = run_exec(&dir, &bin, &db, session, &["cargo", "test"]);
@@ -382,4 +382,120 @@ fn container_argv_does_not_mount_a_store_outside_the_workspace() {
         !v.iter().any(|a| a.contains("/elsewhere")),
         "a store outside the workspace is not mounted: {v:?}"
     );
+}
+
+/// The read-only store mount is asserted for every spelling in review (5)'s table, against a real
+/// scratch workspace so the resolution (relative → cwd, `.`/`..` normalised, longest existing
+/// ancestor canonicalised) is exercised end to end.
+#[cfg(unix)]
+mod store_path_spellings {
+    use super::*;
+
+    fn symlink(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("symlink");
+    }
+
+    /// The read-only mount string for a directory.
+    fn ro_mount(dir: &Path) -> String {
+        let d = dir.display();
+        format!("type=bind,src={d},dst={d},readonly")
+    }
+
+    /// The argv for `TSR_DB = db` in workspace `ws`, with the store path injected. `ws` is
+    /// canonicalised first, matching what `container_argv_with_store` does internally.
+    fn argv_for(ws: &Path, db: &Path) -> Vec<String> {
+        let ws = std::fs::canonicalize(ws).expect("canonicalize ws");
+        exec::container_argv_with_store(Runtime::Docker, &ws, &["echo".to_string()], Some(db))
+    }
+
+    /// A relative `TSR_DB` (`data/tsr.db`) mounts `<ws>/data` read-only.
+    #[test]
+    fn relative_store_path_mounts_its_directory_read_only() {
+        let ws = scratch("spell-relative");
+        let v = argv_for(&ws, Path::new("data/tsr.db"));
+        let want = ro_mount(
+            &std::fs::canonicalize(&ws)
+                .expect("canonicalize ws")
+                .join("data"),
+        );
+        assert!(
+            v.contains(&want),
+            "a relative TSR_DB mounts its parent read-only: {v:?}"
+        );
+    }
+
+    /// A dot-relative `TSR_DB` (`.tsr/tsr.db` and `./.tsr/tsr.db`) mounts `<ws>/.tsr` read-only.
+    #[test]
+    fn dot_relative_store_path_mounts_its_directory_read_only() {
+        let ws = scratch("spell-dot-relative");
+        let want = ro_mount(
+            &std::fs::canonicalize(&ws)
+                .expect("canonicalize ws")
+                .join(".tsr"),
+        );
+        for db in [".tsr/tsr.db", "./.tsr/tsr.db"] {
+            let v = argv_for(&ws, Path::new(db));
+            assert!(
+                v.contains(&want),
+                "TSR_DB={db} mounts <ws>/.tsr read-only: {v:?}"
+            );
+        }
+    }
+
+    /// A bare file name (`tsr.db`) resolves to the workspace itself: refused with exit 2.
+    #[test]
+    fn bare_file_name_store_path_is_refused() {
+        let ws = scratch("spell-bare");
+        let bin = fake_docker(&scratch("spell-bare-bin"), true, true, 1);
+        let out = std::process::Command::new(tsr_bin())
+            .args(["exec", "--", "echo", "hi"])
+            .current_dir(&ws)
+            .env("PATH", path_with(&bin))
+            .env("TSR_DB", "tsr.db")
+            .env("TSR_SESSION", "s")
+            .output()
+            .expect("run tsr exec");
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "a bare TSR_DB equal to the workspace is refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A path outside the workspace that is a symlink *into* it resolves to the in-workspace
+    /// directory, which is mounted read-only.
+    #[test]
+    fn symlink_into_the_workspace_is_mounted_read_only() {
+        let root = scratch("spell-symlink-in");
+        let ws = root.join("ws");
+        let data = ws.join("data");
+        std::fs::create_dir_all(&data).expect("ws/data");
+        let outside = root.join("outside-link");
+        symlink(&data, &outside);
+        let v = argv_for(&ws, &outside.join("tsr.db"));
+        let want = ro_mount(&std::fs::canonicalize(&data).expect("canonicalize data"));
+        assert!(
+            v.contains(&want),
+            "a symlink into the workspace mounts the resolved directory read-only: {v:?}"
+        );
+    }
+
+    /// A path inside the workspace that is a symlink *out* of it resolves outside, so it is not
+    /// mounted.
+    #[test]
+    fn symlink_out_of_the_workspace_is_not_mounted() {
+        let root = scratch("spell-symlink-out");
+        let ws = root.join("ws");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&ws).expect("ws");
+        std::fs::create_dir_all(&outside).expect("outside");
+        let link = ws.join("link");
+        symlink(&outside, &link);
+        let v = argv_for(&ws, &link.join("tsr.db"));
+        assert!(
+            !v.iter().any(|a| a.contains("readonly")),
+            "a symlink out of the workspace is not mounted: {v:?}"
+        );
+    }
 }
