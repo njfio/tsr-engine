@@ -4,8 +4,8 @@
 //! One row per commitment of a gated action — chosen actions only, so an unchosen `Proposed`
 //! candidate is never a row. Each row carries the task, the commitment's event id and its 0-based
 //! index in the task's log, the action kind, and every forecast on the common event paired to it by
-//! `tsr_cli::reconstruct`'s rule: the forecast names the committed candidate **and** its
-//! `state_version` equals the commitment's index.
+//! `tsr_cli::reconstruct`'s rule: the forecast names the committed candidate **and** no event other
+//! than a `Forecast` lies between it and the commitment in the task's log (F5).
 //!
 //! The view is pure: the same events yield the same rows, and events appended after a commitment
 //! change none of its features. Nothing here reads `Committed.decision.utility` — main's hook writes
@@ -78,10 +78,11 @@ impl DecisionRow {
 /// the whole session log: a session that holds several tasks would otherwise shift every task after
 /// the first. The commitment's `index` is its 0-based position in its task's log.
 ///
-/// A forecast is paired when it is on the common event, names the committed candidate, carries
-/// `state_version` equal to that task-local index, and was recorded **before** the commitment in
-/// the task's log. A forecast appended after the commitment — after the execute or the close —
-/// never pairs (§B9's post-execution forecast edit).
+/// A forecast is paired when it is on the common event, names the committed candidate, and no event
+/// other than a `Forecast` lies between it and the commitment in the task's log (F5: forecasts may
+/// follow one another, so a generator forecast followed by an operator forecast both pair). A
+/// forecast appended after the commitment — after the execute or the close — never pairs (§B9's
+/// post-execution forecast edit).
 pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
     use std::collections::HashMap;
 
@@ -99,11 +100,17 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
     let mut event_index: HashMap<EventId, u64> = HashMap::new();
     // The running count of events seen so far for each task.
     let mut task_len: HashMap<TaskId, u64> = HashMap::new();
+    // F5: per task, whether the event at each 0-based index is a `Forecast`. The pairing rule is
+    // "no event other than a Forecast lies between the forecast and the commitment", so the paired
+    // forecasts are the contiguous run of Forecasts immediately before the commitment.
+    let mut is_forecast: HashMap<TaskId, Vec<bool>> = HashMap::new();
 
     for (_, e) in events {
         let local = task_len.entry(e.task).or_insert(0);
         event_index.insert(e.id, *local);
         *local += 1;
+        let flags = is_forecast.entry(e.task).or_default();
+        flags.push(matches!(e.kind, EventKind::Forecast { .. }));
         match &e.kind {
             EventKind::Proposed { candidate } => {
                 kinds.insert(candidate.id, candidate.kind);
@@ -147,12 +154,33 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
             continue;
         }
         let index = event_index.get(&e.id).copied().unwrap_or(0);
+        // F5: the paired forecasts are the contiguous run of Forecasts immediately before the
+        // commitment — a forecast pairs when no event other than a Forecast lies between it and the
+        // commitment (forecasts may follow one another). Walk back from the commitment while the
+        // preceding event is a Forecast; those indices are the paired positions.
+        let flags = is_forecast.get(&e.task);
+        let mut paired_positions: Vec<u64> = Vec::new();
+        let mut pos = index;
+        while pos > 0 {
+            let prev = pos - 1;
+            if flags
+                .and_then(|f| f.get(prev as usize))
+                .copied()
+                .unwrap_or(false)
+            {
+                paired_positions.push(prev);
+                pos = prev;
+            } else {
+                break;
+            }
+        }
         let paired: Vec<Forecast> = forecasts
             .get(&(e.task, *candidate))
             .map(|fs| {
                 fs.iter()
-                    // The forecast must precede the commitment in the task's log.
-                    .filter(|(at, f)| *at < index && f.state_version == index)
+                    // The forecast must precede the commitment and lie in the contiguous run of
+                    // Forecasts immediately before it.
+                    .filter(|(at, _)| paired_positions.contains(at))
                     .map(|(_, f)| f.clone())
                     .collect()
             })
@@ -557,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn forecast_at_a_different_state_version_is_not_paired() {
+    fn a_forecast_separated_by_a_non_forecast_event_is_not_paired() {
         let t = task();
         let c = candidate(ActionKind::ProposePatch, b"p");
         let events = vec![
@@ -572,16 +600,33 @@ mod tests {
                     b"prop",
                 ),
             ),
-            // commitment index will be 2; this forecast is at version 1, so it is not paired.
+            // The forecast is at index 2; the commitment is at index 4. A non-Forecast event (an
+            // approval) sits between them, so the forecast does not pair (F5: only Forecasts may
+            // lie between a forecast and its commitment).
             (
                 3,
-                ev(&t, forecast(c.id, 0.9, 1, Forecaster::Generator), b"fc"),
+                ev(&t, forecast(c.id, 0.9, 3, Forecaster::Generator), b"fc"),
             ),
-            (4, ev(&t, committed(c.id, 0.5), b"commit")),
+            (
+                4,
+                ev(
+                    &t,
+                    EventKind::Approved {
+                        candidate: c.id,
+                        scope: "task".into(),
+                        expires_at: "2024-01-02T00:00:00Z".into(),
+                    },
+                    b"approve",
+                ),
+            ),
+            (5, ev(&t, committed(c.id, 0.5), b"commit")),
         ];
         let rows = decision_rows(&events);
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].forecasts.is_empty());
+        assert!(
+            rows[0].forecasts.is_empty(),
+            "a non-Forecast event between the forecast and the commitment breaks pairing"
+        );
     }
 
     // ---- A1/A3/A11: the index is task-local, and a forecast must precede the commitment ----

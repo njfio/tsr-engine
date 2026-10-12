@@ -466,3 +466,219 @@ fn b7_train_apply_prints_raw_and_calibrated_p_and_support() {
         "B9: apply on held_out logs each read to holdout-access.jsonl"
     );
 }
+
+/// F2/A2: under `--by repo` the unit is the lineage merged with every lineage a clone group
+/// touches. Before the fix every clone group spanned 2–6 lineages, so the union-find merged all 12
+/// lineages into one unit and every seed split 380/0/0 — `fit` then published an identity
+/// calibrator. With every clone group inside one lineage the split has three non-empty sides for
+/// every seed, and `fit` accepts each.
+#[test]
+fn by_repo_seeds_1_to_8_give_three_non_empty_sides() {
+    use std::process::Command;
+
+    let tsr = PathBuf::from(env!("CARGO_BIN_EXE_tsr"));
+    let fx = fixtures_dir();
+
+    for seed in 1..=8u64 {
+        let dir = temp_dir(&format!("repo-seed-{seed}"));
+        let data = dir.join("data");
+        let bundle = dir.join("bundle");
+
+        let dataset = Command::new(&tsr)
+            .args([
+                "train",
+                "dataset",
+                "--events",
+                fx.join("events.jsonl").to_str().expect("events"),
+                "--tasks",
+                fx.join("tasks.jsonl").to_str().expect("tasks"),
+                "--labels",
+                fx.join("labels.jsonl").to_str().expect("labels"),
+                "--by",
+                "repo",
+                "--calibrate",
+                "0.2",
+                "--holdout",
+                "0.2",
+                "--seed",
+                &seed.to_string(),
+                "--out",
+                data.to_str().expect("data"),
+            ])
+            .output()
+            .expect("run tsr train dataset");
+        assert!(
+            dataset.status.success(),
+            "F2/A2: tsr train dataset --by repo --seed {seed} succeeds: {}",
+            String::from_utf8_lossy(&dataset.stderr)
+        );
+
+        let split: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(data.join("split.json")).expect("split.json is readable"),
+        )
+        .expect("split.json is JSON");
+        let mut counts = std::collections::BTreeMap::new();
+        for side in split["assignments"]
+            .as_object()
+            .expect("assignments is an object")
+            .values()
+        {
+            *counts
+                .entry(side.as_str().expect("a side is a string").to_string())
+                .or_insert(0usize) += 1;
+        }
+        for side in ["fit", "calibrate", "held_out"] {
+            assert!(
+                counts.get(side).copied().unwrap_or(0) > 0,
+                "F2/A2: --by repo --seed {seed} has a non-empty {side} side, got {counts:?}"
+            );
+        }
+
+        let fit = Command::new(&tsr)
+            .args([
+                "train",
+                "fit",
+                data.to_str().expect("data"),
+                "--out",
+                bundle.to_str().expect("bundle"),
+            ])
+            .output()
+            .expect("run tsr train fit");
+        assert!(
+            fit.status.success(),
+            "F2/A2: tsr train fit accepts the --by repo --seed {seed} split: {}",
+            String::from_utf8_lossy(&fit.stderr)
+        );
+    }
+}
+
+/// F5: on a real log a generator forecast followed by an operator forecast must both pair with the
+/// commitment. The hook stamps each forecast with the task's event count at that moment, so the
+/// generator's version is one below the operator's; the old pairing required `state_version` to
+/// equal the commitment's index, so only the operator paired and `generator_raw` was `None`. The
+/// pairing rule is now "no event other than a Forecast lies between the forecast and the
+/// commitment", so both pair.
+#[test]
+fn two_real_forecasts_pair_both_with_the_commitment() {
+    use std::process::Command;
+
+    let dir = temp_dir("two-forecasts");
+    let db = dir.join("tsr.db");
+    let out = dir.join("dataset");
+    let tsr = PathBuf::from(env!("CARGO_BIN_EXE_tsr"));
+    let session = "m4-two-forecasts";
+    let cmd = "cargo test --offline -p parser";
+
+    let hook = |stage: &str, payload: serde_json::Value| {
+        let mut child = Command::new(&tsr)
+            .args(["hook", "--stage", stage])
+            .env("TSR_DB", &db)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn tsr hook");
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(payload.to_string().as_bytes())
+            .expect("write payload");
+        let out = child.wait_with_output().expect("tsr hook runs");
+        assert!(
+            out.status.success(),
+            "tsr hook {stage} succeeds: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+
+    hook(
+        "SessionStart",
+        serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "SessionStart",
+            "cwd": "/workspace",
+        }),
+    );
+
+    for source in ["generator", "operator"] {
+        let forecast = Command::new(&tsr)
+            .args([
+                "forecast",
+                "--kind",
+                "run_approved_test",
+                "--args",
+                cmd,
+                "--p",
+                "0.7",
+                "--source",
+                source,
+                "--task",
+                session,
+            ])
+            .env("TSR_DB", &db)
+            .output()
+            .expect("run tsr forecast");
+        assert!(
+            forecast.status.success(),
+            "F5: tsr forecast --source {source} succeeds: {}",
+            String::from_utf8_lossy(&forecast.stderr)
+        );
+    }
+
+    hook(
+        "PreToolUse",
+        serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": cmd },
+            "cwd": "/workspace",
+        }),
+    );
+
+    let dataset = Command::new(&tsr)
+        .args([
+            "train",
+            "dataset",
+            "--store",
+            db.to_str().expect("db path"),
+            "--out",
+            out.to_str().expect("out path"),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            "7",
+        ])
+        .output()
+        .expect("run tsr train dataset");
+    assert!(
+        dataset.status.success(),
+        "F5: tsr train dataset succeeds: {}",
+        String::from_utf8_lossy(&dataset.stderr)
+    );
+
+    let rows: Vec<serde_json::Value> = std::fs::read_to_string(out.join("rows.jsonl"))
+        .expect("rows.jsonl is readable")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("a row is JSON"))
+        .collect();
+    assert_eq!(rows.len(), 1, "one row for the one commitment");
+    let row = &rows[0];
+    assert!(
+        row["generator_raw"].is_number(),
+        "F5: the generator forecast pairs with the commitment, got generator_raw={}",
+        row["generator_raw"]
+    );
+    assert!(
+        row["operator_raw"].is_number(),
+        "F5: the operator forecast pairs with the commitment, got operator_raw={}",
+        row["operator_raw"]
+    );
+}

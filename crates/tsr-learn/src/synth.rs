@@ -279,7 +279,6 @@ struct TaskPlan {
 /// later than every fit/calibrate task.
 fn plan_task(rng: &mut SplitMix64, family: Family, index: usize, task_index: usize) -> TaskPlan {
     let name = format!("m4-{}-{:03}", family.name, index);
-    let lineage = format!("lineage-{:02}", rng.index(LINEAGES));
     // A clone group on roughly a third of tasks, as a contiguous block of `CLONE_BLOCK` task
     // indices, so the split's clone-group rule is exercised without interleaving groups in time.
     let block = task_index / CLONE_BLOCK;
@@ -287,6 +286,15 @@ fn plan_task(rng: &mut SplitMix64, family: Family, index: usize, task_index: usi
         Some(format!("clone-{:03}", block))
     } else {
         None
+    };
+    // F2/A2: a clone group lives inside **one** lineage. Every member of a clone block shares the
+    // block's lineage, so no clone group spans two lineages. Under `--by repo` the unit is the
+    // lineage merged with every lineage a clone group touches (dataset.rs `make_split`); a group
+    // that spans lineages would merge them all into one unit and collapse the split to 380/0/0.
+    // A task outside a clone block draws its lineage from the stream, as before.
+    let lineage = match &clone_group {
+        Some(_) => format!("lineage-{:02}", block % LINEAGES),
+        None => format!("lineage-{:02}", rng.index(LINEAGES)),
     };
     // A tool-time ceiling on roughly half the tasks, so the budget-fraction feature has both a
     // present and a missing indicator.
@@ -510,19 +518,21 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                 parents = vec![id];
                 step += 1;
 
-                // The forecast, at the version the commitment will occupy. The commitment is
-                // pushed after the generator forecast (and the operator forecast, when present),
-                // so its 0-based index in the **task's own log** is `step` plus those events.
-                // Main's hook records a forecast's `state_version` as the number of events in the
-                // task's own log (`hook.rs` `event_count`), and `decision_rows` pairs on that
-                // task-local index (A1/A3/A11), so the version is task-local, not session-global.
-                let commit_version = step as u64 + 1 + u64::from(plan.operator_forecasts);
+                // F5: the forecast's `state_version` is stamped exactly as main's hook stamps it —
+                // the number of events in the task's own log *after* the forecast is appended, i.e.
+                // the index the next event will occupy (`hook.rs` `event_count` + 1). The generator
+                // forecast is pushed first, so its version is `step + 1`; the operator forecast, when
+                // present, is pushed next and its version is one higher. The commitment follows, so
+                // the **last** forecast before it carries the commitment's index — which is what the
+                // M0 invariant `every_gated_action_has_prior_forecast_at_same_state_version` checks.
+                // `decision_rows` pairs a forecast by the events between it and the commitment, not
+                // by an exact version, so both forecasts pair (F5).
                 let f = Forecast::new(
                     crate::decision_event_id(),
                     Horizon::TaskClose,
                     Forecaster::Generator,
                     gen_prob(&plan.family, insp),
-                    commit_version,
+                    step as u64 + 1,
                 );
                 let id = push(
                     &mut events,
@@ -545,7 +555,7 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
                         Horizon::TaskClose,
                         Forecaster::Operator,
                         op_prob(&plan.family, insp),
-                        commit_version,
+                        step as u64 + 1,
                     );
                     let id = push(
                         &mut events,
