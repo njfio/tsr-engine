@@ -154,7 +154,11 @@ fn d10_intuition_executed_resolves_true() {
         "D10: an Executed of the Intuition candidate sets intuition_executed"
     );
 
-    let f = named_forecast(1, tsr_forecast::resolve::event_id("intuition_executed").unwrap(), 0.5);
+    let f = named_forecast(
+        1,
+        tsr_forecast::resolve::event_id("intuition_executed").unwrap(),
+        0.5,
+    );
     let r = resolve(&f, &facts);
     assert_eq!(
         r.resolution,
@@ -245,10 +249,7 @@ fn r3_hook_stop_done_resolves_forecast() {
         .map(|(_, e)| e)
         .collect();
     let mut facts = TaskFacts::from_events(&events);
-    assert!(
-        facts.closed,
-        "R3: a hook Stop{{done}} closes the task"
-    );
+    assert!(facts.closed, "R3: a hook Stop{{done}} closes the task");
     assert!(
         facts.criteria_met,
         "R3: a hook Stop{{done}} means the criteria were met"

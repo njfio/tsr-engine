@@ -108,7 +108,10 @@ fn r5_missing_store_exits_2_naming_the_path() {
     let t = task(2);
 
     let (code, _stdout, stderr) = run_tsr_in(&db, &cwd, &["reflect", &t.to_string()]);
-    assert_eq!(code, 2, "a missing store is refused with exit 2; stderr={stderr}");
+    assert_eq!(
+        code, 2,
+        "a missing store is refused with exit 2; stderr={stderr}"
+    );
     assert!(
         stderr.contains(&db.display().to_string()),
         "the error names the missing path; stderr={stderr}"
