@@ -109,6 +109,11 @@ pub struct Dataset {
     /// the report, so a truncated `--tasks` is visible rather than silent.
     #[serde(default)]
     pub unindexed_tasks: usize,
+    /// F8: the number of distinct tasks that have an index row but no gated commitment, so they
+    /// produce no row and are dropped from the split. Counted in `dataset`'s stdout,
+    /// `data-manifest.json` and the report, exactly as `unindexed_tasks` is.
+    #[serde(default)]
+    pub uncommitted_tasks: usize,
 }
 
 /// The split fractions: the calibrate and held-out shares; the fit side takes the remainder.
@@ -448,6 +453,13 @@ pub fn build_dataset(
     // otherwise `fit` refuses the tool's own output ("split.json assigns task X, which has no
     // rows"). Count such tasks and continue.
     let committed: BTreeSet<TaskId> = decision_rows(events).into_iter().map(|r| r.task).collect();
+    // F8: an index row for a task with no gated commitment produces no row and is dropped from the
+    // split. Count those tasks so the drop is visible rather than silent.
+    let uncommitted: BTreeSet<TaskId> = index
+        .iter()
+        .map(|r| r.task)
+        .filter(|t| !committed.contains(t))
+        .collect();
     let split_index: Vec<TaskIndexRow> = index
         .iter()
         .filter(|r| committed.contains(&r.task))
@@ -557,6 +569,7 @@ pub fn build_dataset(
         training_root,
         source_root,
         unindexed_tasks: unindexed.len(),
+        uncommitted_tasks: uncommitted.len(),
     })
 }
 
@@ -617,6 +630,7 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
         "held_out": ds.rows.iter().filter(|r| r.side == Side::HeldOut).count(),
         "resolved": ds.rows.iter().filter(|r| r.label.is_some()).count(),
         "unindexed_tasks": ds.unindexed_tasks,
+        "uncommitted_tasks": ds.uncommitted_tasks,
     });
     std::fs::write(
         dir.join("data-manifest.json"),
@@ -1009,6 +1023,7 @@ mod tests {
                 training_root: Hash::of(&[b"t"]),
                 source_root: Hash::of(&[b"s"]),
                 unindexed_tasks: 0,
+                uncommitted_tasks: 0,
             };
             let report = crate::probes::probe_boundary(&ds, &index);
             assert!(

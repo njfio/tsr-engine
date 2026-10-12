@@ -679,14 +679,14 @@ fn the_controller_beats_the_generator_on_held_out() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Parse `mean=brier=<m> [interval_lo=<lo>, interval_hi=<hi>] <verdict>` for one family key.
+    // Parse `mean_brier=<m> [interval_lo=<lo>, interval_hi=<hi>] <verdict>` for one family key.
     let parse = |key: &str| -> (f64, f64, f64, String) {
         let line = paired
             .lines()
             .find(|l| l.contains(key))
             .unwrap_or_else(|| panic!("no `{key}` line in:\n{paired}"));
         let mean: f64 = line
-            .split("mean=brier=")
+            .split("mean_brier=")
             .nth(1)
             .and_then(|s| s.split_whitespace().next())
             .and_then(|s| s.parse().ok())
@@ -714,7 +714,7 @@ fn the_controller_beats_the_generator_on_held_out() {
     };
 
     // Overall: the controller is better on average (mean < 0) but the interval spans zero.
-    let (mean, lo, hi, verdict) = parse("all tasks=");
+    let (mean, lo, hi, verdict) = parse("all n=");
     assert!(
         mean < 0.0,
         "the controller is better on average overall, got mean={mean}"
@@ -726,7 +726,7 @@ fn the_controller_beats_the_generator_on_held_out() {
     assert_eq!(verdict, "INCONCLUSIVE", "overall verdict");
 
     // The overconfident family: same shape — better on average, not conclusive.
-    let (mean, lo, hi, verdict) = parse("overconfident tasks=");
+    let (mean, lo, hi, verdict) = parse("overconfident n=");
     assert!(
         mean < 0.0,
         "the controller is better on average for the overconfident family, got mean={mean}"
@@ -738,7 +738,7 @@ fn the_controller_beats_the_generator_on_held_out() {
     assert_eq!(verdict, "INCONCLUSIVE", "overconfident verdict");
 
     // The calibrated family is conclusive and positive: the controller is worse there.
-    let (mean, lo, hi, verdict) = parse("calibrated tasks=");
+    let (mean, lo, hi, verdict) = parse("calibrated n=");
     assert!(
         mean > 0.0 && lo > 0.0,
         "the calibrated family's interval is wholly above zero, got mean={mean} [{lo}, {hi}]"
@@ -1033,6 +1033,388 @@ fn f9_fit_refuses_an_empty_events_log() {
     );
 }
 
+/// F9/B3: a `tasks.jsonl` holding only a newline has no parseable record. `fit` must exit 2 naming
+/// the file and the line, not exit 0 with the acceptance id (the old guard was `metadata.len()==0`,
+/// so a one-byte file slipped through and probe (a) skipped every row for want of an index row).
+#[test]
+fn f9_fit_refuses_a_newline_only_tasks_index() {
+    let dir = temp_dir("f9-tasks-newline");
+    let ds = build_dataset(&dir, "7");
+    std::fs::write(ds.join("tasks.jsonl"), "\n").unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a newline-only tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line 1"),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: a `events.jsonl` holding only a newline has no parseable record. `fit` must exit 2 naming
+/// the file and the line, not panic (exit 101) at probes.rs:111.
+#[test]
+fn f9_fit_refuses_a_newline_only_events_log() {
+    let dir = temp_dir("f9-events-newline");
+    let ds = build_dataset(&dir, "7");
+    std::fs::write(ds.join("events.jsonl"), "\n").unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a newline-only events.jsonl (never a panic):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line 1"),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: a truncated `events.jsonl` (a line that does not parse) must make `fit` exit 2 naming the
+/// file and the line, never exit 1 for bad input.
+#[test]
+fn f9_fit_refuses_a_truncated_events_log_naming_the_line() {
+    let dir = temp_dir("f9-events-trunc");
+    let ds = build_dataset(&dir, "7");
+    let text = std::fs::read_to_string(ds.join("events.jsonl")).unwrap();
+    let truncated: String = text.chars().take(text.len() / 2).collect();
+    std::fs::write(ds.join("events.jsonl"), truncated).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a truncated events.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line "),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on an empty `tasks.jsonl` must exit 2, not exit 0 with 0 rows.
+#[test]
+fn f9_dataset_refuses_an_empty_tasks_index() {
+    let dir = temp_dir("f9-dataset-tasks");
+    let (ev, _tk, lb) = regenerate(&dir);
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let empty = bad.join("tasks.jsonl");
+    std::fs::write(&empty, "").unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        empty.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses an empty tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on a newline-only `tasks.jsonl` must exit 2 naming the file and the line.
+#[test]
+fn f9_dataset_refuses_a_newline_only_tasks_index() {
+    let dir = temp_dir("f9-dataset-tasks-nl");
+    let (ev, _tk, lb) = regenerate(&dir);
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let nl = bad.join("tasks.jsonl");
+    std::fs::write(&nl, "\n").unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        nl.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a newline-only tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line 1"),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on a newline-only `events.jsonl` must exit 2 naming the file and the line.
+#[test]
+fn f9_dataset_refuses_a_newline_only_events_log() {
+    let dir = temp_dir("f9-dataset-events-nl");
+    let (_ev, tk, lb) = regenerate(&dir);
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let nl = bad.join("events.jsonl");
+    std::fs::write(&nl, "\n").unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        nl.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a newline-only events.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line 1"),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on a truncated `events.jsonl` (a line that does not parse) must exit 2 naming
+/// the file and the line, never exit 1 for bad input.
+#[test]
+fn f9_dataset_refuses_a_truncated_events_log_naming_the_line() {
+    let dir = temp_dir("f9-dataset-events-trunc");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&ev).unwrap();
+    let truncated: String = text.chars().take(text.len() / 2).collect();
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let trunc = bad.join("events.jsonl");
+    std::fs::write(&trunc, truncated).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        trunc.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a truncated events.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line "),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on a truncated `tasks.jsonl` (a line that does not parse) must exit 2 naming
+/// the file and the line, never exit 1 for bad input.
+#[test]
+fn f9_dataset_refuses_a_truncated_tasks_index_naming_the_line() {
+    let dir = temp_dir("f9-dataset-tasks-trunc");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&tk).unwrap();
+    let truncated: String = text.chars().take(text.len() / 2).collect();
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let trunc = bad.join("tasks.jsonl");
+    std::fs::write(&trunc, truncated).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        trunc.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a truncated tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line "),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `fit` on a truncated `tasks.jsonl` must exit 2 naming the file and the line.
+#[test]
+fn f9_fit_refuses_a_truncated_tasks_index_naming_the_line() {
+    let dir = temp_dir("f9-fit-tasks-trunc");
+    let ds = build_dataset(&dir, "7");
+    let text = std::fs::read_to_string(ds.join("tasks.jsonl")).unwrap();
+    let truncated: String = text.chars().take(text.len() / 2).collect();
+    std::fs::write(ds.join("tasks.jsonl"), truncated).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a truncated tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+    assert!(
+        err.contains("line "),
+        "F9/B3: the refusal names the line: {err}"
+    );
+}
+
+/// F9/B3: `dataset` on an empty `events.jsonl` must exit 2, not exit 0 with 0 rows.
+#[test]
+fn f9_dataset_refuses_an_empty_events_log() {
+    let dir = temp_dir("f9-dataset-events");
+    let (_ev, tk, lb) = regenerate(&dir);
+    let bad = dir.join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    let empty = bad.join("events.jsonl");
+    std::fs::write(&empty, "").unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        empty.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses an empty events.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+}
+
 /// R6: `--tasks` is required by the brief; `dataset` without it must exit 2, not silently make
 /// every task its own lineage with family `unknown`.
 #[test]
@@ -1199,6 +1581,93 @@ fn f8_fit_accepts_a_dataset_whose_index_names_a_task_with_no_commitment() {
     assert_eq!(
         code, 0,
         "F8: fit accepts dataset's own output when the index names a task with no gated commitment:\n{out}\n{err}"
+    );
+}
+
+/// F8: an index row for a task with no gated commitment is accepted and silently dropped. The
+/// count of such tasks must appear in `dataset`'s stdout, in `data-manifest.json` and in the
+/// report, exactly as `unindexed_tasks` already is.
+#[test]
+fn f8_uncommitted_tasks_are_counted() {
+    let dir = temp_dir("f8-uncommitted");
+    let (ev, tk, lb) = regenerate(&dir);
+    // Append two index rows for tasks that appear in no event: no gated commitment, no rows.
+    let mut text = std::fs::read_to_string(&tk).unwrap();
+    for tag in ["ff", "fe"] {
+        let extra = serde_json::json!({
+            "task": format!("00000000000000000000000000000000000000000000000000000000000000{tag}"),
+            "family": "calibrated",
+            "lineage": format!("lineage-{tag}"),
+            "timestamp": "2026-01-01T00:00:00Z",
+        });
+        text.push_str(&serde_json::to_string(&extra).unwrap());
+        text.push('\n');
+    }
+    let tk2 = dir.join("tasks-extra.jsonl");
+    std::fs::write(&tk2, text).unwrap();
+
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk2.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "F8: dataset runs:\n{out}\n{err}");
+    let n: usize = field(&out, "uncommitted_tasks")
+        .parse()
+        .expect("uncommitted_tasks is a number");
+    assert_eq!(n, 2, "F8: dataset counts the two uncommitted tasks: {out}");
+    let manifest = std::fs::read_to_string(ds.join("data-manifest.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(
+        v["uncommitted_tasks"].as_u64(),
+        Some(n as u64),
+        "F8: data-manifest.json carries the count: {manifest}"
+    );
+
+    // F8: the report carries the count too.
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "F8: fit accepts the dataset: {out}\n{err}");
+    let (code, out, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 0, "F8: report runs: {out}\n{err}");
+    let line = out
+        .lines()
+        .find(|l| l.starts_with("uncommitted_tasks "))
+        .unwrap_or_else(|| panic!("F8: the report carries the count: {out}"));
+    assert_eq!(
+        line.split_whitespace().nth(1),
+        Some(n.to_string().as_str()),
+        "F8: the report carries the count: {out}"
     );
 }
 

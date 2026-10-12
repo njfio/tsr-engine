@@ -327,6 +327,9 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
         // A8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
         // rows, not the index, so it carries the stored count when present.
         unindexed_tasks: manifest["unindexed_tasks"].as_u64().unwrap_or(0) as usize,
+        // F8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
+        // rows, not the index, so it carries the stored count when present.
+        uncommitted_tasks: manifest["uncommitted_tasks"].as_u64().unwrap_or(0) as usize,
     })
 }
 
@@ -816,6 +819,7 @@ mod tests {
             training_root,
             source_root: Hash::of(&[b"source"]),
             unindexed_tasks: 0,
+            uncommitted_tasks: 0,
         }
     }
 
@@ -1018,6 +1022,7 @@ mod tests {
             training_root,
             source_root: Hash::of(&[b"a7"]),
             unindexed_tasks: 0,
+            uncommitted_tasks: 0,
         };
         let ddir = tmpdir("ds-a7");
         crate::dataset::write_dataset(&ds, &ddir).unwrap();

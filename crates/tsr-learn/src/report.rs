@@ -73,8 +73,9 @@ pub struct Scores {
 pub struct Paired {
     /// The number of tasks in the pair.
     pub tasks: u32,
-    /// The mean paired difference, controller minus generator.
-    pub mean: f64,
+    /// The mean paired difference, controller minus generator, or `None` for an empty pair (JSON
+    /// null; the text prints `n=0` with no number).
+    pub mean: Option<f64>,
     /// The 90% interval, or `None` when there are fewer than two lineage clusters.
     pub interval: Option<(f64, f64)>,
     /// True when the interval spans zero.
@@ -100,6 +101,10 @@ pub struct Report {
     /// A8: the number of distinct tasks whose decision rows had no index row (a truncated
     /// `--tasks`), so the report names what the dataset dropped.
     pub unindexed_tasks: u32,
+    /// F8: the number of distinct tasks that have an index row but no gated commitment, so they
+    /// produce no row and are dropped from the split. The report names what the dataset dropped.
+    #[serde(default)]
+    pub uncommitted_tasks: u32,
     /// The controller's scores over all scored rows.
     pub controller: Scores,
     /// The generator's scores over all scored rows.
@@ -493,6 +498,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         excluded,
         uncalibrated,
         unindexed_tasks: dataset.unindexed_tasks as u32,
+        uncommitted_tasks: dataset.uncommitted_tasks as u32,
         controller,
         generator,
         operator,
@@ -517,7 +523,7 @@ pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
     if diffs.is_empty() {
         return Paired {
             tasks: 0,
-            mean: 0.0,
+            mean: None,
             interval: None,
             inconclusive: false,
             clusters: 0,
@@ -534,7 +540,7 @@ pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
     if n_clusters < 2 {
         return Paired {
             tasks,
-            mean,
+            mean: Some(mean),
             interval: None,
             inconclusive: false,
             clusters: n_clusters,
@@ -565,7 +571,7 @@ pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
     let inconclusive = lo <= 0.0 && hi >= 0.0;
     Paired {
         tasks,
-        mean,
+        mean: Some(mean),
         interval: Some((lo, hi)),
         inconclusive,
         clusters: n_clusters,
@@ -596,6 +602,7 @@ pub fn render_report(r: &Report, json: bool) -> String {
     out.push_str(&format!("excluded {}\n", r.excluded));
     out.push_str(&format!("uncalibrated {}\n", r.uncalibrated));
     out.push_str(&format!("unindexed_tasks {}\n", r.unindexed_tasks));
+    out.push_str(&format!("uncommitted_tasks {}\n", r.uncommitted_tasks));
     out.push_str(&format!("log_loss_clip {}\n", LOG_LOSS_CLIP));
     out.push_str(&format!("support_floor {}\n", r.support_floor));
 
@@ -700,11 +707,11 @@ fn render_paired(label: &str, p: &Paired) -> String {
     } else {
         "conclusive"
     };
-    // B6: an empty pair prints n/a, never a number.
-    let mean = if p.tasks == 0 {
-        "mean=n/a".to_string()
-    } else {
-        format!("mean={}", proxy("brier", p.mean))
+    // F10/B4: an empty pair prints `n=0` and no number; a non-empty pair prints its mean under
+    // ONE label, `mean_brier=`, not the doubled `mean=brier=`.
+    let mean = match p.mean {
+        Some(m) => proxy("mean_brier", m),
+        None => "mean=n/a".to_string(),
     };
     let verdict = if verdict.is_empty() {
         String::new()
@@ -712,7 +719,7 @@ fn render_paired(label: &str, p: &Paired) -> String {
         format!(" {verdict}")
     };
     format!(
-        "  {label} tasks={} clusters={} {mean} {interval}{verdict}\n",
+        "  {label} n={} clusters={} {mean} {interval}{verdict}\n",
         p.tasks, p.clusters,
     )
 }
@@ -826,6 +833,7 @@ mod tests {
             training_root: Hash::of(&[b"train"]),
             source_root: Hash::of(&[b"source"]),
             unindexed_tasks: 0,
+            uncommitted_tasks: 0,
         }
     }
 
@@ -1243,10 +1251,10 @@ mod tests {
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 7);
         assert_eq!(r.paired.tasks, 2, "two tasks in the pair");
+        let mean = r.paired.mean.expect("B5: a non-empty pair has a mean");
         assert!(
-            (r.paired.mean - (-0.12)).abs() < 1e-9,
-            "B5: the pair is the mean of the per-task means (-0.12), got {}",
-            r.paired.mean
+            (mean - (-0.12)).abs() < 1e-9,
+            "B5: the pair is the mean of the per-task means (-0.12), got {mean}"
         );
     }
 
@@ -1283,6 +1291,75 @@ mod tests {
             "B6: an empty set must not print a number:\n{text}"
         );
         assert!(text.contains("n/a"), "B6: an empty set prints n/a:\n{text}");
+    }
+
+    /// F10/B4: an empty paired difference must print `"mean": null` in JSON and `n=0` with no
+    /// number in the text. Today `Paired.mean` is a bare `f64`, so an empty pair prints
+    /// `"mean": 0.0` — a number nobody measured.
+    #[test]
+    fn f10_empty_pair_has_a_null_mean() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // No held-out labelled rows: the pair is empty.
+        let ds = dataset(&b, Vec::new());
+        let r = report(&b, &ds, 7);
+        assert_eq!(r.paired.tasks, 0, "F10: the pair is empty");
+        assert!(
+            r.paired.mean.is_none(),
+            "F10: an empty pair's mean is None, got {:?}",
+            r.paired.mean
+        );
+        let json = render_report(&r, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            v["paired"]["mean"].is_null(),
+            "F10: report.json prints \"mean\": null for an empty pair:\n{json}"
+        );
+        let text = render_report(&r, false);
+        let line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("all "))
+            .unwrap_or_else(|| panic!("F10: the text has an `all` paired line:\n{text}"));
+        assert!(
+            line.contains("n=0"),
+            "F10: the empty pair prints n=0:\n{line}"
+        );
+        assert!(
+            !line.contains("mean=") || line.contains("mean=n/a"),
+            "F10: the empty pair prints no number:\n{line}"
+        );
+    }
+
+    /// F10/B4: a non-empty pair still prints its mean, and the paired line carries ONE label —
+    /// `mean_brier=` — not the doubled `mean=brier=`.
+    #[test]
+    fn f10_paired_line_has_one_label() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(
+                &b,
+                "calibrated",
+                &format!("l{}", i % 3),
+                signal,
+                label,
+                0.9,
+                i,
+            ));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        assert!(r.paired.mean.is_some(), "F10: a non-empty pair has a mean");
+        let text = render_report(&r, false);
+        assert!(
+            !text.contains("mean=brier="),
+            "F10/B4: the paired line has one label, not `mean=brier=`:\n{text}"
+        );
+        assert!(
+            text.contains("mean_brier="),
+            "F10/B4: the paired line labels the mean `mean_brier=`:\n{text}"
+        );
     }
 
     /// B10: reliability bins carry, per bin, n, the mean forecast and the observed frequency (as

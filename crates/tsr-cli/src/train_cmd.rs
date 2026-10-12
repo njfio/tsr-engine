@@ -186,6 +186,35 @@ fn read_events_file(path: &Path) -> Result<Vec<(i64, Event)>, String> {
     Ok(events)
 }
 
+/// F9/B3: refuse a JSONL input that is not data.
+///
+/// Returns the number of parseable records, or an error naming the file and the line: line 1 when
+/// the file holds no parseable record (empty or newline-only), or the first line that does not
+/// parse (truncated JSON included). A file that is not data must never reach the probes, where an
+/// empty log panics and an empty index silently turns probe (a) off.
+fn require_parseable_jsonl(path: &Path) -> Result<usize, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let mut records = 0usize;
+    for (idx, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Err(e) = serde_json::from_str::<serde_json::Value>(line) {
+            return Err(format!("{} line {}: {e}", path.display(), idx + 1));
+        }
+        records += 1;
+    }
+    if records == 0 {
+        return Err(format!(
+            "{} line 1: no parseable record (the file is empty or holds only blank lines)",
+            path.display()
+        ));
+    }
+    Ok(records)
+}
+
 /// The source root: the store's `head_root`, or the events file's digest.
 fn source_root(store: Option<&Path>, events: Option<&Path>) -> Result<Hash, String> {
     if let Some(path) = store {
@@ -251,6 +280,19 @@ fn run_dataset(
             return std::process::ExitCode::from(2);
         }
     };
+    // F9/B3: refuse an input that is not data before anything is read or written. A file with no
+    // parseable record, or a line that does not parse, is bad input: exit 2 naming the file and the
+    // line, never exit 1 and never a probe that skips every row.
+    if let Some(path) = events {
+        if let Err(e) = require_parseable_jsonl(path) {
+            eprintln!("tsr: dataset refused: {e}");
+            return std::process::ExitCode::from(2);
+        }
+    }
+    if let Err(e) = require_parseable_jsonl(tasks) {
+        eprintln!("tsr: dataset refused: {e}");
+        return std::process::ExitCode::from(2);
+    }
     let log = match read_log(store, events) {
         Ok(l) => l,
         Err(e) => {
@@ -332,6 +374,7 @@ fn run_dataset(
     println!("training_root={}", ds.training_root.to_hex());
     println!("split_digest={}", ds.split.digest.to_hex());
     println!("unindexed_tasks={}", ds.unindexed_tasks);
+    println!("uncommitted_tasks={}", ds.uncommitted_tasks);
     std::process::ExitCode::SUCCESS
 }
 
@@ -348,18 +391,12 @@ fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::p
             );
             return std::process::ExitCode::from(2);
         }
-        // F9/B3: an empty `tasks.jsonl` silently turns probe (a) off (every row is skipped for
-        // want of an index row), and an empty `events.jsonl` panics the probe pass. Refuse both,
-        // naming the file, with exit 2.
-        let empty = std::fs::metadata(&path)
-            .map(|m| m.len() == 0)
-            .unwrap_or(false);
-        if empty {
-            eprintln!(
-                "tsr: fit refused: {} is empty in the dataset directory {}",
-                name,
-                dataset_dir.display()
-            );
+        // F9/B3: a `tasks.jsonl` with no parseable record silently turns probe (a) off (every row
+        // is skipped for want of an index row), and an `events.jsonl` with no parseable record
+        // panics the probe pass. A line that does not parse is bad input too. Refuse both, naming
+        // the file and the line, with exit 2 — never a panic, never exit 1 for bad input.
+        if let Err(e) = require_parseable_jsonl(&path) {
+            eprintln!("tsr: fit refused: {e}");
             return std::process::ExitCode::from(2);
         }
     }
