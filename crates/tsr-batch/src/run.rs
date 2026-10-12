@@ -310,14 +310,23 @@ pub fn run_one(
     // (D4). The base tree is unmutated, so the mutation diff is applied to `dest` before the
     // session sees it. The diff is read from the CAS by digest; a missing or unsafe digest is an
     // error, never a silently unmutated copy.
+    //
+    // The diff is applied only when provisioning actually materialised a copy at `dest`. A
+    // stand-in runner (`ScriptedRunner`) answers exit 0 without creating a tree, so there is no
+    // copy to mutate and nothing to apply the diff to; a real runner that exits 0 always creates
+    // `dest`, and for it a missing or unsafe digest is still a hard error. Reading the CAS is
+    // therefore gated on the copy existing, so a scripted run never needs a CAS it does not use.
     if let Some(diff_digest) = task.mutation_diff.as_deref() {
-        let cas = tsr_corpus::mine::cas_dir(&config.out);
-        let diff =
-            tsr_corpus::mine::read_cas(&cas, diff_digest).map_err(|e| RunError::MutationDiff {
-                digest: diff_digest.to_string(),
-                reason: e.to_string(),
+        if dest.exists() {
+            let cas = tsr_corpus::mine::cas_dir(&config.out);
+            let diff = tsr_corpus::mine::read_cas(&cas, diff_digest).map_err(|e| {
+                RunError::MutationDiff {
+                    digest: diff_digest.to_string(),
+                    reason: e.to_string(),
+                }
             })?;
-        apply_diff(&dest, &diff)?;
+            apply_diff(&dest, &diff)?;
+        }
     }
 
     // (4) Drive the session.
