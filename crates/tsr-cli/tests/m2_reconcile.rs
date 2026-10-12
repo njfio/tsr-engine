@@ -1,10 +1,10 @@
 //! The crash and cancellation matrix (PRD §B4, §B6, §B11 M2 item 3).
 //!
-//! Four rows, each a crash point where the log holds a `Dispatched` with neither `Executed` nor
-//! `Unresolved`, and each asserting the exact event kinds appended:
+//! Four rows, each a point where an execution can stop, and each asserting the exact event kinds
+//! reconcile appends:
 //!
-//! 1. **intent** — the crash lands after the intent is committed, before the effect. Nothing was
-//!    dispatched, so there is no pending dispatch and reconcile appends nothing.
+//! 1. **intent** — the crash lands after the proposal is logged, before anything is dispatched.
+//!    There is no pending dispatch, so reconcile appends nothing.
 //! 2. **send** — the crash lands after the effect was sent, before the acknowledgement. The log
 //!    holds no `Executed`, so the check cannot say: the dispatch stays `Unresolved`.
 //! 3. **acknowledgement** — the crash lands after the effect, before the ack is recorded. Same
@@ -34,7 +34,7 @@ use tsr_store::Store;
 /// Where a fake execution is allowed to fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrashPoint {
-    /// After the intent is committed, before the effect is sent.
+    /// After the proposal is logged, before anything is dispatched.
     Intent,
     /// After the effect is sent, before the acknowledgement is recorded.
     Send,
@@ -206,7 +206,7 @@ fn dispatched(cand: &Candidate) -> (Store, Event) {
 ///
 /// The four rows differ in what the executor had written when it crashed, so each reconciles a
 /// different store:
-/// - `Intent`: nothing — the crash landed before the intent was committed, so no `Dispatched`.
+/// - `Intent`: the proposal only — the crash landed before anything was dispatched.
 /// - `Send`: `Dispatched` only — the effect was sent, but the tool's log never reached the CAS.
 /// - `Acknowledgement`: `Dispatched` and the tool's log in the CAS, but no `Executed`.
 /// - `None`: `Dispatched` and `Executed` — the effect and its acknowledgement both landed.
@@ -231,7 +231,7 @@ fn store_at_crash_point(cand: &Candidate, crash: CrashPoint, cas: &std::path::Pa
     );
     s.append(&proposed).unwrap();
     if crash == CrashPoint::Intent {
-        // The crash landed before the intent was committed: nothing was dispatched.
+        // The crash landed after the proposal, before anything was dispatched.
         return s;
     }
     let dispatch = Event::new(
@@ -428,7 +428,8 @@ fn row_acknowledgement_tool_ran_without_executed_is_unresolved_idempotent() {
 
 #[test]
 fn row_acknowledgement_missing_digest_is_unknown() {
-    // The tool's log never reached the CAS either: the check still cannot say.
+    // The log names no digest (there is no `Executed`), whatever the CAS holds beside it, so the
+    // check still cannot say.
     let cand = candidate("ack-missing");
     let cas = std::env::temp_dir().join(format!("tsr-d5-ack-missing-{}", std::process::id()));
     std::fs::create_dir_all(&cas).unwrap();
