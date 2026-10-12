@@ -91,7 +91,10 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
     // forecast is stored with its 0-based index in the task's own log, so the pairing rule can
     // require it to precede the commitment.
     let mut kinds: HashMap<CandidateId, ActionKind> = HashMap::new();
-    let mut forecasts: HashMap<CandidateId, Vec<(u64, Forecast)>> = HashMap::new();
+    // A1/A3/A11: keyed by (task, candidate), not candidate alone. Synthetic candidates are minted
+    // from a hash of (kind, args), so `mint(RunApprovedTest, "step_3")` is the same id in every
+    // task; keying by candidate alone would pair a commitment with another task's forecast.
+    let mut forecasts: HashMap<(TaskId, CandidateId), Vec<(u64, Forecast)>> = HashMap::new();
     // The 0-based index of each event within its own task's log.
     let mut event_index: HashMap<EventId, u64> = HashMap::new();
     // The running count of events seen so far for each task.
@@ -111,7 +114,7 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
             } => {
                 if forecast.event == common {
                     forecasts
-                        .entry(*candidate)
+                        .entry((e.task, *candidate))
                         .or_default()
                         .push((event_index[&e.id], forecast.clone()));
                 }
@@ -145,7 +148,7 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
         }
         let index = event_index.get(&e.id).copied().unwrap_or(0);
         let paired: Vec<Forecast> = forecasts
-            .get(candidate)
+            .get(&(e.task, *candidate))
             .map(|fs| {
                 fs.iter()
                     // The forecast must precede the commitment in the task's log.
