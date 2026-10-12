@@ -1,0 +1,577 @@
+//! The ledger's required behaviours (PRD §B11 M2 item 1), each as a test over a real store.
+
+use tsr_domain::{
+    ContrastId, CriterionId, Event, EventId, EventKind, Hash, Observation, Preference,
+    PreferenceId, PreferenceStatus, Scope, Source, TaskId, UnmetKind,
+};
+use tsr_ledger::{fold, normalize_text, Ledger, LedgerError};
+use tsr_store::Store;
+
+fn store() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(&dir.path().join("events.jsonl")).expect("open store");
+    (dir, store)
+}
+
+fn task() -> TaskId {
+    TaskId(Hash::of(&[b"t-1"]))
+}
+
+fn scope() -> Scope {
+    Scope::Task(task())
+}
+
+/// A Contrast the log holds: the Filter's write rule refuses an expansion that names anything
+/// else, so a test that expands must first record the contrast it expands from.
+fn contrast(store: &Store) -> ContrastId {
+    // D12: a Contrast's id is its content address, so mint it through the Filter rather than
+    // hand-picking one.
+    let c = tsr_ledger::Filter::contrast_from_criteria(
+        EventId(Hash::of(&[b"return-1"])),
+        vec![(
+            CriterionId(Hash::of(&[b"criterion-1"])),
+            UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        vec![],
+    );
+    Ledger::new(store)
+        .record_contrast(&task(), vec![], c.clone(), "2026-01-01T00:00:00Z")
+        .expect("record the contrast");
+    c.id
+}
+
+/// A generator-origin preference is in the structure but absent from the active view until an
+/// Operator `StatusSet(Open)` exists for it; present after.
+#[test]
+fn generator_preference_waits_for_operator_open() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "the retry budget is the dimension this contrast clarified",
+            scope(),
+            vec![],
+            vec![],
+            Source::Generator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    let collective = ledger.collective().expect("fold");
+    let entry = collective.get(&id).expect("in the structure");
+    assert!(
+        entry.status.is_none(),
+        "generator origin is not open on arrival"
+    );
+    assert!(!entry.is_active());
+    assert!(!ledger.active().expect("active").contains(&id));
+
+    ledger
+        .set_status(
+            &task(),
+            vec![],
+            id,
+            PreferenceStatus::Open,
+            Source::Operator,
+            "2026-01-01T00:01:00Z",
+        )
+        .expect("operator admits it");
+
+    let active = ledger.active().expect("active");
+    assert!(active.contains(&id), "present after the operator opens it");
+    assert!(active.get(&id).expect("entry").is_open());
+}
+
+/// An operator-origin preference — including a rejection reason — is open on arrival.
+#[test]
+fn operator_preference_is_open_on_arrival() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "rejected: the diff changed a public signature without a migration",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    let active = ledger.active().expect("active");
+    let entry = active.get(&id).expect("open on arrival");
+    assert!(entry.is_open());
+    assert_eq!(entry.history.len(), 1);
+    assert_eq!(entry.history[0].1, Source::Operator);
+}
+
+/// `withdrawn` and `out_of_scope` are operator-only: refused with exit 2 when `by` is not Operator.
+#[test]
+fn operator_only_statuses_are_refused_for_non_operator() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "a preference",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    for status in [PreferenceStatus::Withdrawn, PreferenceStatus::OutOfScope] {
+        for by in [Source::Generator, Source::Rules] {
+            let err = ledger
+                .set_status(
+                    &task(),
+                    vec![],
+                    id,
+                    status.clone(),
+                    by,
+                    "2026-01-01T00:02:00Z",
+                )
+                .expect_err("refused");
+            assert!(matches!(err, LedgerError::OperatorOnly { .. }), "{err:?}");
+            assert_eq!(err.exit_code(), 2);
+        }
+    }
+
+    // The operator may set them.
+    ledger
+        .set_status(
+            &task(),
+            vec![],
+            id,
+            PreferenceStatus::Withdrawn,
+            Source::Operator,
+            "2026-01-01T00:03:00Z",
+        )
+        .expect("operator may withdraw");
+    assert!(!ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
+}
+
+/// A merge finds a duplicate by normalized text within the same scope and yields `Overlapping(id)`.
+#[test]
+fn duplicate_normalized_text_in_same_scope_overlaps() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let first = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "The  Retry   Budget",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+    let second = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "the retry budget",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:01:00Z",
+        )
+        .expect("expand");
+
+    assert_eq!(normalize_text("The  Retry   Budget"), "the retry budget");
+    assert_eq!(
+        ledger
+            .overlapping_with("the retry budget", &scope())
+            .expect("lookup"),
+        Some(first)
+    );
+
+    let event = ledger
+        .mark_overlapping(&task(), vec![], second, "2026-01-01T00:02:00Z")
+        .expect("mark")
+        .expect("a duplicate exists");
+    assert_eq!(event.0, event.0);
+
+    let active = ledger.active().expect("active");
+    assert_eq!(
+        active.get(&second).expect("entry").status,
+        Some(PreferenceStatus::Overlapping(first))
+    );
+
+    // A different scope is not a duplicate.
+    let other = Scope::Family("f-1".to_string());
+    assert_eq!(
+        ledger
+            .overlapping_with("the retry budget", &other)
+            .expect("lookup"),
+        None
+    );
+}
+
+/// A later return meeting the criterion closes the preference: `Fulfilled`.
+#[test]
+fn a_later_return_meeting_the_criterion_fulfils() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "the criterion: the suite passes on the merged head",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+    assert!(ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
+
+    // The later return arrives as an event; the criterion closes and the status is mechanical.
+    let ret = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::Observed {
+            observation: Observation::Evidence {
+                digest: Hash::of(&[b"return:test_pass"]),
+                source: "tool:test".to_string(),
+            },
+        },
+        "2026-01-01T00:05:00Z",
+    );
+    store.append(&ret).expect("append the return");
+
+    ledger
+        .mark_fulfilled(&task(), vec![ret.id], id, "2026-01-01T00:05:01Z")
+        .expect("fulfil");
+
+    let active = ledger.active().expect("active");
+    let entry = active.get(&id).expect("entry");
+    assert_eq!(entry.status, Some(PreferenceStatus::Fulfilled));
+    assert!(!entry.is_open());
+    assert_eq!(entry.history.last().expect("history").1, Source::Rules);
+}
+
+/// The fold is deterministic and the root hash equals `store.head_root()`.
+#[test]
+fn fold_is_deterministic_and_root_is_the_store_head() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let a = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "first",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+    let b = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "second",
+            scope(),
+            vec![a],
+            vec![a],
+            Source::Generator,
+            "2026-01-01T00:01:00Z",
+        )
+        .expect("expand");
+    ledger
+        .set_status(
+            &task(),
+            vec![],
+            b,
+            PreferenceStatus::Open,
+            Source::Operator,
+            "2026-01-01T00:02:00Z",
+        )
+        .expect("open");
+
+    let one = ledger.collective().expect("fold");
+    let two = ledger.collective().expect("fold again");
+    assert_eq!(one, two, "same events, same view");
+    assert_eq!(one.root, store.head_root().expect("head"));
+    assert_eq!(one.active(), two.active());
+
+    // The fold is a pure function of the events and the root.
+    let events = store.all().expect("all");
+    let root = store.head_root().expect("head");
+    assert_eq!(fold(&events, root), one);
+    assert_eq!(fold(&events, root), one);
+
+    // The produced preference is the content address of its own text, scope and parents.
+    let entry = one.get(&b).expect("entry");
+    let expected = Preference::new(
+        entry.preference.text.clone(),
+        entry.preference.scope.clone(),
+        entry.preference.parents.clone(),
+        entry.preference.origin,
+    )
+    .expect("mint");
+    assert_eq!(entry.preference.id, expected.id);
+    assert_eq!(entry.catalyzed_by, vec![a]);
+    assert_eq!(entry.preference.parents, vec![a]);
+}
+
+/// A status for a preference the log never carried is refused, not silently folded.
+#[test]
+fn status_for_unknown_preference_is_refused() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+    let err = ledger
+        .set_status(
+            &task(),
+            vec![],
+            PreferenceId(Hash::of(&[b"pref-nope"])),
+            PreferenceStatus::Open,
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect_err("refused");
+    assert!(matches!(err, LedgerError::UnknownPreference(_)));
+    assert_eq!(err.exit_code(), 2);
+}
+
+/// An `Expanded` event round-trips through serde and rebuilds the preference with the same id:
+/// the fold reads the node from the log alone, never from a side table.
+#[test]
+fn expanded_event_round_trips_and_rebuilds_the_preference() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "the dimension this contrast clarified",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    let events = store.all().expect("all");
+    let (_, ev) = events
+        .iter()
+        .find(|(_, e)| matches!(e.kind, EventKind::Expanded { .. }))
+        .expect("an Expanded event");
+    let payload = serde_json::to_string(ev).expect("serialize");
+    let back: Event = serde_json::from_str(&payload).expect("deserialize");
+    let EventKind::Expanded { expansion } = &back.kind else {
+        panic!("an Expanded event");
+    };
+    let rebuilt = Preference::new(
+        expansion.text.clone(),
+        expansion.scope.clone(),
+        expansion.parents.clone(),
+        expansion.origin,
+    )
+    .expect("mint");
+    assert_eq!(rebuilt.id, expansion.produced);
+    assert_eq!(rebuilt.id, id);
+    assert_eq!(rebuilt.text, "the dimension this contrast clarified");
+    assert_eq!(rebuilt.origin, Source::Operator);
+
+    // The fold over the deserialized event alone yields the same node.
+    let view = fold(&[(1, back)], store.head_root().expect("head"));
+    assert_eq!(view.entries.len(), 1);
+    assert_eq!(view.entries[0].preference.id, id);
+}
+
+/// A produced id that is not the content address of its own text, scope and parents is refused
+/// with exit 2 — the ledger never mints a node it cannot re-derive from the log.
+#[test]
+fn produced_mismatch_is_refused() {
+    let (_dir, store) = store();
+
+    // A hand-built expansion whose `produced` does not address its content.
+    let expansion = tsr_domain::Expansion {
+        from_contrast: ContrastId(Hash::of(&[b"c-1"])),
+        produced: PreferenceId(Hash::of(&[b"not-the-address"])),
+        catalyzed_by: vec![],
+        text: "a preference".to_string(),
+        scope: scope(),
+        parents: vec![],
+        origin: Source::Operator,
+    };
+    let expected = Preference::new(
+        expansion.text.clone(),
+        expansion.scope.clone(),
+        expansion.parents.clone(),
+        expansion.origin,
+    )
+    .expect("mint");
+    assert_ne!(expected.id, expansion.produced);
+
+    // The fold refuses to admit a node whose address does not match its content.
+    let ev = Event::new(
+        task(),
+        vec![],
+        Source::Operator,
+        EventKind::Expanded { expansion },
+        "2026-01-01T00:00:00Z",
+    );
+    let view = fold(&[(1, ev)], store.head_root().expect("head"));
+    assert!(view.entries.is_empty(), "a mismatched node is not admitted");
+}
+
+/// D12a: `record_contrast` checks a Contrast's `id` is its content address. A record whose id is
+/// not the address of (from_return, unmet, evidence) is refused with exit 2; the matching one is
+/// accepted and reads back from the log.
+#[test]
+fn d12_record_contrast_checks_the_content_address() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let from_return = EventId(Hash::of(&[b"return-d12"]));
+    let unmet = vec![(
+        CriterionId(Hash::of(&[b"criterion-d12"])),
+        UnmetKind::Rejected {
+            reason: "the criterion went unmet".to_string(),
+        },
+    )];
+    let evidence = vec![EventId(Hash::of(&[b"evidence-d12"]))];
+
+    // The id the Filter mints for these fields is the content address.
+    let good = tsr_ledger::filter::contrast_id(&from_return, &unmet, &evidence);
+    let contrast = tsr_domain::Contrast {
+        id: good,
+        from_return,
+        unmet: unmet.clone(),
+        evidence: evidence.clone(),
+    };
+    ledger
+        .record_contrast(&task(), vec![], contrast, "2026-01-01T00:00:00Z")
+        .expect("the content-addressed contrast is recorded");
+
+    // A contrast whose id is not its content address is refused with exit 2.
+    let bad = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"not-the-address"])),
+        from_return,
+        unmet,
+        evidence,
+    };
+    let err = ledger
+        .record_contrast(&task(), vec![], bad, "2026-01-01T00:01:00Z")
+        .expect_err("a mismatched id is refused");
+    assert!(
+        matches!(err, LedgerError::ContrastIdMismatch { .. }),
+        "{err:?}"
+    );
+    assert_eq!(err.exit_code(), 2);
+}
+
+/// D12b: the fold applies `Withdrawn` or `OutOfScope` only from an Operator `by`. A raw
+/// `StatusSet` event with a non-operator `by` is recorded in the history and ignored for the
+/// active view, even though the write path would have refused it.
+#[test]
+fn d12_fold_applies_operator_only_statuses_only_from_operator() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "a preference",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    // Append a raw non-operator `Withdrawn` directly to the store, bypassing the write path's
+    // refusal, so the fold is the only thing under test.
+    let ev = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::StatusSet {
+            preference: id,
+            status: PreferenceStatus::Withdrawn,
+            by: Source::Rules,
+        },
+        "2026-01-01T00:01:00Z",
+    );
+    store.append(&ev).expect("append raw status");
+
+    let active = ledger.active().expect("active");
+    let entry = active.get(&id).expect("entry");
+    assert!(
+        entry.is_open(),
+        "a non-operator Withdrawn does not leave the active view"
+    );
+    assert!(
+        entry
+            .history
+            .iter()
+            .any(|(s, by)| *s == PreferenceStatus::Withdrawn && *by == Source::Rules),
+        "the non-operator status is still recorded in the history"
+    );
+
+    // The operator's own Withdrawn does apply.
+    ledger
+        .set_status(
+            &task(),
+            vec![],
+            id,
+            PreferenceStatus::Withdrawn,
+            Source::Operator,
+            "2026-01-01T00:02:00Z",
+        )
+        .expect("operator may withdraw");
+    assert!(!ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
+}

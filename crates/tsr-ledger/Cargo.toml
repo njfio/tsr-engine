@@ -1,0 +1,22 @@
+[package]
+name = "tsr-ledger"
+description = "The Culmination ledger as views over the append-only event log: Expanded and StatusSet writes, the active view, admission by source (PRD B2.1/B6/B8)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tsr-domain = { path = "../tsr-domain" }
+tsr-store = { path = "../tsr-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

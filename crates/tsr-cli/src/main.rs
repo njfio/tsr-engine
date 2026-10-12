@@ -11,6 +11,10 @@ use std::process::ExitCode;
 use tsr_cli::{exec, hook, store_path, task};
 
 mod policy_cmd;
+use tsr_cli::note_cmd;
+use tsr_cli::reconcile_cmd;
+use tsr_cli::reflect_cmd;
+use tsr_cli::review_cmd;
 
 #[derive(Parser)]
 #[command(
@@ -73,10 +77,58 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PolicyCmd,
     },
+    /// Record the operator's experience note on a task (M2, B7).
+    Note {
+        task: String,
+        /// A short note on friction or trust; never reward truth.
+        #[arg(long)]
+        text: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
+    },
     /// Label outcomes after close (M2, B5, B7).
-    Review { task: String },
+    Review {
+        /// The task whose returns are labelled; omit with --stats to compute over the family.
+        task: Option<String>,
+        /// accepted | rejected | disputed; omit to list the returns awaiting a label.
+        label: Option<String>,
+        /// The reason for a rejection; stored apart from tool results.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Name the return to label; a correction supersedes its standing label.
+        #[arg(long = "return")]
+        return_id: Option<String>,
+        /// Sample greens for review at this rate (0, 1].
+        #[arg(long)]
+        sample: Option<f64>,
+        /// Fix the sampling draw.
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Restrict --stats to one task family.
+        #[arg(long)]
+        family: Option<String>,
+        /// Print the false-accept rate (green but rejected), weighted and unweighted.
+        #[arg(long)]
+        stats: bool,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
+    },
     /// The Mirror view: one closed episode, in the book's order (M2, B7).
-    Reflect { task: String },
+    Reflect {
+        /// The task to render; omit with --family to print calibration curves.
+        task: Option<String>,
+        /// Print each forecaster's calibration curve for this task family.
+        #[arg(long)]
+        family: Option<String>,
+        /// Emit the same content as a JSON document.
+        #[arg(long)]
+        json: bool,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
+    },
     /// Corpus tooling: mine, mutants (M3, B9).
     Corpus {
         #[command(subcommand)]
@@ -118,6 +170,13 @@ enum TaskCmd {
     /// Export a task's trace as JSON (M0 exit evidence).
     Export {
         task: String,
+    },
+    /// Reconcile dispatches with no recorded outcome (M2, B4/B6).
+    Reconcile {
+        task: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
     },
 }
 
@@ -176,8 +235,39 @@ fn main() -> ExitCode {
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
-        Cmd::Review { .. } => not_yet("review", "B5/B7 (M2)"),
-        Cmd::Reflect { .. } => not_yet("reflect", "B7 the Mirror view (M2)"),
+        Cmd::Note { task, text, store } => note_cmd::run(&task, &text, store.as_deref()),
+        Cmd::Review {
+            task,
+            label,
+            reason,
+            return_id,
+            sample,
+            seed,
+            family,
+            stats,
+            store,
+        } => review_cmd::run(&review_cmd::ReviewArgs {
+            task: task.unwrap_or_default(),
+            label,
+            reason,
+            return_id,
+            sample,
+            seed,
+            family,
+            stats,
+            store,
+        }),
+        Cmd::Reflect {
+            task,
+            family,
+            json,
+            store,
+        } => reflect_cmd::run(&reflect_cmd::ReflectArgs {
+            task,
+            family,
+            json,
+            store,
+        }),
         Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),
@@ -187,6 +277,15 @@ fn main() -> ExitCode {
 }
 
 fn run_task(cmd: TaskCmd) -> ExitCode {
+    // N2: `status` and `export` are M0 arms (lane 01's). At d2b5f96 `run_task` opened the shared
+    // store up front, so both create the store when it is missing and exit 0. Restore that.
+    //
+    // `reconcile` is M2 and reads the log itself: it must refuse a missing store with exit 2
+    // naming the path rather than create one (R5), so it is dispatched before the shared store is
+    // opened.
+    if let TaskCmd::Reconcile { task, store } = &cmd {
+        return reconcile_cmd::run(task, store.as_deref());
+    }
     let store = match store_path::open_store() {
         Ok(s) => s,
         Err(e) => {
@@ -234,6 +333,7 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
                 }
             }
         }
+        TaskCmd::Reconcile { .. } => unreachable!("reconcile is dispatched before the store opens"),
         TaskCmd::Export { task: name } => {
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {

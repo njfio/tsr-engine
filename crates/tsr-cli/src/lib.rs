@@ -8,6 +8,10 @@
 
 pub mod exec;
 pub mod hook;
+pub mod note_cmd;
+pub mod reconcile_cmd;
+pub mod reflect_cmd;
+pub mod review_cmd;
 pub mod store_path;
 pub mod task;
 
