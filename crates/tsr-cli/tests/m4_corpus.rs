@@ -7,9 +7,13 @@
 //!
 //! The invariants are the PRD's, not the implementer's (see `crates/tsr-cli/src/lib.rs`):
 //! - B6: sequence is monotone; every parent precedes its child.
-//! - B5: every gated action has a forecast at the same state version, recorded before commitment.
 //! - B6: every dispatch is reconciled or explicitly unresolved.
 //! - B4: every command ran in the sealed sibling sandbox.
+//!
+//! B5 (every gated action has a forecast at the same state version, recorded before commitment) is
+//! asserted **per task**, not on the whole-corpus concatenation: `synth.rs` writes task-local state
+//! versions, so the corpus is 380 independent sessions and the concatenation is not one session.
+//! See `every_task_satisfies_the_m0_invariants_as_its_own_session`.
 
 use std::path::{Path, PathBuf};
 
@@ -101,10 +105,9 @@ fn every_fixture_session_satisfies_the_m0_invariants() {
         session.every_parent_precedes_its_child(),
         "B6: causality is finite and prior"
     );
-    assert!(
-        session.every_gated_action_has_prior_forecast_at_same_state_version(),
-        "B5: a gated action is denied until a forecast exists for the current state version"
-    );
+    // B5 is not asserted on this concatenation: the corpus is 380 task-local sessions, so a
+    // commitment's global index here does not match its forecast's task-local state_version. B5 is
+    // checked per task in `every_task_satisfies_the_m0_invariants_as_its_own_session`.
     assert!(
         session.every_dispatch_reconciled_or_unresolved(),
         "B6: every dispatch is reconciled, or explicitly unresolved — never silent"
