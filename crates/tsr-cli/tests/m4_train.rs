@@ -200,7 +200,7 @@ fn a_non_operator_label_is_refused_with_exit_2() {
 }
 
 #[test]
-fn a_different_seed_gives_a_different_split_digest() {
+fn f15_a_different_seed_splits_differently_under_by_repo() {
     let dir = temp_dir("seed");
     let (events, tasks, labels) = regenerate(&dir);
 
@@ -298,7 +298,8 @@ fn fit_refuses_fewer_than_150_mature_tasks() {
         .lines()
         .filter(|l| {
             let v: serde_json::Value = serde_json::from_str(l).unwrap();
-            keep.contains(v["task"].as_str().unwrap_or(""))
+            // An events.jsonl line is `{"seq": n, "event": {...}}`; the task id is inside `event`.
+            keep.contains(v["event"]["task"].as_str().unwrap_or(""))
         })
         .map(|l| format!("{l}\n"))
         .collect();
@@ -505,6 +506,146 @@ fn the_report_uses_engineering_names_and_a_calibrator_version() {
     );
 }
 
+/// Run the binary with an extra environment variable set.
+fn run_env(args: &[&str], key: &str, value: &str) -> (i32, String, String) {
+    let out = Command::new(tsr_bin())
+        .args(args)
+        .env(key, value)
+        .output()
+        .expect("the tsr binary runs");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// B16: a different seed changes the bundle id (the split, and so the fitted head, differ).
+#[test]
+fn b16_a_different_seed_changes_the_bundle_id() {
+    let dir = temp_dir("b16-seed");
+    let (ev, tk, lb) = regenerate(&dir);
+    let mut ids = Vec::new();
+    for seed in ["1", "2"] {
+        let ds = dir.join(format!("ds-{seed}"));
+        let (code, out, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "repo",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            seed,
+            "--out",
+            ds.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "dataset seed {seed} failed:\n{out}\n{err}");
+        let b = dir.join(format!("models-{seed}"));
+        let (code, out, err) = run(&[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "fit seed {seed} failed:\n{out}\n{err}");
+        ids.push(out.trim().to_string());
+    }
+    assert_ne!(
+        ids[0], ids[1],
+        "B16: a different seed changes the bundle id"
+    );
+}
+
+/// B16: `TSR_CODE_COMMIT` is recorded but does not change the bundle id.
+#[test]
+fn b16_tsr_code_commit_leaves_the_bundle_id_unchanged() {
+    let dir = temp_dir("b16-commit");
+    let ds = build_dataset(&dir, "7");
+    let b1 = dir.join("models-a");
+    let (code, out, err) = run_env(
+        &[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            b1.to_str().unwrap(),
+        ],
+        "TSR_CODE_COMMIT",
+        "deadbeef",
+    );
+    assert_eq!(code, 0, "fit failed:\n{out}\n{err}");
+    let id1 = out.trim().to_string();
+    let b2 = dir.join("models-b");
+    let (code, out, err) = run_env(
+        &[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            b2.to_str().unwrap(),
+        ],
+        "TSR_CODE_COMMIT",
+        "cafebabe",
+    );
+    assert_eq!(code, 0, "fit failed:\n{out}\n{err}");
+    let id2 = out.trim().to_string();
+    assert_eq!(
+        id1, id2,
+        "B16: TSR_CODE_COMMIT leaves the bundle id unchanged"
+    );
+}
+
+/// B16: no report or apply output holds "percent certain" or a TSR term followed by a number.
+#[test]
+fn b16_no_forbidden_strings_in_report_or_apply() {
+    let dir = temp_dir("b16-strings");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let (code, report_out, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 0, "report failed: {err}");
+    let (code, apply_out, err) = run(&[
+        "train",
+        "apply",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "apply failed: {err}");
+    for (label, out) in [("report", &report_out), ("apply", &apply_out)] {
+        assert!(
+            !out.to_lowercase().contains("percent certain"),
+            "B16: no 'percent certain' in {label}:\n{out}"
+        );
+        // A TSR term followed by a number, e.g. "TSR-3" or "tsr 3".
+        let lower = out.to_lowercase();
+        for (i, _) in lower.match_indices("tsr") {
+            let rest = &lower[i + 3..];
+            let rest = rest.trim_start_matches(['-', '_', ' ']);
+            if rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                panic!("B16: a TSR term followed by a number in {label}:\n{out}");
+            }
+        }
+    }
+}
+
 /// §B7/§B8, B4/B5/B6, DoD: the paired difference (controller minus generator) on held_out rows,
 /// per task, with the 90% cluster-bootstrap interval over lineage.
 ///
@@ -538,7 +679,7 @@ fn the_controller_beats_the_generator_on_held_out() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Parse `mean=brier=<m> [<lo>, <hi>] <verdict>` for one family key.
+    // Parse `mean=brier=<m> [interval_lo=<lo>, interval_hi=<hi>] <verdict>` for one family key.
     let parse = |key: &str| -> (f64, f64, f64, String) {
         let line = paired
             .lines()
@@ -550,14 +691,18 @@ fn the_controller_beats_the_generator_on_held_out() {
             .and_then(|s| s.split_whitespace().next())
             .and_then(|s| s.parse().ok())
             .unwrap_or_else(|| panic!("no mean in `{line}`"));
-        let lo_hi = line
-            .split('[')
+        let lo: f64 = line
+            .split("interval_lo=")
+            .nth(1)
+            .and_then(|s| s.split(',').next())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no interval_lo in `{line}`"));
+        let hi: f64 = line
+            .split("interval_hi=")
             .nth(1)
             .and_then(|s| s.split(']').next())
-            .expect("an interval");
-        let (lo, hi) = lo_hi.split_once(',').expect("lo, hi");
-        let lo: f64 = lo.trim().parse().unwrap();
-        let hi: f64 = hi.trim().parse().unwrap();
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no interval_hi in `{line}`"));
         let verdict = if line.contains("INCONCLUSIVE") {
             "INCONCLUSIVE"
         } else if line.contains("conclusive") {

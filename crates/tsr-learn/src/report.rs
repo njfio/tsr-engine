@@ -1178,27 +1178,9 @@ mod tests {
         //   (0.1-0)^2 - (0.5-0)^2 = 0.01 - 0.25 = -0.24 each.
         // Per-task mean = (0 + (-0.24))/2 = -0.12; per-row mean = (0 + (-0.24)*3)/4 = -0.18.
         let mut rows = Vec::new();
-        rows.push(row_in_task(
-            &b,
-            "calibrated",
-            "lA",
-            "taskA",
-            1.0,
-            true,
-            0.9,
-            0,
-        ));
+        rows.push(row_in_task(&b, "calibrated", "taskA", 1.0, true, 0.9, 0));
         for i in 1..4u64 {
-            rows.push(row_in_task(
-                &b,
-                "calibrated",
-                "lB",
-                "taskB",
-                0.0,
-                false,
-                0.5,
-                i,
-            ));
+            rows.push(row_in_task(&b, "calibrated", "taskB", 0.0, false, 0.5, i));
         }
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 7);

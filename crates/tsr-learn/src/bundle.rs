@@ -422,12 +422,14 @@ pub fn write_bundle(
         Some(&split_json),
     );
     if !probe_report.is_clean() {
+        // A7: name the row (and, for probe (b), the feature) — not just the probe. The `Leak`
+        // Display carries the probe, the row id (or `feature:<name>`) and the detail.
         let caught = probe_report
             .leaks
             .iter()
-            .map(|l| l.probe.name())
+            .map(|l| l.to_string())
             .collect::<Vec<_>>()
-            .join(", ");
+            .join("; ");
         return Err(LearnError::Invalid(format!(
             "probe caught a leak: {caught}"
         )));
@@ -1010,6 +1012,60 @@ mod tests {
         write_bundle(&ddir, &out, 12).unwrap();
         let b = load_bundle(&out).unwrap();
         assert_eq!(b.manifest.support_floor, 12);
+    }
+
+    /// A7: a probe caught in `fit` names the row, and for probe (b) the feature — not just the
+    /// probe name. Before the fix, `write_bundle` joined only `l.probe.name()`.
+    #[test]
+    fn a7_a_caught_probe_in_fit_names_the_row_and_feature() {
+        let spec = spec_for_families(&["calibrated".to_string()]);
+        let dim = spec.names.len();
+        let mut rows = Vec::new();
+        for i in 0..160u64 {
+            let label = i % 2 == 0;
+            let mut v = vec![0.0; dim];
+            // The label copied into feature 0: a perfect threshold separator.
+            v[0] = if label { 1.0 } else { 0.0 };
+            let side = if i < 120 { Side::Fit } else { Side::Calibrate };
+            let mut r = row("calibrated", v, Some(label), side, i);
+            r.lineage = if side == Side::Fit { "l0" } else { "l1" }.to_string();
+            r.id = crate::dataset::row_id_of(&r);
+            rows.push(r);
+        }
+        let mut assignments = std::collections::BTreeMap::new();
+        for r in &rows {
+            assignments.insert(r.task.to_string(), r.side);
+        }
+        let data_root = crate::dataset::data_root(&rows);
+        let training_root = crate::dataset::training_root(&rows);
+        let digest = crate::dataset::split_digest(SplitBy::Time, 7, &assignments);
+        let ds = Dataset {
+            rows,
+            split: SplitManifest {
+                by: SplitBy::Time,
+                seed: 7,
+                assignments,
+                digest,
+            },
+            spec,
+            data_root,
+            training_root,
+            source_root: Hash::of(&[b"a7"]),
+            unindexed_tasks: 0,
+        };
+        let ddir = tmpdir("ds-a7");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("out-a7");
+        let err = write_bundle(&ddir, &out, 30).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("label_reach"),
+            "A7: the error names the probe: {msg}"
+        );
+        assert!(
+            msg.contains("feature:"),
+            "A7: the error names the feature: {msg}"
+        );
     }
 
     /// Strip the `id` line and the `[content_digests]` table from a manifest, as an attacker
