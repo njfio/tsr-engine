@@ -3,8 +3,8 @@
 //! Four rows, each a crash point where the log holds a `Dispatched` with neither `Executed` nor
 //! `Unresolved`, and each asserting the exact event kinds appended:
 //!
-//! 1. **intent** — the crash lands after the intent is committed, before the effect. An
-//!    idempotent tool is reconciled to at most one `Executed`; a non-idempotent one is blocked.
+//! 1. **intent** — the crash lands after the intent is committed, before the effect. Nothing was
+//!    dispatched, so there is no pending dispatch and reconcile appends nothing.
 //! 2. **send** — the crash lands after the effect was sent, before the acknowledgement. The log
 //!    holds no `Executed`, so the check cannot say: the dispatch stays `Unresolved`.
 //! 3. **acknowledgement** — the crash lands after the effect, before the ack is recorded. Same
@@ -18,8 +18,8 @@
 use std::collections::BTreeSet;
 
 use tsr_cli::reconcile_cmd::{
-    intent_key, pending_dispatches, reconcile_one, reconcile_task, record_cancellation, Reconciled,
-    Reconciler, Resolution, ToolCheck, CANCELLED, UNKNOWN_IDEMPOTENT, UNKNOWN_NON_IDEMPOTENT,
+    intent_key, pending_dispatches, reconcile_one, reconcile_task, record_cancellation, Resolution,
+    ToolCheck, CANCELLED, UNKNOWN_IDEMPOTENT, UNKNOWN_NON_IDEMPOTENT,
 };
 use tsr_domain::{
     ActionKind, Candidate, CandidateId, Event, EventId, EventKind, ExecError, ExecOutcome,
@@ -286,83 +286,40 @@ fn kinds(s: &Store) -> Vec<String> {
         .collect()
 }
 
-/// A reconciler that always answers the same thing, for the rows that do not need a tool.
-struct Fixed {
-    idempotent: bool,
-    answer: Reconciled,
-}
-
-impl Reconciler for Fixed {
-    fn idempotent(&self, _c: &CandidateId) -> bool {
-        self.idempotent
-    }
-    fn check(&self, _c: &CandidateId, _intent: &str) -> Reconciled {
-        self.answer.clone()
-    }
-}
 // ---------------------------------------------------------------------------------------------
-// Row 1: crash at intent
+// Row 1: crash at intent — nothing was dispatched
 // ---------------------------------------------------------------------------------------------
 
+/// D5: the intent crash point leaves no `Dispatched`, so there is no pending dispatch and
+/// reconcile appends nothing. The old `row_intent_*` tests reconciled a `Dispatched` store — the
+/// Send row's store, not the Intent row's — and asserted `UnresolvedIdempotent`/`UnresolvedBlocked`
+/// for it; the matrix's Intent row has nothing dispatched, so those results are unreachable here.
 #[test]
-fn row_intent_idempotent_unknown_is_unresolved_and_retryable() {
+fn row_intent_nothing_dispatched_has_no_pending_dispatch() {
     let cand = candidate("intent-idem");
-    let (s, dispatch) = dispatched(&cand);
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-    assert_eq!(pending.len(), 1, "the dispatch has no outcome yet");
-    assert_eq!(pending[0].candidate, cand.id);
-    assert_eq!(pending[0].dispatched, dispatch.id);
-
-    let r = Fixed {
-        idempotent: true,
-        answer: Reconciled::Unknown,
-    };
-    let res = reconcile_one(&s, &task(), &pending[0], &r, "t3").unwrap();
-    assert_eq!(res, Resolution::UnresolvedIdempotent);
-    assert!(res.retryable(), "an idempotent unknown may be retried once");
-
-    let events = s.by_task(&task()).unwrap();
+    let cas = std::env::temp_dir().join(format!("tsr-d5-intent-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Intent, &cas);
     assert_eq!(
         kinds(&s),
-        vec!["task_opened", "proposed", "dispatched", "unresolved"]
+        vec!["task_opened", "proposed"],
+        "the intent crash point leaves nothing dispatched"
     );
-    let last = &events.last().unwrap().1;
-    assert_eq!(
-        last.parents,
-        vec![dispatch.id],
-        "the reconciliation names its intent"
-    );
-    match &last.kind {
-        EventKind::Unresolved { candidate, reason } => {
-            assert_eq!(*candidate, cand.id);
-            assert_eq!(reason, UNKNOWN_IDEMPOTENT);
-        }
-        other => panic!("expected Unresolved, got {other:?}"),
-    }
-}
-
-#[test]
-fn row_intent_non_idempotent_unknown_is_blocked() {
-    let cand = candidate("intent-nonidem");
-    let (s, _) = dispatched(&cand);
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-    let r = Fixed {
-        idempotent: false,
-        answer: Reconciled::Unknown,
-    };
-    let res = reconcile_one(&s, &task(), &pending[0], &r, "t3").unwrap();
-    assert_eq!(res, Resolution::UnresolvedBlocked);
-    assert!(!res.retryable(), "a non-idempotent unknown stays blocked");
 
     let events = s.by_task(&task()).unwrap();
-    assert_eq!(
-        kinds(&s),
-        vec!["task_opened", "proposed", "dispatched", "unresolved"]
+    let check = ToolCheck::from_log(&events);
+    assert!(
+        pending_dispatches(&events).is_empty(),
+        "nothing was dispatched, so nothing is pending"
     );
-    match &events.last().unwrap().1.kind {
-        EventKind::Unresolved { reason, .. } => assert_eq!(reason, UNKNOWN_NON_IDEMPOTENT),
-        other => panic!("expected Unresolved, got {other:?}"),
-    }
+    // Reconcile over this store appends nothing: the CLI prints "no pending dispatches".
+    let out = reconcile_task(&s, &task(), &check, "t3").unwrap();
+    assert!(
+        out.is_empty(),
+        "reconcile appends nothing at the intent row"
+    );
+    assert_eq!(kinds(&s), vec!["task_opened", "proposed"]);
+    std::fs::remove_dir_all(&cas).ok();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -741,9 +698,9 @@ fn d5_matrix_rows_reconcile_the_store_their_crash_point_left() {
 /// `Executed` from the fake executor's private keys. The old matrix fed `ex.tool_check(...)`,
 /// whose `seen_keys` already held the idempotency key (the effect was sent before the ack
 /// crashed), so the row settled `Executed` — the same as the `None` row. The CLI builds its
-/// check with `ToolCheck::from_log` over the store, which holds no `Executed` for this dispatch
-/// and no digest in the CAS, so the row is `Unresolved` (idempotent, retryable). This test fails
-/// if the matrix ever goes back to the fake's keys.
+/// check with `ToolCheck::from_log` over the store, which holds no `Executed` for this dispatch,
+/// so the row is `Unresolved` (idempotent, retryable) — the CAS is never consulted (D1, N3). This
+/// test fails if the matrix ever goes back to the fake's keys.
 #[test]
 fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
     let cand = candidate("matrix-ack-not-fake");
@@ -769,8 +726,8 @@ fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
         ex.has_seen(&intent_key(&cand.id)),
         "the fake's private keys claim the effect happened"
     );
-    // The CLI's check, built from the log and the CAS, cannot say: no `Executed` in the log and
-    // no digest in the CAS.
+    // The CLI's check, built from the log alone, cannot say: no `Executed` in the log settles
+    // this dispatch, and the CAS is never consulted (D1, N3).
     let cas = std::env::temp_dir().join(format!("tsr-d5-ack-not-fake-{}", std::process::id()));
     std::fs::create_dir_all(&cas).unwrap();
     let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
@@ -792,6 +749,11 @@ fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
     std::fs::remove_dir_all(&cas).ok();
 }
 
+/// D5: `reconcile_task` settles every pending dispatch once, through the same check the CLI
+/// builds (`ToolCheck::from_log`). Two idempotent dispatches with no `Executed` in the log are
+/// both `UnresolvedIdempotent` (retryable) — the CLI prints two `unresolved retryable`. The old
+/// test fed a hand-built `Fixed` reconciler answering `Executed` and asserted `Resolution::Executed`,
+/// which the CLI never yields for this store.
 #[test]
 fn reconcile_task_settles_every_pending_dispatch_once() {
     let a = candidate("multi-a");
@@ -830,17 +792,21 @@ fn reconcile_task_settles_every_pending_dispatch_once() {
         s.append(&dispatch).unwrap();
         parents = vec![dispatch.id];
     }
-    let r = Fixed {
-        idempotent: true,
-        answer: Reconciled::Executed {
-            exit_code: Some(0),
-            log_digest: None,
-            duration_ms: 1,
-        },
-    };
-    let out = reconcile_task(&s, &task(), &r, "t3").unwrap();
+    // The CLI's own check: built from the log, it cannot say (no `Executed`), so both dispatches
+    // are idempotent unknowns — retryable, not settled.
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&events);
+    let out = reconcile_task(&s, &task(), &check, "t3").unwrap();
     assert_eq!(out.len(), 2, "one resolution per pending dispatch");
-    assert!(out.iter().all(|(_, r)| *r == Resolution::Executed));
+    assert!(
+        out.iter()
+            .all(|(_, r)| *r == Resolution::UnresolvedIdempotent),
+        "the CLI yields two unresolved retryable, not Executed: {out:?}"
+    );
+    assert!(
+        out.iter().all(|(_, r)| r.retryable()),
+        "each idempotent unknown may be retried once"
+    );
     assert_eq!(
         kinds(&s),
         vec![
@@ -849,12 +815,30 @@ fn reconcile_task_settles_every_pending_dispatch_once() {
             "dispatched",
             "proposed",
             "dispatched",
-            "executed",
-            "executed"
+            "unresolved",
+            "unresolved"
         ]
     );
-    // Idempotent: a second reconcile finds nothing pending.
-    assert!(reconcile_task(&s, &task(), &r, "t4").unwrap().is_empty());
+    // §B6: the one retry is spent, so a second reconcile refuses both — nothing is appended.
+    let again = reconcile_task(&s, &task(), &check, "t4").unwrap();
+    assert_eq!(again.len(), 2, "both dispatches are still pending");
+    assert!(
+        again.iter().all(|(_, r)| *r == Resolution::Refused),
+        "a second retry of an idempotent unknown is refused: {again:?}"
+    );
+    assert_eq!(
+        kinds(&s),
+        vec![
+            "task_opened",
+            "proposed",
+            "dispatched",
+            "proposed",
+            "dispatched",
+            "unresolved",
+            "unresolved"
+        ],
+        "a refused retry appends nothing"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -913,7 +897,7 @@ fn cli_reconcile_over_a_real_store_reports_and_settles() {
         .output()
         .expect("the tsr binary runs");
     // D1: the CLI loads its evidence from the log, so a `RunApprovedTest` candidate is known
-    // idempotent. With no digest in the CAS the outcome is unknown, so the dispatch is recorded
+    // idempotent. With no `Executed` in the log the outcome is unknown, so the dispatch is recorded
     // `unresolved` and is retryable (exit 0) — not blocked.
     assert_eq!(
         out.status.code(),
@@ -1023,9 +1007,9 @@ fn d1_run_reconcile(db: &std::path::Path) -> (Option<i32>, String, String) {
 
 /// D1: an idempotent (`RunApprovedTest`) dispatch whose log holds its own `Executed` is settled —
 /// `pending_dispatches` finds nothing and reconcile appends nothing. The CAS is not consulted
-/// (D1, N3): the `Executed` is the evidence, not the artifact on disk.
+/// (D1, N3): the `Executed` in the log is the evidence, not the artifact on disk.
 #[test]
-fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
+fn d1_reconcile_settles_idempotent_dispatch_from_its_own_executed() {
     let dir = d1_scratch("resolves-idempotent");
     let db = dir.join("tsr.db");
     let cas = dir.join("cas");
@@ -1056,14 +1040,14 @@ fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
 
     let (code, stdout, stderr) = d1_run_reconcile(&db);
     assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
-    // The dispatch's own `Executed` is its evidence, so nothing is pending: the CAS digest in the
+    // The dispatch's own `Executed` is its evidence, so nothing is pending: the `Executed` in the
     // log settles it and reconcile appends nothing.
     assert!(
         stdout.contains("no pending dispatches"),
         "the dispatch is settled by its own Executed; stdout: {stdout}"
     );
 
-    // The log's last event is the dispatch's own Executed carrying the CAS digest.
+    // The log's last event is the dispatch's own Executed carrying the tool's log digest.
     let s = Store::open(&db).unwrap();
     let events = s.by_task(&task()).unwrap();
     let last = &events.last().unwrap().1;
@@ -1074,7 +1058,11 @@ fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
             ..
         } => {
             assert_eq!(*candidate, cand.id);
-            assert_eq!(*log_digest, Some(digest), "the CAS digest is the evidence");
+            assert_eq!(
+                *log_digest,
+                Some(digest),
+                "the Executed in the log is the evidence"
+            );
         }
         other => panic!("expected Executed, got {other:?}"),
     }

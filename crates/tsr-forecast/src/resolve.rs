@@ -86,9 +86,10 @@ pub struct TaskFacts {
     /// True when a `Stop { reason: "operator" }` event exists: an operator stop for external
     /// reasons, which censors the common decision event (B7).
     pub operator_stop: bool,
-    /// The reason of the *last* `Stop` event seen, if any. N1: the last Stop decides the task's
-    /// state at its close, so a later `Stop { done }` supersedes an earlier `Stop { operator }`.
-    pub last_stop: Option<String>,
+    /// The reason of the *last* close event seen, `Stop` or `TaskClosed`, if any. N1/P1: the last
+    /// close event decides, so a later `Stop { done }` supersedes an earlier `Stop { operator }`,
+    /// and a `TaskClosed { operator }` after any `Stop` still censors.
+    pub last_close: Option<String>,
     /// True when a `Stop { reason: "budget" }` or `TaskClosed { reason: "budget" }` event exists:
     /// a budget ceiling was breached, so the common decision event resolves false (B7).
     pub budget_breached: bool,
@@ -121,6 +122,8 @@ impl TaskFacts {
                 EventKind::TaskClosed { reason, .. } => {
                     f.closed = true;
                     f.close_reason = Some(reason.clone());
+                    // P1: the last close event, Stop or TaskClosed, decides.
+                    f.last_close = Some(reason.clone());
                     if reason == "done" {
                         f.criteria_met = true;
                     }
@@ -144,10 +147,11 @@ impl TaskFacts {
                     // hook-recorded forecast could never resolve. A `Stop { done }` is the task's
                     // close (its criteria were met); `Stop { operator }` is an operator stop.
                     //
-                    // N1: the *last* Stop decides. The hook writes a Stop on every turn, with
-                    // `operator` whenever `stop_hook_active` is set, so an early `Stop { operator }`
-                    // must not censor a session that later closes with `Stop { done }`.
-                    f.last_stop = Some(reason.clone());
+                    // N1/P1: the *last* close event decides. The hook writes a Stop on every turn,
+                    // with `operator` whenever `stop_hook_active` is set, so an early
+                    // `Stop { operator }` must not censor a session that later closes with
+                    // `Stop { done }`; and a `TaskClosed { operator }` after any Stop still censors.
+                    f.last_close = Some(reason.clone());
                     if reason == "operator" {
                         f.operator_stop = true;
                     }
@@ -332,9 +336,10 @@ fn resolve_diff_accepted(
 
 fn resolve_common(def: &NamedEvent, facts: &TaskFacts) -> (Resolution, Vec<tsr_domain::EventId>) {
     // §B7: censored on an operator stop for external reasons, whether or not the task has closed.
-    // N1: the *last* Stop decides. A later `Stop { done | budget }` supersedes an earlier
-    // `Stop { operator }`; only when no Stop was recorded does a `TaskClosed { operator }` decide.
-    let operator_stop = match facts.last_stop.as_deref() {
+    // N1/P1: the *last* close event decides. A later `Stop { done | budget }` supersedes an earlier
+    // `Stop { operator }`, and a `TaskClosed { operator }` after any `Stop` still censors: the last
+    // of the `Stop`/`TaskClosed` events is the one that decides the task's state at its close.
+    let operator_stop = match facts.last_close.as_deref() {
         Some("operator") => true,
         Some(_) => false,
         None => facts.operator_stop,

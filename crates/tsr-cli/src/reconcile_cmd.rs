@@ -377,7 +377,8 @@ pub fn from_exec_outcome(outcome: &ExecOutcome) -> Result<Reconciled, ExecError>
 
 /// Run `tsr task reconcile <task>`.
 ///
-/// The store path is the task's log; the CAS root is its sibling `cas/` directory. Exit codes:
+/// The store path is the task's log; reconcile reads only the log and never the CAS (D1, N3).
+/// Exit codes:
 ///
 /// | code | meaning |
 /// | --- | --- |

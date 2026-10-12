@@ -345,6 +345,60 @@ fn n1_last_stop_decides() {
     );
 }
 
+/// P1: a `TaskClosed { operator }` after any hook `Stop` still censors. The last close event,
+/// `Stop` or `TaskClosed`, decides: `Executed` -> `Stop { done }` -> `TaskClosed { operator }` ->
+/// accepted resolves censored, not true.
+#[test]
+fn p1_task_closed_operator_after_stop_done_censors() {
+    let mut log = Vec::new();
+    push(
+        &mut log,
+        EventKind::TaskOpened { task: task() },
+        Source::Rules,
+    );
+    let candidate = Candidate::new(
+        ActionKind::ProposePatch,
+        Source::Generator,
+        Hash::of(&[b"p1-args"]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("a valid candidate");
+    push(
+        &mut log,
+        EventKind::Executed {
+            candidate: candidate.id,
+            exit_code: Some(0),
+            log_digest: None,
+            duration_ms: 0,
+        },
+        Source::Rules,
+    );
+    // The hook closes the session with `Stop { done }`, and the operator then cancels for
+    // external reasons.
+    push(
+        &mut log,
+        EventKind::Stop {
+            reason: "done".into(),
+        },
+        Source::Rules,
+    );
+    push(
+        &mut log,
+        EventKind::TaskClosed {
+            task: task(),
+            reason: "operator".into(),
+        },
+        Source::Operator,
+    );
+    label(&mut log, LabelStatus::Observed);
+    assert_eq!(
+        resolve_common(&log),
+        Resolution::Censored,
+        "the last close event decides: TaskClosed{{operator}} after Stop{{done}} censors (B7)"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // D11 — the residual's sign.
 // ---------------------------------------------------------------------------------------------
