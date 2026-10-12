@@ -14,9 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tsr_batch::driver::{
-    read_session, Mode, ScriptedDriver, ScriptedRepo, ScriptedSession, StepArgs,
-};
+use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedRepo, ScriptedSession};
 use tsr_batch::run::{run_all, BatchConfig};
 use tsr_batch::task::read_tasks;
 use tsr_batch::ClaudeCodeDriver;
@@ -103,7 +101,7 @@ fn run_inner(
                     // the CLI replays — not only in tests. In record mode the controller is
                     // ignored (system 1 gates nothing), so it is not attached.
                     let driver = if mode == Mode::Rules {
-                        let repo = scripted_repo_for(&session, &config.profile);
+                        let repo = scripted_repo_for(task, &config.profile);
                         ScriptedDriver::new(mode, session)
                             .with_tier0(repo, config.profile.budgets.tool_minutes)
                     } else {
@@ -187,32 +185,79 @@ fn resolve_profile(profile_arg: Option<&Path>) -> Result<PathBuf, String> {
     ))
 }
 
-/// The scripted repository the Tier 0 controller checks, derived from the session itself.
+/// The scripted repository the Tier 0 controller checks, derived from the **task**, not the
+/// session (N4).
 ///
 /// The controller's read-before-test rule compares the paths a session inspects against the
-/// failing assertion and its call site. The ground truth of what a session read is the session's
-/// own `inspect` steps, so the assertion is the first inspected path and the call site the second
-/// — never the task's family, which need not name a file the session ever opens (a `lexer` task
-/// whose fixture session inspects `src/parser.rs` would otherwise be denied for not reading a file
-/// it was never given). The failing test id is the first allowlisted test the session runs, else
-/// the profile's first test.
-fn scripted_repo_for(session: &ScriptedSession, profile: &Profile) -> ScriptedRepo {
-    let mut inspected = session.steps.iter().filter_map(|step| match &step.args {
-        StepArgs::InspectPath { path } => Some(path.clone()),
-        _ => None,
-    });
-    let assertion = inspected.next().unwrap_or_default();
-    let call_site = inspected.next().unwrap_or_else(|| assertion.clone());
-    let failing_test_id = session
-        .steps
-        .iter()
-        .find_map(|step| match &step.args {
-            StepArgs::TestId { id } => Some(id.clone()),
-            _ => None,
-        })
-        .or_else(|| profile.tests.first().map(|t| t.id.clone()))
-        .unwrap_or_default();
+/// failing assertion and its call site. Deriving those from the session's own `inspect` steps made
+/// the rule vacuous: any session that inspected any two files before its first test passed, because
+/// the session chose what it had to have read. The ground truth is the task: the files to have been
+/// read are the files that define the task's failing tests, and the failing test id is the task's
+/// own failing test.
+///
+/// A Rust test path `a::b::c` is defined in the file of module `a::b`; for a crate whose module
+/// `a` is a top-level module that is `src/a.rs` (unit tests) or `tests/a.rs` (integration tests).
+/// The first such file is the failing assertion's file and the second its call site. A task whose
+/// failing tests name no module (no `::`) yields no file, and the rule is then not enforced — the
+/// task's oracle test files (item 2) are what close that gap.
+fn scripted_repo_for(task: &tsr_batch::CorpusTask, profile: &Profile) -> ScriptedRepo {
+    let files = oracle_test_files(task);
+    let assertion = files.first().cloned().unwrap_or_default();
+    let call_site = files.get(1).cloned().unwrap_or_else(|| assertion.clone());
+    let failing_test_id = failing_test_command(task, profile);
     ScriptedRepo::new(assertion, call_site, failing_test_id)
+}
+
+/// The profile test command id that runs the task's failing test (N4).
+///
+/// The session names an allowlisted command id, never the task's test path, so the controller's
+/// `failing_test_id` is the profile command whose argv covers the failing test's crate — the
+/// command the session would run to exercise it. A task whose failing test names no crate, or a
+/// profile with no command that names it, falls back to the profile's first command.
+fn failing_test_command(task: &tsr_batch::CorpusTask, profile: &Profile) -> String {
+    let crate_name = task
+        .failing_tests()
+        .into_iter()
+        .find_map(|test| test.split_once("::").map(|(module, _)| module.to_string()));
+    if let Some(crate_name) = crate_name {
+        let head = crate_name.split("::").next().unwrap_or(&crate_name);
+        if let Some(cmd) = profile
+            .tests
+            .iter()
+            .find(|t| t.argv.iter().any(|a| a == head))
+        {
+            return cmd.id.clone();
+        }
+    }
+    profile
+        .tests
+        .first()
+        .map(|t| t.id.clone())
+        .unwrap_or_default()
+}
+
+/// The repository paths of the files that define a task's failing tests, derived from the test
+/// paths themselves (N4).
+///
+/// A test path `a::b::c` names a test `c` in module `a::b`; the file that defines it is the file
+/// of module `a` — `src/a.rs` for a unit-test module, `tests/a.rs` for an integration test. The
+/// paths are returned sorted and deduplicated so the assertion and call site are stable.
+fn oracle_test_files(task: &tsr_batch::CorpusTask) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for test in task.failing_tests() {
+        let Some((module, _)) = test.split_once("::") else {
+            continue;
+        };
+        let head = module.split("::").next().unwrap_or(module);
+        if head.is_empty() {
+            continue;
+        }
+        files.push(format!("src/{head}.rs"));
+        files.push(format!("tests/{head}.rs"));
+    }
+    files.sort();
+    files.dedup();
+    files
 }
 
 /// Load one session per task, in the order the manifest names them.

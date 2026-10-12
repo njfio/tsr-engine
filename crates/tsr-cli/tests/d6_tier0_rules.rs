@@ -563,3 +563,114 @@ fn d6_batch_continues_after_a_read_before_test_refusal() {
         "D6 (F2): both tasks must be recorded; results: {results}"
     );
 }
+
+/// A rules session that inspects two files that are **not** the task's oracle test files, then
+/// runs the failing test. On the pre-fix code the controller took the "failing assertion" and its
+/// "call site" from the session's own first two inspects, so this session satisfied
+/// read-before-test and ran the test. After the fix the files to have been read come from the task
+/// (`parser::tests::handles_empty_input` → `src/parser.rs`, `tests/parser.rs`), so this session is
+/// denied.
+fn unrelated_inspect_session() -> serde_json::Value {
+    serde_json::json!({
+        "name": "n4-unrelated-inspect",
+        "steps": [
+            {
+                "kind": "inspect",
+                "args": { "arg": "inspect_path", "path": "src/unrelated.rs" },
+                "forecast": 0.9, "forecast_event": "test_pass", "dispatch": false,
+                "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
+                "tool_minutes": 0, "wall_clock_ms": 0
+            },
+            {
+                "kind": "inspect",
+                "args": { "arg": "inspect_path", "path": "tests/unrelated.rs" },
+                "forecast": 0.9, "forecast_event": "test_pass", "dispatch": false,
+                "exit_code": null, "duration_ms": 0, "generator_tokens": 0,
+                "tool_minutes": 0, "wall_clock_ms": 0
+            },
+            {
+                "kind": "run_approved_test",
+                "args": { "arg": "test_id", "id": "cargo-test-parser" },
+                "forecast": 0.4, "forecast_event": "test_pass", "dispatch": true,
+                "exit_code": 101, "duration_ms": 1200, "generator_tokens": 0,
+                "tool_minutes": 1, "wall_clock_ms": 1200
+            }
+        ]
+    })
+}
+
+/// N4: the read-before-test rule reads the **task**, not the session.
+///
+/// The defect: `batch_cmd.rs` `scripted_repo_for` took the failing assertion and its call site from
+/// the session's own first two `inspect` steps, so any session that inspected any two files before
+/// its first test passed read-before-test. The files to have been read must come from the task: the
+/// files that define the task's failing tests. A session that inspects unrelated files and then
+/// runs the failing test is denied.
+#[test]
+fn n4_read_before_test_reads_the_task_not_the_session() {
+    let ws = workspace();
+    let scratch = ws.join("target/n4-read-before-test");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let manifest = scratch.join("tasks.jsonl");
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}\n",
+            task_json("n4-task", "parser", "parser::tests::handles_empty_input")
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        scratch.join("session-rules.json"),
+        serde_json::to_string_pretty(&unrelated_inspect_session()).unwrap(),
+    )
+    .unwrap();
+    let out = scratch.join("out");
+    let profile = ws.join("profiles/default.toml");
+
+    let output = Command::new(tsr_bin())
+        .args([
+            "task",
+            "run",
+            "--mode",
+            "rules",
+            "--tasks",
+            manifest.to_str().unwrap(),
+            "--driver",
+            "scripted",
+            "--out",
+            out.to_str().unwrap(),
+            "--profile",
+            profile.to_str().unwrap(),
+            "--scripted-runner",
+        ])
+        .output()
+        .expect("run tsr");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "N4: a read-before-test refusal must not abort the batch; got {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+
+    // The task must end on the Tier 0 refusal: the session inspected files the task never named.
+    let events = events_of(&out, "n4-task");
+    assert!(
+        has_stop(&events, "blocked"),
+        "N4: a session that inspects unrelated files must be denied read-before-test; events: {events:#?}"
+    );
+    assert!(
+        has_task_closed(&events),
+        "N4: the denied task must be closed; events: {events:#?}"
+    );
+
+    let results = std::fs::read_to_string(out.join("results-rules.jsonl")).unwrap();
+    assert!(
+        !results.contains("\"accepted\""),
+        "N4: a session that never read the task's oracle test files must not be accepted; results: {results}"
+    );
+}
