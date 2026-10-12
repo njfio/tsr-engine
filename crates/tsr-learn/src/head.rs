@@ -152,6 +152,22 @@ pub fn predict(head: &Head, x: &FeatureVector) -> f64 {
     sigmoid(z)
 }
 
+/// B1: the head's output, refusing a feature vector whose length differs from the head's weights.
+///
+/// `predict` zips the vector against the weights, so a shorter vector silently drops the tail and a
+/// longer one silently ignores it — a misaligned vector then prints a plausible number. Callers
+/// that score a dataset against a bundle use this so a length mismatch is an error, not a score.
+pub fn predict_checked(head: &Head, x: &FeatureVector) -> Result<f64, crate::LearnError> {
+    if x.values.len() != head.weights.len() {
+        return Err(crate::LearnError::Invalid(format!(
+            "feature length {} does not match the head's {} weights",
+            x.values.len(),
+            head.weights.len()
+        )));
+    }
+    Ok(predict(head, x))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

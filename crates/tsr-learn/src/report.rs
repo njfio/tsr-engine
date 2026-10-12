@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bundle::Bundle;
 use crate::dataset::{Dataset, Row, Side};
-use crate::head::predict;
+use crate::head::predict_checked;
 use crate::isotonic::apply_isotonic;
 use crate::support::support;
 use tsr_domain::{Proxy, Support};
@@ -69,6 +69,8 @@ pub struct Paired {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Report {
     pub bundle_id: String,
+    /// The dataset's split digest, so a report names the split it scored.
+    pub split_digest: String,
     pub calibrator: String,
     pub seed: u64,
     /// The number of held_out rows with a resolved label.
@@ -118,17 +120,21 @@ pub struct FloorPoint {
 pub const FLOOR_SWEEP: [u32; 6] = [0, 5, 10, 20, 30, 50];
 
 /// The controller's calibrated `p` for a row, or `None` when the row is uncalibrated.
+///
+/// B1: a row whose feature length differs from the bundle's is refused rather than zipped.
 pub fn calibrated_p(bundle: &Bundle, row: &Row) -> Option<f64> {
     if !bundle.population_contains(&row.family) {
         return None;
     }
-    let raw = predict(&bundle.head, &row.features);
+    let raw = predict_checked(&bundle.head, &row.features).ok()?;
     Some(apply_isotonic(&bundle.isotonic, raw))
 }
 
 /// The controller's raw `p` for a row (the head's output, always).
+///
+/// B1: a row whose feature length differs from the bundle's is refused rather than zipped.
 pub fn raw_p(bundle: &Bundle, row: &Row) -> f64 {
-    predict(&bundle.head, &row.features)
+    predict_checked(&bundle.head, &row.features).unwrap_or(f64::NAN)
 }
 
 /// Score a set of `(p, y)` pairs.
@@ -193,6 +199,53 @@ fn scored_rows(ds: &Dataset) -> Vec<&Row> {
         .collect()
 }
 
+/// B1: refuse a dataset that does not belong to the bundle.
+///
+/// `report` scores the bundle's head and calibrator against the dataset's rows, so a dataset with
+/// another split or another feature spec is not the bundle's evaluation set: a foreign split makes
+/// the bundle's own fit and calibrate rows look held-out, and a foreign feature length makes
+/// `predict` zip misaligned vectors and print a plausible score. The split digest and the feature
+/// spec (schema version, feature names and length) must match; the error names what differs.
+pub fn check_dataset_matches_bundle(
+    bundle: &Bundle,
+    dataset: &Dataset,
+) -> Result<(), crate::LearnError> {
+    let want = &bundle.manifest.split_digest;
+    let got = dataset.split.digest.to_hex();
+    if want != &got {
+        return Err(crate::LearnError::Invalid(format!(
+            "dataset split digest {got} does not match the bundle's {want}"
+        )));
+    }
+    if dataset.spec.version != bundle.spec.version {
+        return Err(crate::LearnError::Invalid(format!(
+            "dataset feature schema {} does not match the bundle's {}",
+            dataset.spec.version, bundle.spec.version
+        )));
+    }
+    if dataset.spec.names.len() != bundle.spec.names.len() {
+        return Err(crate::LearnError::Invalid(format!(
+            "dataset feature length {} does not match the bundle's {}",
+            dataset.spec.names.len(),
+            bundle.spec.names.len()
+        )));
+    }
+    for (i, (a, b)) in dataset
+        .spec
+        .names
+        .iter()
+        .zip(bundle.spec.names.iter())
+        .enumerate()
+    {
+        if a != b {
+            return Err(crate::LearnError::Invalid(format!(
+                "dataset feature {i} is {a:?}, the bundle's is {b:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Build the report, logging every held_out row read to `<dir>/holdout-access.jsonl` (B9).
 ///
 /// The split digest covers assignments only, so this logging never changes it.
@@ -202,6 +255,8 @@ pub fn report_logged(
     seed: u64,
     dir: &std::path::Path,
 ) -> Result<Report, crate::LearnError> {
+    // B1: refuse a dataset that does not belong to the bundle, before any row is read or logged.
+    check_dataset_matches_bundle(bundle, dataset)?;
     for r in dataset.rows.iter().filter(|r| r.side == Side::HeldOut) {
         crate::probes::log_holdout_access(dir, r, "report")?;
     }
@@ -361,6 +416,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
 
     Report {
         bundle_id: bundle.id.to_hex(),
+        split_digest: dataset.split.digest.to_hex(),
         calibrator: bundle.manifest.calibrator.clone(),
         seed,
         scored: rows.len() as u32,
@@ -455,6 +511,7 @@ pub fn render_report(r: &Report, json: bool) -> String {
     }
     let mut out = String::new();
     out.push_str(&format!("bundle {}\n", r.bundle_id));
+    out.push_str(&format!("split_digest {}\n", r.split_digest));
     out.push_str(&format!("calibrator {}\n", r.calibrator));
     out.push_str(&format!("seed {}\n", r.seed));
     out.push_str(&format!("scored {}\n", r.scored));
@@ -552,7 +609,7 @@ mod tests {
     use crate::bundle::{Bundle, Manifest};
     use crate::dataset::{SplitBy, SplitManifest};
     use crate::features::{spec_for_families, FeatureVector};
-    use crate::head::Head;
+    use crate::head::{predict_checked, Head};
     use crate::isotonic::Isotonic;
     use crate::support::SupportEntry;
     use std::collections::BTreeMap;
@@ -597,7 +654,7 @@ mod tests {
                     spec.version
                 ),
                 support_floor: 30,
-                split_digest: "s".into(),
+                split_digest: Hash::of(&[b"split"]).to_hex(),
                 source_root: "r".into(),
                 state: "draft".into(),
                 id: Hash::of(&[b"bundle"]).to_hex(),
@@ -834,6 +891,78 @@ mod tests {
         // Every number is a Proxy with its engineering name.
         assert!(text.contains("brier="), "{text}");
         assert!(text.contains("log_loss="), "{text}");
+    }
+
+    /// B1: `report` must refuse a dataset that does not belong to the bundle. The dataset's split
+    /// digest and its feature spec (schema version, feature names and length) must match the
+    /// bundle's; today `report` scores whatever it is handed.
+    #[test]
+    fn b1_report_refuses_a_foreign_dataset() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "calibrated", "l", signal, label, 0.9, i));
+        }
+
+        // A dataset with another split digest is refused, naming the split digest.
+        let mut foreign_split = dataset(&b, rows.clone());
+        foreign_split.split.digest = Hash::of(&[b"another split"]);
+        let err = report_logged(&b, &foreign_split, 7, std::path::Path::new("/tmp/none"))
+            .expect_err("a foreign split digest is refused");
+        let msg = err.to_string();
+        assert!(msg.contains("split digest"), "{msg}");
+
+        // A dataset with another feature-schema version is refused, naming the schema version.
+        let mut foreign_schema = dataset(&b, rows.clone());
+        foreign_schema.spec.version = "features@v2".to_string();
+        let err = report_logged(&b, &foreign_schema, 7, std::path::Path::new("/tmp/none"))
+            .expect_err("a foreign feature schema is refused");
+        let msg = err.to_string();
+        assert!(msg.contains("feature schema"), "{msg}");
+
+        // A dataset with another feature length is refused, naming the length.
+        let mut foreign_len = dataset(&b, rows.clone());
+        foreign_len.spec.names.pop();
+        foreign_len.spec.numeric_widths.pop();
+        let err = report_logged(&b, &foreign_len, 7, std::path::Path::new("/tmp/none"))
+            .expect_err("a foreign feature length is refused");
+        let msg = err.to_string();
+        assert!(msg.contains("feature length"), "{msg}");
+
+        // A dataset with another feature name is refused, naming the feature.
+        let mut foreign_name = dataset(&b, rows.clone());
+        foreign_name.spec.names[0] = "not_a_feature".to_string();
+        let err = report_logged(&b, &foreign_name, 7, std::path::Path::new("/tmp/none"))
+            .expect_err("a foreign feature name is refused");
+        let msg = err.to_string();
+        assert!(msg.contains("not_a_feature"), "{msg}");
+
+        // The matching dataset is accepted.
+        let ok = dataset(&b, rows);
+        assert!(report_logged(&b, &ok, 7, std::path::Path::new("/tmp/none")).is_ok());
+    }
+
+    /// B1: `predict` must return an error on a feature-length mismatch instead of zipping the
+    /// shorter vector against the head's weights and printing a plausible number.
+    #[test]
+    fn b1_predict_errors_on_a_length_mismatch() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let dim = b.spec.names.len();
+        let short = FeatureVector {
+            values: vec![0.0; dim - 1],
+        };
+        let err = predict_checked(&b.head, &short).expect_err("a short vector is refused");
+        assert!(err.to_string().contains("feature length"), "{err}");
+        let long = FeatureVector {
+            values: vec![0.0; dim + 1],
+        };
+        assert!(predict_checked(&b.head, &long).is_err());
+        let exact = FeatureVector {
+            values: vec![0.0; dim],
+        };
+        assert!(predict_checked(&b.head, &exact).is_ok());
     }
 
     #[test]
