@@ -92,7 +92,11 @@ pub fn mutants_cmd(repo: String, out: PathBuf) -> ExitCode {
 /// session in by asking the sealed sandbox to run this command, so the argv it builds names a real
 /// subcommand (D4). The checkout is a `git worktree` detached at the snapshot; `git` reads history
 /// and writes the working tree, it executes nothing from the repository.
-pub fn materialize_cmd(repo: Option<&std::path::Path>, snapshot: &str, out: &std::path::Path) -> ExitCode {
+pub fn materialize_cmd(
+    repo: Option<&std::path::Path>,
+    snapshot: &str,
+    out: &std::path::Path,
+) -> ExitCode {
     let repo = repo.unwrap_or_else(|| std::path::Path::new("."));
     match tsr_corpus::mine::materialize(repo, snapshot, out) {
         Ok(dest) => {

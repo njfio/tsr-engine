@@ -429,12 +429,19 @@ fn d4_provisioning_failure_is_refused() {
     let mut runner = ScriptedRunner::ok();
     let dest = dir.path().join("copies").join(&task.id).join("rules");
     let provision = tsr_batch::run::provision_argv(task.snapshot(), &dest);
-    runner.script(Path::new(task.snapshot()), &provision, RunResult::exit_only(1));
+    runner.script(
+        Path::new(task.snapshot()),
+        &provision,
+        RunResult::exit_only(1),
+    );
 
     let err = run_one(task, Mode::Rules, &driver, &runner, &config)
         .expect_err("a non-zero provisioning exit must be refused");
     assert!(
-        matches!(err, tsr_batch::run::RunError::ProvisioningFailed { exit: 1, .. }),
+        matches!(
+            err,
+            tsr_batch::run::RunError::ProvisioningFailed { exit: 1, .. }
+        ),
         "expected ProvisioningFailed, got {err:?}"
     );
 }
