@@ -123,18 +123,13 @@ pub fn oracle_cmd(
     full_suite: bool,
     suite: Option<&str>,
 ) -> ExitCode {
-    let suite_argv: Vec<String> = suite
-        .map(|s| s.split_whitespace().map(str::to_string).collect())
-        .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
-    let mut argv = suite_argv;
-    if let Some(tests) = tests {
-        for t in tests.split(',').filter(|t| !t.is_empty()) {
-            argv.push(t.to_string());
+    let argv = match oracle_argv(tests, full_suite, suite) {
+        Some(argv) => argv,
+        None => {
+            eprintln!("tsr: corpus oracle needs --tests <csv> or --full-suite");
+            return ExitCode::from(2);
         }
-    } else if !full_suite {
-        eprintln!("tsr: corpus oracle needs --tests <csv> or --full-suite");
-        return ExitCode::from(2);
-    }
+    };
 
     let runner = ExecRunner::new();
     let result = runner.run(snapshot, &argv, &tsr_corpus::Limits::new(600_000, 1 << 20));
@@ -145,6 +140,36 @@ pub fn oracle_cmd(
         println!("oracle: fail (exit {})", result.exit);
         ExitCode::from(1)
     }
+}
+
+/// The argv the oracle runs: the suite command, then the flipped tests after `--`.
+///
+/// R3: the flipped tests are passed to the suite *after* `--`, one argument each. Cargo accepts
+/// only one positional TESTNAME before `--`; `cargo test a b` fails with `unexpected argument 'b'`,
+/// so a task with two flipped tests could never be accepted. `cargo test -- a b` runs both (each is
+/// a substring filter, and the union is what the oracle wants: every flipped test must pass).
+///
+/// Returns `None` when neither `--tests` nor `--full-suite` was given.
+pub fn oracle_argv(
+    tests: Option<&str>,
+    full_suite: bool,
+    suite: Option<&str>,
+) -> Option<Vec<String>> {
+    let mut argv: Vec<String> = suite
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
+    if let Some(tests) = tests {
+        let names: Vec<&str> = tests.split(',').filter(|t| !t.is_empty()).collect();
+        if !names.is_empty() {
+            argv.push("--".to_string());
+            for t in names {
+                argv.push(t.to_string());
+            }
+        }
+    } else if !full_suite {
+        return None;
+    }
+    Some(argv)
 }
 
 /// `tsr corpus split <dir> --by time|repo --holdout <fraction> --seed <n>`.

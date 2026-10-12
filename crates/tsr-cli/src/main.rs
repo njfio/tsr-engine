@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use tsr_cli::{exec, hook, store_path, task};
 
 mod batch_cmd;
-mod corpus_cmd;
+pub mod corpus_cmd;
 mod eval_cmd;
 mod policy_cmd;
 

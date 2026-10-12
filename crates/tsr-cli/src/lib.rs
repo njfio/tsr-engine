@@ -11,6 +11,8 @@ pub mod hook;
 pub mod store_path;
 pub mod task;
 
+pub mod corpus_cmd;
+
 pub mod reconstruct {
     //! Rebuild a session from its event log and check the M0 invariants.
     //!
