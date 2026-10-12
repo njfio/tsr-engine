@@ -731,6 +731,167 @@ fn d9_list_argv_writes_the_file_read_list_reads() {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// R2, D1 residual: a hostile `log_path` in outcomes.json must not read the host
+// ---------------------------------------------------------------------------------------------
+
+/// Build an `outcomes.json` with one caught mutant whose scenario `log_path` is `log_path`.
+///
+/// The descriptor `file` is a safe relative path, so the only untrusted input is the `log_path`.
+fn outcomes_with_log_path(log_path: &str) -> String {
+    serde_json::json!({
+        "outcomes": [
+            {
+                "scenario": {
+                    "Mutant": {
+                        "name": "x",
+                        "package": "p",
+                        "file": "src/lib.rs",
+                        "span": {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 2}},
+                        "replacement": "0",
+                        "genre": "FnValue"
+                    }
+                },
+                "summary": "CaughtMutant",
+                "log_path": log_path
+            }
+        ],
+        "total_mutants": 1,
+        "caught": 1
+    })
+    .to_string()
+}
+
+/// R2: an absolute `log_path` in `outcomes.json` must not read a host file into `tasks.jsonl`.
+///
+/// Pre-fix, `read_failing_tests` joined `log_path` onto `<snapshot>/mutants.out` with no check, so
+/// `"log_path": "/etc/hostname"` (an absolute path replaces the base) put the host file's lines
+/// into `tasks.jsonl` as `failing_tests`. The fix refuses any `log_path` that does not resolve
+/// inside `mutants.out`.
+#[test]
+fn r2_absolute_log_path_does_not_leak_host_bytes() {
+    let host = Path::new("/etc/hostname");
+    let Ok(host_text) = fs::read_to_string(host) else {
+        eprintln!("skipping: {host:?} unreadable");
+        return;
+    };
+    let host_line = host_text.lines().next().unwrap_or("").to_string();
+    assert!(!host_line.is_empty(), "host file has a first line");
+
+    let repo = tmpdir("r2-abs-log");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: outcomes_with_log_path("/etc/hostname").into_bytes(),
+        logs: vec![],
+        kill_exit: 0,
+    };
+    let err = mutants(&repo, &out, &MutantsOptions::default(), &runner)
+        .expect_err("an absolute log_path must be refused, not read from the host");
+    assert!(matches!(err, MutantsError::MissingReport(_)), "{err:?}");
+
+    // Nothing was written: the host file's line is not in tasks.jsonl.
+    let body = fs::read_to_string(out.join("tasks.jsonl")).unwrap_or_default();
+    assert!(
+        !body.contains(&host_line),
+        "the host file's first line leaked into tasks.jsonl: {body}"
+    );
+}
+
+/// R2: a `..` `log_path` in `outcomes.json` must not read a sibling file into `tasks.jsonl`.
+///
+/// Pre-fix, `"log_path": "../secret.log"` escaped `mutants.out` and read a file beside it. The fix
+/// refuses any `log_path` with a `..` component.
+#[test]
+fn r2_parent_dir_log_path_does_not_leak_sibling_bytes() {
+    let repo = tmpdir("r2-parent-log");
+    // A file beside mutants.out, inside the snapshot: `../secret.log` would reach it.
+    fs::write(repo.join("secret.log"), "test leaked::secret ... FAILED\n").expect("write secret");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: outcomes_with_log_path("../secret.log").into_bytes(),
+        logs: vec![],
+        kill_exit: 0,
+    };
+    let err = mutants(&repo, &out, &MutantsOptions::default(), &runner)
+        .expect_err("a `..` log_path must be refused, not read from a sibling");
+    assert!(matches!(err, MutantsError::MissingReport(_)), "{err:?}");
+
+    let body = fs::read_to_string(out.join("tasks.jsonl")).unwrap_or_default();
+    assert!(
+        !body.contains("leaked::secret"),
+        "a sibling file's failing test leaked into tasks.jsonl: {body}"
+    );
+}
+
+/// R2: a `log_path` that passes through a symlink out of `mutants.out` must be refused.
+///
+/// A committed symlink `mutants.out/log/x.log -> /etc/hostname` passes a string check (relative, no
+/// `..`) but would read a host file. The fix resolves each component and refuses a symlink, as
+/// `is_safe_descriptor_path` does for a descriptor `file`.
+#[test]
+fn r2_symlinked_log_path_does_not_leak_host_bytes() {
+    let host = Path::new("/etc/hostname");
+    let Ok(host_text) = fs::read_to_string(host) else {
+        eprintln!("skipping: {host:?} unreadable");
+        return;
+    };
+    let host_line = host_text.lines().next().unwrap_or("").to_string();
+    assert!(!host_line.is_empty(), "host file has a first line");
+
+    let repo = tmpdir("r2-symlink-log");
+    let log_dir = repo.join(MUTANTS_OUT_DIR).join("log");
+    fs::create_dir_all(&log_dir).expect("mkdir log dir");
+    std::os::unix::fs::symlink(host, log_dir.join("x.log")).expect("symlink log");
+
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: outcomes_with_log_path("log/x.log").into_bytes(),
+        logs: vec![],
+        kill_exit: 0,
+    };
+    let err = mutants(&repo, &out, &MutantsOptions::default(), &runner)
+        .expect_err("a symlinked log_path must be refused, not read from the host");
+    assert!(matches!(err, MutantsError::MissingReport(_)), "{err:?}");
+
+    let body = fs::read_to_string(out.join("tasks.jsonl")).unwrap_or_default();
+    assert!(
+        !body.contains(&host_line),
+        "the host file's first line leaked into tasks.jsonl: {body}"
+    );
+}
+
+/// R2: a safe relative `log_path` inside `mutants.out` still reads its own log.
+///
+/// The guard must not break the real cargo-mutants layout: `log/x.log` under `mutants.out` is read
+/// and its failing test names land in `tasks.jsonl`.
+#[test]
+fn r2_relative_log_path_still_reads_its_own_log() {
+    let repo = tmpdir("r2-rel-log");
+    let out = repo.join("out");
+    let runner = PerMutantLogRunner {
+        list: LIST_SAMPLE.as_bytes().to_vec(),
+        outcomes: outcomes_with_log_path("log/x.log").into_bytes(),
+        logs: vec![(
+            "log/x.log".to_string(),
+            "test tests::flipped_add ... FAILED\n".to_string(),
+        )],
+        kill_exit: 0,
+    };
+    let report_out = mutants(&repo, &out, &MutantsOptions::default(), &runner).expect("mutants");
+    assert_eq!(report_out.tasks, 1, "the caught mutant yields a task");
+
+    let body = fs::read_to_string(out.join("tasks.jsonl")).expect("tasks.jsonl");
+    let task: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        task["failing_tests"],
+        serde_json::json!(["tests::flipped_add"]),
+        "a safe relative log_path still yields its own failing tests"
+    );
+}
+
 /// D9(d): the stored reversal is a real unified diff, not a placeholder header.
 ///
 /// Pre-fix, `reversal_diff` emitted `@@ mutant <op> @@`, which is not a unified-diff hunk header

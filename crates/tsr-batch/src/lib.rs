@@ -37,4 +37,4 @@ pub use invariants::{check_session_invariants, InvariantViolation};
 pub use results::{read_results, write_results, OracleVerdict, Outcome, TaskResult};
 pub use run::{grant_for, oracle_verdict, run_all, run_one, task_id, BatchConfig, RunError};
 pub use session::{SessionCtx, SessionError};
-pub use task::{read_tasks, write_tasks, CorpusTask, TaskError, TaskKind};
+pub use task::{is_safe_task_id, read_tasks, write_tasks, CorpusTask, TaskError, TaskKind};

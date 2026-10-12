@@ -43,6 +43,11 @@ pub enum RunError {
     /// The disposable copy was never materialised: the provisioning run exited non-zero (D4).
     #[error("provisioning failed: `{argv}` exited {exit}")]
     ProvisioningFailed { argv: String, exit: i32 },
+    /// The task id is not a safe path component (R2, D1): `run_one` joins it into
+    /// `out/state/<id>` and `out/copies/<id>`, so an id that could name a path outside `--out` is
+    /// refused here as well as where `tasks.jsonl` is parsed.
+    #[error("unsafe task id {id:?}: must match [A-Za-z0-9._-]{{1,128}} and not be `.` or `..`")]
+    InvalidTaskId { id: String },
 }
 
 /// The configuration of a batch run.
@@ -156,6 +161,14 @@ pub fn run_one(
     runner: &dyn Runner,
     config: &BatchConfig,
 ) -> Result<TaskResult, RunError> {
+    // R2, D1: `run_one` is public, so a caller can hand it a `CorpusTask` that never went through
+    // `read_tasks`. The id is joined into `out/state/<id>` and `out/copies/<id>` below, so it is
+    // re-checked here — an absolute id would replace the base and a `..` id would escape `--out`.
+    if !crate::task::is_safe_task_id(&task.id) {
+        return Err(RunError::InvalidTaskId {
+            id: task.id.clone(),
+        });
+    }
     let state_dir = config.out.join("state").join(&task.id);
     std::fs::create_dir_all(&state_dir)?;
     let store_path = state_dir.join(format!("{}.sqlite", mode.system()));

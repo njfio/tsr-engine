@@ -421,7 +421,23 @@ pub fn read_failing_tests(
                 .unwrap_or_else(|| "<unknown>".to_string())
         )));
     };
-    let path = snapshot.join(MUTANTS_OUT_DIR).join(rel);
+    // `log_path` comes from `outcomes.json`, which cargo-mutants writes from the repository under
+    // test, so it is untrusted: an absolute path replaces the base, a `..` component escapes
+    // `mutants.out`, and a symlink passes a string check but reads a host file (R2, D1). It must
+    // resolve inside `mutants.out`, canonicalised, with symlinks refused — the same guard
+    // `is_safe_descriptor_path` applies to a descriptor `file`.
+    let out_dir = snapshot.join(MUTANTS_OUT_DIR);
+    if !is_safe_descriptor_path(&out_dir, rel) {
+        return Err(MutantsError::MissingReport(format!(
+            "caught mutant {} has an unsafe log_path {rel:?} in {OUTCOMES_FILE}: it must resolve \
+             inside {MUTANTS_OUT_DIR}",
+            outcome
+                .mutant()
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )));
+    }
+    let path = out_dir.join(rel);
     let text = fs::read_to_string(&path).map_err(|e| {
         MutantsError::MissingReport(format!(
             "no kill-run log at {} for a caught mutant: {e}",
@@ -433,17 +449,22 @@ pub fn read_failing_tests(
 
 /// The reversal diff for a mutant: the unified diff that restores the original source line.
 ///
-/// cargo-mutants does not emit the reversal itself, so it is reconstructed from the descriptor:
-/// the mutated line is `replacement`, the original is the source line at the mutant's span in the
-/// repository at the mutated snapshot. When the original cannot be read, the reversal is the
-/// descriptor's own text (the mutation), which is still a stable, content-addressed record of what
-/// must change.
+/// cargo-mutants does not emit the reversal itself, but its descriptor carries the `diff` it
+/// actually applied (the mutation). Reversing that diff — swapping the `-`/`+` lines of each hunk
+/// and the `-`/`+` file headers — yields a diff that applies to the mutated file (D9f). The
+/// descriptor's `diff` is preferred because it is the mutation as cargo-mutants wrote it; the
+/// `replacement`/span reconstruction is only a fallback for a descriptor with no `diff`.
 ///
 /// The result is a **real unified diff** (D9d): `--- a/<file>` / `+++ b/<file>` headers and a
 /// `@@ -<line>,1 +<line>,1 @@` hunk header with the mutated line removed and the original line
 /// added, so `git apply`/`patch` can apply it. The pre-fix placeholder `@@ mutant <op> @@` was not
 /// a hunk header and could not be applied.
 pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
+    if let Some(diff) = mutant.diff.as_deref() {
+        if let Some(reversed) = reverse_unified_diff(diff) {
+            return reversed;
+        }
+    }
     let original = mutant
         .line()
         .and_then(|n| read_source_line(repo, &mutant.file, n))

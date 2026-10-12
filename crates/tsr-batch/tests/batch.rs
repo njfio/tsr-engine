@@ -541,3 +541,33 @@ fn d1_dot_ids_are_refused_and_a_valid_id_is_accepted() {
     assert_eq!(read.len(), 1);
     assert_eq!(read[0].id, good);
 }
+
+/// R2, D1: `run_one` is public, so it must re-check the task id before joining it into a path.
+///
+/// `read_tasks` refuses an unsafe id, but a caller can build a `CorpusTask` directly and hand it to
+/// `run_one`, which joins `task.id` into `out/state/<id>` and `out/copies/<id>`. Pre-fix, an
+/// absolute or `..` id reached those joins unchecked. The fix refuses it at the top of `run_one`.
+#[test]
+fn r2_run_one_rechecks_the_task_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let runner = ok_runner();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    for bad in ["/etc/tsr-escape", "../escape", "..", "."] {
+        let mut task = tasks().into_iter().next().expect("a fixture task");
+        task.id = bad.to_string();
+        let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+            .err()
+            .unwrap_or_else(|| panic!("id {bad:?} must be refused by run_one"));
+        assert!(
+            matches!(err, tsr_batch::RunError::InvalidTaskId { .. }),
+            "id {bad:?}: expected InvalidTaskId, got {err:?}"
+        );
+    }
+
+    // Nothing was created outside `--out`: the escape paths do not exist.
+    assert!(!Path::new("/etc/tsr-escape").exists());
+    assert!(!dir.path().parent().unwrap().join("escape").exists());
+}
