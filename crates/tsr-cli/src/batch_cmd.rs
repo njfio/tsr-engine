@@ -2,7 +2,9 @@
 //!
 //! This is the CLI face of `tsr-batch`. It reads a `tasks.jsonl`, runs every task under one system
 //! (`record` or `rules`) through one driver (`scripted` or `claude-code`), and writes
-//! `results.jsonl` plus the per-task stores under `--out`.
+//! `results-<mode>.jsonl` plus the per-task stores under `--out`. One file per mode means the
+//! operator's sequence — record then rules into the same `--out` — keeps both systems' rows, and
+//! `tsr eval baseline <out>` pairs them (D8).
 //!
 //! The `scripted` driver replays a fixture session per task, found next to the manifest:
 //! `<manifest-dir>/sessions/<task-id>-<mode>.json`, then `<manifest-dir>/session-<mode>.json`, then
@@ -114,7 +116,9 @@ fn run_inner(
         }
     };
 
-    let results_path = out.join("results.jsonl");
+    // D8: one file per mode, so record then rules into the same --out do not
+    // overwrite each other. `tsr eval baseline <out>` reads both.
+    let results_path = out.join(format!("results-{}.jsonl", mode.system()));
     tsr_batch::write_results(&results_path, &results)
         .map_err(|e| format!("writing {}: {e}", results_path.display()))?;
 

@@ -48,11 +48,29 @@ pub struct ResultsDir {
 }
 
 impl ResultsDir {
-    /// Read `<dir>/results.jsonl` and split it into the two systems.
+    /// Read the results directory written by `tsr task run`.
+    ///
+    /// D8: `tsr task run` writes one file per mode (`results-record.jsonl`,
+    /// `results-rules.jsonl`), so record then rules into the same `--out` do not
+    /// overwrite each other. When either per-mode file is present it is read as
+    /// that system; otherwise the older single-file shape `<dir>/results.jsonl`
+    /// is read and split by the `system` field.
     ///
     /// A result whose `system` is neither `record` nor `rules` is an error: the
     /// baseline compares exactly those two systems (PRD B9).
     pub fn read(dir: &Path) -> Result<Self, EvalError> {
+        let record_path = dir.join("results-record.jsonl");
+        let rules_path = dir.join("results-rules.jsonl");
+        if record_path.exists() || rules_path.exists() {
+            let record = read_one_system(dir, SYSTEM_RECORD)?;
+            let rules = read_one_system(dir, SYSTEM_RULES)?;
+            return Ok(Self {
+                dir: dir.to_path_buf(),
+                record,
+                rules,
+            });
+        }
+
         let path = dir.join("results.jsonl");
         if !path.exists() {
             return Err(EvalError::MissingResults(path));
@@ -146,10 +164,18 @@ impl ResultsDir {
     }
 }
 
-/// Read one system's `results.jsonl` from a directory, requiring every row to
-/// name `system`.
+/// Read one system's results from a directory, requiring every row to name
+/// `system`.
+///
+/// D8: `tsr task run` writes `results-<system>.jsonl`; the older single-file
+/// shape `results.jsonl` is still accepted.
 fn read_one_system(dir: &Path, system: &str) -> Result<SystemResults, EvalError> {
-    let path = dir.join("results.jsonl");
+    let per_mode = dir.join(format!("results-{system}.jsonl"));
+    let path = if per_mode.exists() {
+        per_mode
+    } else {
+        dir.join("results.jsonl")
+    };
     if !path.exists() {
         return Err(EvalError::MissingResults(path));
     }
