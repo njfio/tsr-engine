@@ -6,7 +6,8 @@
 //! (`Fulfilled`, `Overlapping`) apply only to preferences already admitted.
 
 use tsr_domain::{
-    ContrastId, Event, EventKind, Hash, Observation, PreferenceStatus, Scope, Source, TaskId,
+    ContrastId, CriterionId, Event, EventId, EventKind, Hash, Observation, PreferenceStatus, Scope,
+    Source, TaskId, UnmetKind,
 };
 use tsr_ledger::{Ledger, LedgerError};
 use tsr_store::Store;
@@ -25,8 +26,24 @@ fn scope() -> Scope {
     Scope::Task(task())
 }
 
-fn contrast() -> ContrastId {
-    ContrastId(Hash::of(&[b"c-d2"]))
+/// A Contrast the log holds: the Filter's write rule refuses an expansion that names anything
+/// else, so a test that expands must first record the contrast it expands from.
+fn contrast(store: &Store) -> ContrastId {
+    let c = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"c-d2"])),
+        from_return: EventId(Hash::of(&[b"return-d2"])),
+        unmet: vec![(
+            CriterionId(Hash::of(&[b"criterion-d2"])),
+            UnmetKind::Rejected {
+                reason: "the criterion went unmet".to_string(),
+            },
+        )],
+        evidence: vec![],
+    };
+    Ledger::new(store)
+        .record_contrast(&task(), vec![], c.clone(), "2026-01-01T00:00:00Z")
+        .expect("record the contrast");
+    c.id
 }
 
 /// D2: a `StatusSet(Open)` by a non-operator source does not admit a Generator-origin preference.
@@ -40,7 +57,7 @@ fn d2_generator_open_does_not_admit() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the retry budget is the dimension this contrast clarified",
             scope(),
             vec![],
@@ -93,7 +110,7 @@ fn d2_operator_open_admits() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the retry budget is the dimension this contrast clarified",
             scope(),
             vec![],
@@ -132,7 +149,7 @@ fn d2_mechanical_status_needs_admission() {
         .expand(
             &task(),
             vec![],
-            contrast(),
+            contrast(&store),
             "the criterion: the suite passes on the merged head",
             scope(),
             vec![],
