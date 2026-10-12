@@ -362,12 +362,11 @@ fn json_carries_the_five_sections_with_raw_p_and_uncalibrated() {
     let mirror = build_mirror(&t, &events, root);
 
     // The five sections are present.
-    // D9: the intent is the task's own intent (the task-scoped preference recorded at open),
-    // not the operator's experience note.
+    // D9: the Mirror never guesses an intent — the log records no task intent, so Desire records
+    // none (the task-scoped preference is a criterion, not the intent).
     assert_eq!(
-        mirror.desire.intent.as_deref(),
-        Some(INTENT),
-        "desire carries the task's intent"
+        mirror.desire.intent, None,
+        "desire records no intent: the log records none"
     );
     assert!(
         !mirror.imagination.candidates.is_empty(),

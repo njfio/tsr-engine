@@ -144,7 +144,7 @@ Mirror — task 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b
 ledger root 4bd309c28434cc40da89720fe3a697a0cf18fd5bb3e46afd3a76f613da6ef3e7
 
 Desire
-  intent: the approved test passes without touching the schema
+  intent: (none recorded)
   criterion 9336872f1b30 [open] the approved test passes without touching the schema
   notes: none
 
@@ -181,6 +181,14 @@ The Surprise rows carry the forecaster (`by generator`, `by controller`, `by ope
 residual is **forecast minus observed** everywhere: the generator forecast 0.4670 and the outcome was
 0, so its residual is +0.4670.
 
+The Desire section prints `intent: (none recorded)`: the log records no task intent. `TaskOpened`
+carries no intent field (`crates/tsr-domain/src/lib.rs:712`) and `crates/tsr-cli/src/task.rs:28`
+stores only a digest, so the Mirror cannot recover one. The task-scoped preference shown as the
+criterion (`the approved test passes without touching the schema`) is a *criterion* — a named
+condition — and is never promoted to the intent. The tsr-domain change that would carry the intent
+is an `intent: Option<String>` field on `EventKind::TaskOpened` (written by `tsr task open` and read
+back by `build_mirror`); until that contract change lands, the Mirror prints `(none recorded)`.
+
 ## The Mirror as JSON — `tsr reflect <task> --json`
 
 ```console
@@ -189,7 +197,7 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
   "task": "1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b",
   "ledger_root": "4bd309c28434cc40da89720fe3a697a0cf18fd5bb3e46afd3a76f613da6ef3e7",
   "desire": {
-    "intent": "the approved test passes without touching the schema",
+    "intent": null,
     "criteria": [
       {
         "id": "9336872f1b30",

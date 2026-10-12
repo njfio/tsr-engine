@@ -153,12 +153,13 @@ fn d9_mirror_propensity_is_the_shown_candidates() {
     );
 }
 
-/// D9 (b): the intent is the task's intent, not a rejection's dimension.
+/// D9 (b): the Mirror never guesses an intent.
 ///
 /// A task with no criteria: the only task-scoped preference the fold sees after a rejection is the
-/// contrast's dimension. The Mirror must still print the task's own intent.
+/// contrast's dimension. The Mirror must not promote it (or any task-scoped preference) to the
+/// intent — the log records no task intent, so Desire prints `intent: (none recorded)`.
 #[test]
-fn d9_mirror_intent_is_taskopened() {
+fn d9_mirror_never_guesses_an_intent() {
     let store = Store::open_in_memory().unwrap();
     let t = task(2);
     let cand = candidate_id(2);
@@ -213,9 +214,8 @@ fn d9_mirror_intent_is_taskopened() {
     let m = build_mirror(&t, &events, root);
 
     assert_eq!(
-        m.desire.intent.as_deref(),
-        Some(INTENT),
-        "the intent is the task's own intent, not the rejection's dimension"
+        m.desire.intent, None,
+        "the Mirror never guesses an intent: the log records none"
     );
     assert!(
         !m.desire
@@ -229,8 +229,8 @@ fn d9_mirror_intent_is_taskopened() {
 
     let text = render_mirror(&m);
     assert!(
-        text.contains(&format!("intent: {INTENT}")),
-        "the screen prints the task's intent:\n{text}"
+        text.contains("intent: (none recorded)"),
+        "the screen prints `intent: (none recorded)`:\n{text}"
     );
     assert!(
         !text.contains("intent: the dimension this contrast clarified"),

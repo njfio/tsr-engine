@@ -257,12 +257,6 @@ fn unmet_name(k: &tsr_domain::UnmetKind) -> &'static str {
     }
 }
 
-/// Whether a preference's text is a contrast's dimension (`tsr_ledger::dimension_text`) rather than
-/// a task's own intent. A dimension text always opens with this fixed phrase.
-fn is_dimension_text(text: &str) -> bool {
-    text.starts_with("the dimension this contrast clarified")
-}
-
 /// The first 12 hex characters of a hash, for a screen that must stay one line wide.
 fn short(h: &Hash) -> String {
     let hex = h.to_hex();
@@ -274,21 +268,17 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     let evs: Vec<&Event> = events.iter().map(|(_, e)| e).collect();
 
     // --- Desire: the intent and the criteria, with their open/closed state. -------------------
-    // The intent is the task's own intent: the task-scoped preference recorded when the task was
-    // opened (the desired condition). It is *not* an operator experience note — those are notes,
-    // listed separately below, and a note is an observation, never the task's intent.
-    let mut intent: Option<String> = None;
+    // D9 (operator decision): the Mirror never guesses an intent. `TaskOpened` carries no intent
+    // (`tsr-domain` lib.rs:712; `task.rs:28` stores only a digest), so the log records no task
+    // intent and the Mirror prints `intent: (none recorded)`. A task-scoped preference is a
+    // *criterion* (a named condition), never the intent; the first one is not promoted to it.
+    // The tsr-domain change that would carry the intent is an `intent` field on `TaskOpened`.
+    let intent: Option<String> = None;
     let mut criteria: Vec<CriterionRow> = Vec::new();
     // Criteria are the task's preferences in the task scope: each is a named condition.
     let collective = tsr_ledger::fold(events, root);
     for entry in &collective.entries {
         if matches!(entry.preference.scope, tsr_domain::Scope::Task(t) if t == *task) {
-            // The intent is the task's own intent, not a rejection's dimension. A rejection on a
-            // task with no criteria expands into a task-scoped preference whose text is the
-            // contrast's dimension (`dimension_text`); that is a criterion, never the intent.
-            if intent.is_none() && !is_dimension_text(&entry.preference.text) {
-                intent = Some(entry.preference.text.clone());
-            }
             criteria.push(CriterionRow {
                 id: short(&entry.preference.id.0),
                 text: entry.preference.text.clone(),

@@ -1,9 +1,9 @@
 //! D9 (the Mirror) and D12 (`tsr note` on an unknown task) — repair of milestone M2.
 //!
 //! D9: the Mirror must name the forecaster on every Surprise row, take the propensity from the
-//! commit record, list only the committed candidate's forecasts under Belief, take Desire's intent
-//! from the task's own intent (the task-scoped preference recorded at open) rather than from an
-//! operator note, and list operator notes as notes (through `notes_for`).
+//! commit record, list only the committed candidate's forecasts under Belief, never guess an
+//! intent (the log records none, so Desire prints `intent: (none recorded)`), and list operator
+//! notes as notes (through `notes_for`).
 //!
 //! D12: `tsr note` on a task the log does not hold must exit 2.
 
@@ -363,21 +363,85 @@ fn d9_belief_lists_only_the_committed_candidates_forecasts() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// D9 (d): Desire's intent is the task's intent, not the operator note
+// D9 (d): the Mirror never guesses an intent
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn d9_desire_intent_is_the_tasks_intent_not_the_note() {
+fn d9_desire_intent_is_never_guessed() {
     let (_s, _t, m) = mirror_for(4);
+    // The log records no task intent: `TaskOpened` carries none (`tsr-domain` lib.rs:712;
+    // `task.rs:28` stores only a digest). The task-scoped preference is a *criterion*, not the
+    // intent, and the operator's note is a note. So the Mirror records no intent.
     assert_eq!(
-        m.desire.intent.as_deref(),
-        Some(INTENT),
-        "the intent is the task-scoped preference recorded at open"
+        m.desire.intent, None,
+        "the Mirror never guesses an intent: the log records none"
     );
     assert_ne!(
         m.desire.intent.as_deref(),
         Some(NOTE),
         "the operator's note is not the intent"
+    );
+    let text = render_mirror(&m);
+    assert!(
+        text.contains("intent: (none recorded)"),
+        "the screen prints `intent: (none recorded)`:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("intent: {INTENT}")),
+        "the criterion text is not printed as the intent:\n{text}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// D9 (d'): over the committed fixture, the criterion text is not the intent
+// ---------------------------------------------------------------------------------------------
+
+/// The on-disk shape of one committed episode, as far as this test needs it.
+#[derive(serde::Deserialize)]
+struct EpisodeFile {
+    task: TaskId,
+    events: Vec<Event>,
+}
+
+/// D9: over the fixture store, the criterion text is not printed as the intent.
+///
+/// The fixture's task-scoped preference is a criterion — its text is `the approved test passes
+/// without touching the schema` — and the log records no task intent, so the Mirror prints
+/// `intent: (none recorded)`. Before the fix the Mirror promoted the first task-scoped preference
+/// to the intent and printed the criterion text there.
+#[test]
+fn d9_mirror_never_guesses_an_intent_over_the_fixture() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures")
+        .join("m2")
+        .join("episodes")
+        .join("alpha-00.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("committed fixture {} is missing: {e}", path.display()));
+    let file: EpisodeFile = serde_json::from_str(&text).expect("parse episode");
+
+    let store = Store::open_in_memory().unwrap();
+    for ev in &file.events {
+        store.append(ev).unwrap();
+    }
+    let events = store.by_task(&file.task).unwrap();
+    let root = store.head_root().unwrap();
+    let m = build_mirror(&file.task, &events, root);
+
+    assert_eq!(
+        m.desire.intent, None,
+        "the log records no task intent, so the Mirror records none"
+    );
+    let screen = render_mirror(&m);
+    assert!(
+        screen.contains("intent: (none recorded)"),
+        "the Mirror prints `intent: (none recorded)`:\n{screen}"
+    );
+    assert!(
+        !screen.contains("intent: the approved test passes without touching the schema"),
+        "the criterion text is not printed as the intent:\n{screen}"
     );
 }
 
