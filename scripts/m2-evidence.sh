@@ -13,7 +13,9 @@ set -u
 export PATH=/usr/local/cargo/bin:$PATH
 export CARGO_HOME=$PWD/.cargo-home
 
-MAIN=82d6b217891fead5762033b74cb7a4a2cdee51ae
+# The lane's fork point from main (the m0 check below must compare against it). Override with TSR_MAIN.
+MAIN=${TSR_MAIN:-$(git merge-base HEAD origin/main 2>/dev/null)}
+[ -n "$MAIN" ] || { echo "m2-evidence: cannot find origin/main; set TSR_MAIN to main's commit" >&2; exit 2; }
 ALPHA00=1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b
 RETURN=905fedd5f9e146104bd18b1bc0589dac143303999cfcf3d13b0e404076903f32
 
@@ -288,7 +290,7 @@ EOF
 printf '$ cargo test --workspace --no-fail-fast\n'
 printf '```console\n'
 WT=$(cargo test --workspace --no-fail-fast 2>&1); WTRC=$?
-printf '%s\n' "$WT" | tr '\r' '\n' | grep -E '^(test result:|failures:|    [a-z0-9_]+::)' || true
+printf '%s\n' "$WT" | tr '\r' '\n' | grep -E '^(test result:|failures:|    [A-Za-z0-9_:]+$)' || true
 printf 'exit %d\n' "$WTRC"
 printf '```\n\n'
 
