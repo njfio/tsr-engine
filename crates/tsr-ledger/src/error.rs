@@ -25,6 +25,12 @@ pub enum LedgerError {
     /// An expansion names a contrast with no unmet criterion: nothing crossed. Exit 2.
     #[error("contrast {0} has no unmet criterion; nothing crosses")]
     ContrastWithoutUnmet(ContrastId),
+    /// A recorded contrast's `id` is not the content address of its own fields. Exit 2.
+    #[error("contrast {id} is not the content address of its return, unmet pairs and evidence ({expected})")]
+    ContrastIdMismatch {
+        id: ContrastId,
+        expected: ContrastId,
+    },
     /// An expansion whose produced preference is not the content address of its own text. Exit 2.
     #[error("expansion produced {produced} but its text, scope and parents address {expected}")]
     ProducedMismatch {

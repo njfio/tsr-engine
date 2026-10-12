@@ -68,17 +68,16 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
     // A family-scoped preference tags the episode's family (the fold reads the first
     // `Scope::Family` in log order as the task's family).
     let ledger = tsr_ledger::Ledger::new(store);
-    let contrast = tsr_domain::Contrast {
-        id: ContrastId(Hash::of(&[b"family-contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"family-return"])),
-        unmet: vec![(
+    let contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"family-return"])),
+        vec![(
             tsr_domain::CriterionId(Hash::of(&[b"family-criterion"])),
             tsr_domain::UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(t, Vec::new(), contrast.clone(), "unix:1")
         .unwrap();
@@ -98,17 +97,16 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
 
     // The task's intent: a task-scoped preference recorded through the Filter (D9). The Mirror's
     // Desire section takes its intent from this, not from an operator note.
-    let intent_contrast = tsr_domain::Contrast {
-        id: ContrastId(Hash::of(&[b"intent-contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"intent-return"])),
-        unmet: vec![(
+    let intent_contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"intent-return"])),
+        vec![(
             tsr_domain::CriterionId(Hash::of(&[b"intent-criterion"])),
             tsr_domain::UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(t, Vec::new(), intent_contrast.clone(), "unix:1")
         .unwrap();
@@ -271,15 +269,14 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
             residual: 0.4,
         },
     ];
-    let contrast = Contrast {
-        id: ContrastId(Hash::of(&[b"contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"return"])),
-        unmet: vec![(
+    let contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"return"])),
+        vec![(
             CriterionId(Hash::of(&[b"criterion"])),
             UnmetKind::WrongBehaviour,
         )],
-        evidence: vec![tsr_domain::EventId(Hash::of(&[b"evidence"]))],
-    };
+        vec![tsr_domain::EventId(Hash::of(&[b"evidence"]))],
+    );
     store
         .append(&Event::new(
             *t,
@@ -562,12 +559,23 @@ fn cli_reflect_json_and_family_run() {
 
 #[test]
 fn run_refuses_a_missing_subject_with_exit_2() {
-    // `run` opens its own store, so this only checks the argument guard.
+    // `run` opens its own store, so this only checks the argument guard. The store path is a
+    // temp dir (R7): a test must never write into the source tree, and the guard must refuse
+    // before any store is created.
+    let dir = std::env::temp_dir().join(format!("m2-reflect-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = dir.join("does-not-exist.db");
     let code = tsr_cli::reflect_cmd::run(&ReflectArgs {
         task: None,
         family: None,
         json: false,
-        store: "does-not-exist.db".to_string(),
+        store: Some(store.to_string_lossy().into_owned()),
     });
     assert_eq!(format!("{code:?}"), "ExitCode(unix_exit_status(2))");
+    assert!(
+        !store.exists(),
+        "the guard refuses before creating the store (R7)"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

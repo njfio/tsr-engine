@@ -48,17 +48,16 @@ fn append_return(store: &Store, task: &TaskId, seed: u8) -> tsr_domain::EventId 
 fn open_preference(store: &Store, task: &TaskId, text: &str) -> tsr_domain::PreferenceId {
     let ledger = Ledger::new(store);
     // The Filter's write rule admits an expansion only from a Contrast the log holds.
-    let contrast = tsr_domain::Contrast {
-        id: tsr_domain::ContrastId(Hash::of(&[b"contrast", text.as_bytes()])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"return", text.as_bytes()])),
-        unmet: vec![(
+    let contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"return", text.as_bytes()])),
+        vec![(
             tsr_domain::CriterionId(Hash::of(&[b"criterion", text.as_bytes()])),
             tsr_domain::UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(task, Vec::new(), contrast.clone(), "unix:1")
         .unwrap();
@@ -377,7 +376,7 @@ fn review_args_default_lists_pending() {
     // The args struct carries the store path; the default lists.
     let args = ReviewArgs {
         task: t.0.to_hex(),
-        store: ":memory:".to_string(),
+        store: Some(":memory:".to_string()),
         ..Default::default()
     };
     assert!(args.label.is_none());
@@ -431,17 +430,16 @@ fn family_filter_matches_the_tasks_family_scope() {
     let t = task(11);
     let subject = append_return(&store, &t, 11);
     let ledger = Ledger::new(&store);
-    let contrast = tsr_domain::Contrast {
-        id: tsr_domain::ContrastId(Hash::of(&[b"family-contrast"])),
-        from_return: subject,
-        unmet: vec![(
+    let contrast = tsr_ledger::Filter::contrast_from_criteria(
+        subject,
+        vec![(
             tsr_domain::CriterionId(Hash::of(&[b"family-criterion"])),
             tsr_domain::UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(&t, Vec::new(), contrast.clone(), "unix:11")
         .unwrap();
@@ -523,12 +521,7 @@ fn d3_expand_refuses_contrast_without_unmet() {
     let t = task(21);
     let subject = append_return(&store, &t, 21);
     // A Contrast with an empty `unmet` list: nothing crossed, so nothing may expand.
-    let empty = tsr_domain::Contrast {
-        id: tsr_domain::ContrastId(Hash::of(&[b"empty-contrast"])),
-        from_return: subject,
-        unmet: Vec::new(),
-        evidence: vec![subject],
-    };
+    let empty = tsr_ledger::Filter::contrast_from_criteria(subject, Vec::new(), vec![subject]);
     let observed = Event::new(
         t,
         Vec::new(),

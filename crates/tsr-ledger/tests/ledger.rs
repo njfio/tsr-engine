@@ -24,17 +24,18 @@ fn scope() -> Scope {
 /// A Contrast the log holds: the Filter's write rule refuses an expansion that names anything
 /// else, so a test that expands must first record the contrast it expands from.
 fn contrast(store: &Store) -> ContrastId {
-    let c = tsr_domain::Contrast {
-        id: ContrastId(Hash::of(&[b"c-1"])),
-        from_return: EventId(Hash::of(&[b"return-1"])),
-        unmet: vec![(
+    // D12: a Contrast's id is its content address, so mint it through the Filter rather than
+    // hand-picking one.
+    let c = tsr_ledger::Filter::contrast_from_criteria(
+        EventId(Hash::of(&[b"return-1"])),
+        vec![(
             CriterionId(Hash::of(&[b"criterion-1"])),
             UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: vec![],
-    };
+        vec![],
+    );
     Ledger::new(store)
         .record_contrast(&task(), vec![], c.clone(), "2026-01-01T00:00:00Z")
         .expect("record the contrast");
@@ -457,4 +458,120 @@ fn produced_mismatch_is_refused() {
     );
     let view = fold(&[(1, ev)], store.head_root().expect("head"));
     assert!(view.entries.is_empty(), "a mismatched node is not admitted");
+}
+
+/// D12a: `record_contrast` checks a Contrast's `id` is its content address. A record whose id is
+/// not the address of (from_return, unmet, evidence) is refused with exit 2; the matching one is
+/// accepted and reads back from the log.
+#[test]
+fn d12_record_contrast_checks_the_content_address() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let from_return = EventId(Hash::of(&[b"return-d12"]));
+    let unmet = vec![(
+        CriterionId(Hash::of(&[b"criterion-d12"])),
+        UnmetKind::Rejected {
+            reason: "the criterion went unmet".to_string(),
+        },
+    )];
+    let evidence = vec![EventId(Hash::of(&[b"evidence-d12"]))];
+
+    // The id the Filter mints for these fields is the content address.
+    let good = tsr_ledger::filter::contrast_id(&from_return, &unmet, &evidence);
+    let contrast = tsr_domain::Contrast {
+        id: good,
+        from_return,
+        unmet: unmet.clone(),
+        evidence: evidence.clone(),
+    };
+    ledger
+        .record_contrast(&task(), vec![], contrast, "2026-01-01T00:00:00Z")
+        .expect("the content-addressed contrast is recorded");
+
+    // A contrast whose id is not its content address is refused with exit 2.
+    let bad = tsr_domain::Contrast {
+        id: ContrastId(Hash::of(&[b"not-the-address"])),
+        from_return,
+        unmet,
+        evidence,
+    };
+    let err = ledger
+        .record_contrast(&task(), vec![], bad, "2026-01-01T00:01:00Z")
+        .expect_err("a mismatched id is refused");
+    assert!(
+        matches!(err, LedgerError::ContrastIdMismatch { .. }),
+        "{err:?}"
+    );
+    assert_eq!(err.exit_code(), 2);
+}
+
+/// D12b: the fold applies `Withdrawn` or `OutOfScope` only from an Operator `by`. A raw
+/// `StatusSet` event with a non-operator `by` is recorded in the history and ignored for the
+/// active view, even though the write path would have refused it.
+#[test]
+fn d12_fold_applies_operator_only_statuses_only_from_operator() {
+    let (_dir, store) = store();
+    let ledger = Ledger::new(&store);
+
+    let id = ledger
+        .expand(
+            &task(),
+            vec![],
+            contrast(&store),
+            "a preference",
+            scope(),
+            vec![],
+            vec![],
+            Source::Operator,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("expand");
+
+    // Append a raw non-operator `Withdrawn` directly to the store, bypassing the write path's
+    // refusal, so the fold is the only thing under test.
+    let ev = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::StatusSet {
+            preference: id,
+            status: PreferenceStatus::Withdrawn,
+            by: Source::Rules,
+        },
+        "2026-01-01T00:01:00Z",
+    );
+    store.append(&ev).expect("append raw status");
+
+    let active = ledger.active().expect("active");
+    let entry = active.get(&id).expect("entry");
+    assert!(
+        entry.is_open(),
+        "a non-operator Withdrawn does not leave the active view"
+    );
+    assert!(
+        entry
+            .history
+            .iter()
+            .any(|(s, by)| *s == PreferenceStatus::Withdrawn && *by == Source::Rules),
+        "the non-operator status is still recorded in the history"
+    );
+
+    // The operator's own Withdrawn does apply.
+    ledger
+        .set_status(
+            &task(),
+            vec![],
+            id,
+            PreferenceStatus::Withdrawn,
+            Source::Operator,
+            "2026-01-01T00:02:00Z",
+        )
+        .expect("operator may withdraw");
+    assert!(!ledger
+        .active()
+        .expect("active")
+        .get(&id)
+        .expect("entry")
+        .is_open());
 }

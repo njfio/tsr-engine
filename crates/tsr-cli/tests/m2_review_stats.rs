@@ -178,7 +178,7 @@ fn d8_unknown_return_is_refused() {
         seed: None,
         family: None,
         stats: false,
-        store: db.to_string_lossy().to_string(),
+        store: Some(db.to_string_lossy().to_string()),
     };
     let code = tsr_cli::review_cmd::run(&args);
     assert_eq!(
@@ -207,17 +207,16 @@ fn d4_cli_stats_without_task_exits_0() {
         let t = task(20);
         let green = append_return(&store, &t, 20, 0);
         let ledger = tsr_ledger::Ledger::new(&store);
-        let contrast = tsr_domain::Contrast {
-            id: tsr_domain::ContrastId(Hash::of(&[b"c", &[20u8]])),
-            from_return: green,
-            unmet: vec![(
+        let contrast = tsr_ledger::Filter::contrast_from_criteria(
+            green,
+            vec![(
                 tsr_domain::CriterionId(Hash::of(&[b"crit", &[20u8]])),
                 tsr_domain::UnmetKind::Rejected {
                     reason: "x".to_string(),
                 },
             )],
-            evidence: Vec::new(),
-        };
+            Vec::new(),
+        );
         ledger
             .record_contrast(&t, Vec::new(), contrast.clone(), "unix:1")
             .unwrap();
@@ -284,17 +283,16 @@ fn d4_stats_without_task_over_family() {
         let green = append_return(&store, &t, seed, 0);
         // A family-scoped preference names the family.
         let ledger = tsr_ledger::Ledger::new(&store);
-        let contrast = tsr_domain::Contrast {
-            id: tsr_domain::ContrastId(Hash::of(&[b"c", &[seed]])),
-            from_return: green,
-            unmet: vec![(
+        let contrast = tsr_ledger::Filter::contrast_from_criteria(
+            green,
+            vec![(
                 tsr_domain::CriterionId(Hash::of(&[b"crit", &[seed]])),
                 tsr_domain::UnmetKind::Rejected {
                     reason: "x".to_string(),
                 },
             )],
-            evidence: Vec::new(),
-        };
+            Vec::new(),
+        );
         ledger
             .record_contrast(&t, Vec::new(), contrast.clone(), "unix:1")
             .unwrap();
@@ -334,7 +332,7 @@ fn d4_stats_without_task_over_family() {
         seed: None,
         family: Some("alpha".to_string()),
         stats: true,
-        store: db.to_string_lossy().to_string(),
+        store: Some(db.to_string_lossy().to_string()),
     };
     let code = tsr_cli::review_cmd::run(&args);
     assert_eq!(

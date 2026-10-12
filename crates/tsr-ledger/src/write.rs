@@ -114,7 +114,9 @@ impl<'a> Ledger<'a> {
     /// Record a Contrast as an `Observed` event, so a later [`Ledger::expand`] may name it.
     ///
     /// The Filter's write rule (PRD §B2.1) admits an expansion only from a Contrast the log
-    /// holds; this is how a contrast enters the log. Returns the appended event's id.
+    /// holds; this is how a contrast enters the log. The contrast's `id` must be the content
+    /// address of its own fields (D12): a record whose id is not its content address is refused
+    /// with exit 2, so the same contrast is always the same id. Returns the appended event's id.
     pub fn record_contrast(
         &self,
         task: &TaskId,
@@ -122,6 +124,15 @@ impl<'a> Ledger<'a> {
         contrast: tsr_domain::Contrast,
         recorded_at: impl Into<String>,
     ) -> Result<EventId, LedgerError> {
+        // The id must be the content address of (from_return, unmet, evidence), the same address
+        // `Filter::contrast_from_criteria` mints. Refuse otherwise (exit 2).
+        let expected = crate::filter::contrast_id(&contrast.from_return, &contrast.unmet, &contrast.evidence);
+        if expected != contrast.id {
+            return Err(LedgerError::ContrastIdMismatch {
+                id: contrast.id,
+                expected,
+            });
+        }
         let kind = EventKind::Observed {
             observation: tsr_domain::Observation::Return {
                 surprise: Vec::new(),

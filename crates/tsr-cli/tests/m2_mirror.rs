@@ -181,17 +181,16 @@ fn d9_mirror_intent_is_taskopened() {
 
     // The task's intent: a task-scoped preference recorded at open (the desired condition).
     let ledger = tsr_ledger::Ledger::new(&store);
-    let intent_contrast = Contrast {
-        id: ContrastId(Hash::of(&[b"intent-contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"intent-return"])),
-        unmet: vec![(
+    let intent_contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"intent-return"])),
+        vec![(
             CriterionId(Hash::of(&[b"intent-criterion"])),
             UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(&t, Vec::new(), intent_contrast.clone(), "unix:1")
         .unwrap();

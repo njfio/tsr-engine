@@ -324,3 +324,39 @@ fn cli_note_refuses_an_empty_text_with_exit_2() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn d12c_note_on_an_unknown_task_exits_2_without_creating_the_store() {
+    let dir = std::env::temp_dir().join(format!("tsr-note-unknown-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    // The store does not exist yet: a note must not create it.
+    let db = dir.join("does-not-exist.db");
+    assert!(!db.exists());
+
+    let unknown = TaskId(Hash::of(&[b"task-never-opened"]));
+    let bin = env!("CARGO_BIN_EXE_tsr");
+    let out = std::process::Command::new(bin)
+        .args([
+            "note",
+            &unknown.to_string(),
+            "--text",
+            "a note on a task the log does not hold",
+            "--store",
+            db.to_str().unwrap(),
+        ])
+        .output()
+        .expect("the tsr binary runs");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !db.exists(),
+        "a note on an unknown task must not create the store at {}",
+        db.display()
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

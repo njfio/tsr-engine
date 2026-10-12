@@ -24,9 +24,9 @@ use std::path::{Path, PathBuf};
 
 use tsr_cli::review_cmd::{record_label, Label};
 use tsr_domain::{
-    ActionKind, Candidate, Contrast, ContrastId, Decision, Event, EventId, EventKind, Forecast,
-    ForecastId, Forecaster, Hash, Horizon, LabelStatus, Observation, Probability, Scope, Source,
-    Support, Surprise, TaskId, UnmetKind, Utility,
+    ActionKind, Candidate, ContrastId, Decision, Event, EventId, EventKind, Forecast, ForecastId,
+    Forecaster, Hash, Horizon, LabelStatus, Observation, Probability, Scope, Source, Support,
+    Surprise, TaskId, UnmetKind, Utility,
 };
 use tsr_forecast::outcomes::common_decision_event_id;
 use tsr_ledger::Ledger;
@@ -121,40 +121,31 @@ fn forecast_id(seed: u64, index: usize, who: &str) -> ForecastId {
     ]))
 }
 
-/// A contrast id from a fixed seed, index and criterion.
-fn contrast_id(seed: u64, index: usize, criterion: &str) -> ContrastId {
-    ContrastId(Hash::of(&[
-        b"m2-contrast",
-        &seed.to_le_bytes(),
-        &(index as u64).to_le_bytes(),
-        criterion.as_bytes(),
-    ]))
-}
-
 /// Record a Contrast the log holds, so a later `expand` may name it (the Filter's write rule
-/// refuses an expansion from a contrast the log does not carry).
+/// refuses an expansion from a contrast the log does not carry). D12: a Contrast's id is its
+/// content address, so the contrast is minted through the Filter and its id returned.
 fn record_contrast(
     store: &Store,
     task: &TaskId,
     parents: Vec<EventId>,
-    id: ContrastId,
     criterion: tsr_domain::CriterionId,
     recorded_at: &str,
-) {
-    let c = tsr_domain::Contrast {
-        id,
-        from_return: EventId(Hash::of(&[b"m2-return", &id.0 .0])),
-        unmet: vec![(
+) -> ContrastId {
+    let c = tsr_ledger::Filter::contrast_from_criteria(
+        EventId(Hash::of(&[b"m2-return", &criterion.0 .0])),
+        vec![(
             criterion,
             tsr_domain::UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: vec![],
-    };
+        vec![],
+    );
+    let id = c.id;
     Ledger::new(store)
         .record_contrast(task, parents, c, recorded_at)
         .expect("record the contrast");
+    id
 }
 
 /// A criterion id from a fixed seed, index and name.
@@ -243,12 +234,10 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
     // 2. The family-scoped preference tags the episode's family (the fold reads the first
     //    `Scope::Family` in log order as the task's family). It is an Operator statement, so it is
     //    open on arrival.
-    let family_contrast = contrast_id(seed, index, "family");
-    record_contrast(
+    let family_contrast = record_contrast(
         store,
         &task,
         parents.clone(),
-        family_contrast,
         criterion_id(seed, index, "family"),
         &stamp(index, 1),
     );
@@ -271,12 +260,10 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
 
     // 3. A task-scoped criterion preference: the desired condition the contrast is scored against.
     let criterion_text = "the approved test passes without touching the schema";
-    let criterion_contrast = contrast_id(seed, index, "criterion");
-    record_contrast(
+    let criterion_contrast = record_contrast(
         store,
         &task,
         parents.clone(),
-        criterion_contrast,
         criterion_id(seed, index, "criterion"),
         &stamp(index, 2),
     );
@@ -467,12 +454,11 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
             EpisodeOutcome::Disputed => UnmetKind::WrongBehaviour,
             EpisodeOutcome::Accepted => unreachable!(),
         };
-        Some(Contrast {
-            id: contrast_id(seed, index, "criterion"),
-            from_return: executed.id,
-            unmet: vec![(criterion_id(seed, index, "criterion"), kind)],
-            evidence: vec![executed.id],
-        })
+        Some(tsr_ledger::Filter::contrast_from_criteria(
+            executed.id,
+            vec![(criterion_id(seed, index, "criterion"), kind)],
+            vec![executed.id],
+        ))
     };
     let observed = Event::new(
         task,
@@ -820,10 +806,12 @@ fn store_holds_every_episode_for_the_cli() {
 /// byte-identical afterwards. Regeneration happens only under `TSR_REGEN_FIXTURES=1`.
 #[test]
 fn d6_fixture_compare_is_read_only() {
-    assert!(
-        !regen(),
-        "d6_fixture_compare_is_read_only must run without TSR_REGEN_FIXTURES=1"
-    );
+    // R6: under `TSR_REGEN_FIXTURES=1` the documented regeneration run must PASS, not exit 101.
+    // Regeneration is *supposed* to rewrite the committed fixtures, so the read-only property is
+    // only meaningful without it: skip the assertion when regen is requested.
+    if regen() {
+        return;
+    }
 
     // Snapshot the committed corpus and store before the comparison path runs.
     let corpus = generate_corpus(SEED);

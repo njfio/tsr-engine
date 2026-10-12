@@ -29,17 +29,17 @@ fn scope() -> Scope {
 /// A Contrast the log holds: the Filter's write rule refuses an expansion that names anything
 /// else, so a test that expands must first record the contrast it expands from.
 fn contrast(store: &Store) -> ContrastId {
-    let c = tsr_domain::Contrast {
-        id: ContrastId(Hash::of(&[b"c-d2"])),
-        from_return: EventId(Hash::of(&[b"return-d2"])),
-        unmet: vec![(
+    // D12: a Contrast's id is its content address, so mint it through the Filter.
+    let c = tsr_ledger::Filter::contrast_from_criteria(
+        EventId(Hash::of(&[b"return-d2"])),
+        vec![(
             CriterionId(Hash::of(&[b"criterion-d2"])),
             UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: vec![],
-    };
+        vec![],
+    );
     Ledger::new(store)
         .record_contrast(&task(), vec![], c.clone(), "2026-01-01T00:00:00Z")
         .expect("record the contrast");

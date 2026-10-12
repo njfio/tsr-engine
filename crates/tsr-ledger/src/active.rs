@@ -13,6 +13,8 @@ use tsr_domain::{
     Source,
 };
 
+use crate::write::is_operator_only;
+
 /// One preference as the fold sees it: the node, its lineage, and where it stands now.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LedgerEntry {
@@ -168,7 +170,10 @@ pub fn fold(events: &[(i64, Event)], root: tsr_domain::Hash) -> CollectiveRealit
                         }
                     }
                     _ => {
-                        if admitted {
+                        // `withdrawn` and `out_of_scope` are operator-only (PRD §B11 M2 item 1):
+                        // the fold applies them only from an Operator `by`, whatever the write path
+                        // admitted. A non-operator one is recorded in the history and ignored.
+                        if admitted && (!is_operator_only(status) || *by == Source::Operator) {
                             entry.status = Some(status.clone());
                         }
                     }

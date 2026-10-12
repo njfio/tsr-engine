@@ -62,17 +62,16 @@ fn episode(store: &Store, t: &TaskId) {
 
     // The task's intent: a task-scoped preference, recorded through the Filter.
     let ledger = tsr_ledger::Ledger::new(store);
-    let intent_contrast = Contrast {
-        id: ContrastId(Hash::of(&[b"intent-contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"intent-return"])),
-        unmet: vec![(
+    let intent_contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"intent-return"])),
+        vec![(
             CriterionId(Hash::of(&[b"intent-criterion"])),
             UnmetKind::Rejected {
                 reason: "the criterion went unmet".to_string(),
             },
         )],
-        evidence: Vec::new(),
-    };
+        Vec::new(),
+    );
     ledger
         .record_contrast(t, Vec::new(), intent_contrast.clone(), "unix:1")
         .unwrap();
@@ -233,15 +232,14 @@ fn episode(store: &Store, t: &TaskId) {
             residual: 0.4,
         },
     ];
-    let contrast = Contrast {
-        id: ContrastId(Hash::of(&[b"contrast"])),
-        from_return: tsr_domain::EventId(Hash::of(&[b"return"])),
-        unmet: vec![(
+    let contrast = tsr_ledger::Filter::contrast_from_criteria(
+        tsr_domain::EventId(Hash::of(&[b"return"])),
+        vec![(
             CriterionId(Hash::of(&[b"criterion"])),
             UnmetKind::WrongBehaviour,
         )],
-        evidence: vec![tsr_domain::EventId(Hash::of(&[b"evidence"]))],
-    };
+        vec![tsr_domain::EventId(Hash::of(&[b"evidence"]))],
+    );
     store
         .append(&Event::new(
             *t,
