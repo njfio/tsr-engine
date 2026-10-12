@@ -565,31 +565,6 @@ struct EpisodeFile {
     events: Vec<Event>,
 }
 
-/// Write the corpus to `dir`, one JSON file per episode, and return the paths written.
-pub fn write_corpus(dir: &Path, seed: u64) -> Vec<PathBuf> {
-    std::fs::create_dir_all(dir).expect("create fixtures dir");
-    let mut paths = Vec::new();
-    for ep in generate_corpus(seed) {
-        let outcome = match ep.outcome {
-            EpisodeOutcome::Accepted => "accepted",
-            EpisodeOutcome::Rejected => "rejected",
-            EpisodeOutcome::Disputed => "disputed",
-        };
-        let file = EpisodeFile {
-            task: ep.task,
-            family: ep.family.to_string(),
-            index: ep.index,
-            outcome: outcome.to_string(),
-            events: ep.events,
-        };
-        let path = dir.join(format!("{}-{:02}.json", ep.family, ep.index));
-        let json = serde_json::to_string_pretty(&file).expect("serialize episode");
-        std::fs::write(&path, json).expect("write episode");
-        paths.push(path);
-    }
-    paths
-}
-
 /// The store directory the CLI opens, relative to the crate root.
 fn store_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -600,12 +575,37 @@ fn store_dir() -> PathBuf {
         .join("store")
 }
 
+/// Whether the fixtures should be regenerated. Regeneration is explicit: a plain `cargo test`
+/// must never rewrite the committed corpus or the store, so a stale fixture fails the comparison
+/// instead of being silently refreshed. Set `TSR_REGEN_FIXTURES=1` to regenerate.
+fn regen() -> bool {
+    std::env::var("TSR_REGEN_FIXTURES").as_deref() == Ok("1")
+}
+
+/// The committed store path (`fixtures/m2/store/tsr.db`). It is gitignored — a build artifact the
+/// tests compare against, never a source file.
+fn committed_store() -> PathBuf {
+    store_dir().join("tsr.db")
+}
+
+/// A fresh scratch directory under the system temp dir, unique per call. The store tests build
+/// here so a plain run never touches the committed store.
+fn scratch_dir(tag: &str) -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("tsr-m2-{}-{}-{}", tag, std::process::id(), n));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
 /// Build a SQLite store at `dir/tsr.db` holding every event of the corpus, so the CLI
 /// (`tsr reflect --family <f> --store <dir>/tsr.db`) can fold the fixtures. Returns the path.
 ///
 /// The store is rebuilt from scratch each run: the file is removed first, so the corpus is a pure
-/// function of the seed and never accumulates stale events.
-pub fn write_store(dir: &Path, seed: u64) -> PathBuf {
+/// function of the seed and never accumulates stale events. Callers pass a scratch directory; the
+/// committed store is written only under `TSR_REGEN_FIXTURES=1`.
+pub fn build_store(dir: &Path, seed: u64) -> PathBuf {
     std::fs::create_dir_all(dir).expect("create store dir");
     let db = dir.join("tsr.db");
     // Build into a unique temp file, then rename atomically: cargo runs the tests in parallel,
@@ -717,6 +717,17 @@ fn fixtures_are_committed_and_match_the_generator() {
     let corpus = generate_corpus(SEED);
     assert_eq!(corpus.len(), 30, "thirty episodes");
 
+    // 0. Regeneration is explicit. A plain `cargo test` never writes the corpus: it reads the
+    //    committed bytes first and compares them to the generator's output, so a stale corpus
+    //    fails instead of being silently refreshed. `TSR_REGEN_FIXTURES=1` writes it.
+    if regen() {
+        std::fs::create_dir_all(&dir).expect("create fixtures dir");
+        for ep in &corpus {
+            let path = dir.join(format!("{}-{:02}.json", ep.family, ep.index));
+            std::fs::write(&path, render_episode(ep)).expect("write episode");
+        }
+    }
+
     // 1. Read the committed bytes first, and compare them to the generator's output.
     for ep in &corpus {
         let path = dir.join(format!("{}-{:02}.json", ep.family, ep.index));
@@ -756,11 +767,14 @@ fn fixtures_are_committed_and_match_the_generator() {
 
 #[test]
 fn store_holds_every_episode_for_the_cli() {
-    let dir = store_dir();
-    let db = write_store(&dir, SEED);
+    let corpus = generate_corpus(SEED);
+
+    // Build the corpus into a scratch directory. The committed store is never overwritten by a
+    // plain run: it is compared against, and only `TSR_REGEN_FIXTURES=1` publishes it.
+    let scratch = scratch_dir("store-holds");
+    let db = build_store(&scratch, SEED);
     assert!(db.exists(), "the store file exists");
     let store = Store::open(&db).expect("reopen store");
-    let corpus = generate_corpus(SEED);
     // Every episode's task is present, and its events are all in the store.
     for ep in &corpus {
         let events = store.by_task(&ep.task).expect("by_task");
@@ -768,12 +782,88 @@ fn store_holds_every_episode_for_the_cli() {
     }
     // The store's head root is stable across a rebuild.
     let root_a = store.head_root().expect("head root");
-    let db2 = write_store(&dir, SEED);
+    let scratch2 = scratch_dir("store-holds-2");
+    let db2 = build_store(&scratch2, SEED);
     let store2 = Store::open(&db2).expect("reopen store");
     assert_eq!(
         root_a,
         store2.head_root().expect("head root"),
         "stable root"
+    );
+
+    // The committed store, when present, must fold to the same head root: the scratch build is
+    // the corpus, and the committed store is that corpus. Regenerate it only on request.
+    let committed = committed_store();
+    if regen() {
+        std::fs::create_dir_all(store_dir()).expect("create store dir");
+        std::fs::copy(&db, &committed).expect("publish committed store");
+    }
+    if committed.exists() {
+        let c = Store::open(&committed).expect("open committed store");
+        assert_eq!(
+            c.head_root().expect("committed head root"),
+            root_a,
+            "the committed store folds to the same root as a fresh build"
+        );
+    }
+}
+
+/// D6: a plain `cargo test` must not rewrite the committed fixtures. This test snapshots the
+/// committed corpus JSON and the committed store, runs the comparison path, and asserts both are
+/// byte-identical afterwards. Regeneration happens only under `TSR_REGEN_FIXTURES=1`.
+#[test]
+fn d6_fixture_compare_is_read_only() {
+    assert!(
+        !regen(),
+        "d6_fixture_compare_is_read_only must run without TSR_REGEN_FIXTURES=1"
+    );
+
+    // Snapshot the committed corpus and store before the comparison path runs.
+    let corpus = generate_corpus(SEED);
+    let mut before_json: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+    for ep in &corpus {
+        let path = fixtures_dir().join(format!("{}-{:02}.json", ep.family, ep.index));
+        before_json.push((
+            path.clone(),
+            std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display())),
+        ));
+    }
+    let committed = committed_store();
+    let before_store = std::fs::read(&committed).ok();
+
+    // Run the comparison path exactly as the other tests do: compare the corpus read-only and
+    // build the store into a scratch directory.
+    for ep in &corpus {
+        let path = fixtures_dir().join(format!("{}-{:02}.json", ep.family, ep.index));
+        let committed_bytes = std::fs::read_to_string(&path).expect("read committed fixture");
+        assert_eq!(
+            committed_bytes,
+            render_episode(ep),
+            "committed fixture {} differs from the generator",
+            path.display()
+        );
+    }
+    let scratch = scratch_dir("d6-readonly");
+    let db = build_store(&scratch, SEED);
+    assert!(db.exists(), "the scratch store was built");
+
+    // The committed JSON is unchanged.
+    for (path, before) in &before_json {
+        let after = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        assert_eq!(
+            &after,
+            before,
+            "the comparison path rewrote the committed fixture {}",
+            path.display()
+        );
+    }
+    // The committed store is unchanged (or still absent).
+    let after_store = std::fs::read(&committed).ok();
+    assert_eq!(
+        after_store,
+        before_store,
+        "the comparison path rewrote the committed store {}",
+        committed.display()
     );
 }
 
@@ -785,7 +875,19 @@ fn generator_curve_differs_across_families() {
     use tsr_forecast::resolve::{resolve, TaskFacts};
     use tsr_forecast::score::{score_per_forecaster, ScoredForecast};
 
-    let db = write_store(&store_dir(), SEED);
+    // Read the committed store read-only. A plain run never rewrites it; regenerate only on
+    // request, and otherwise build a scratch store if the committed one is absent.
+    let committed = committed_store();
+    if regen() {
+        std::fs::create_dir_all(store_dir()).expect("create store dir");
+        let built = build_store(&scratch_dir("curve-regen"), SEED);
+        std::fs::copy(&built, &committed).expect("publish committed store");
+    }
+    let db = if committed.exists() {
+        committed
+    } else {
+        build_store(&scratch_dir("curve"), SEED)
+    };
     let store = Store::open(&db).expect("open committed store");
     let corpus = generate_corpus(SEED);
 
