@@ -44,8 +44,10 @@ pub const BOOTSTRAP_LEVEL: f64 = 0.90;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Scores {
     pub n: u32,
-    pub brier: f64,
-    pub log_loss: f64,
+    /// The mean Brier score, or `None` for an empty set (prints `n/a`, never a number).
+    pub brier: Option<f64>,
+    /// The mean log loss, or `None` for an empty set.
+    pub log_loss: Option<f64>,
     /// 10 equal-width bins: `(lower, upper, count)`.
     pub reliability: Vec<(f64, f64, u32)>,
 }
@@ -113,7 +115,8 @@ pub struct FamilyScores {
 pub struct FloorPoint {
     pub floor: u32,
     pub coverage: u32,
-    pub brier: f64,
+    /// The controller's Brier at this floor, or `None` when no row has coverage (prints `n/a`).
+    pub brier: Option<f64>,
 }
 
 /// The floors the report sweeps (brief item 6).
@@ -138,13 +141,16 @@ pub fn raw_p(bundle: &Bundle, row: &Row) -> f64 {
 }
 
 /// Score a set of `(p, y)` pairs.
+///
+/// B6: an empty set has no score — `brier` and `log_loss` are `None` and print `n/a`, never a
+/// number (PRD Appendix A forbids a fabricated 0.000000).
 pub fn score(pairs: &[(f64, f64)]) -> Scores {
     let n = pairs.len() as u32;
     if pairs.is_empty() {
         return Scores {
             n: 0,
-            brier: 0.0,
-            log_loss: 0.0,
+            brier: None,
+            log_loss: None,
             reliability: Vec::new(),
         };
     }
@@ -170,8 +176,8 @@ pub fn score(pairs: &[(f64, f64)]) -> Scores {
         .collect();
     Scores {
         n,
-        brier: brier / nf,
-        log_loss: log_loss / nf,
+        brier: Some(brier / nf),
+        log_loss: Some(log_loss / nf),
         reliability,
     }
 }
@@ -272,7 +278,9 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         .filter(|r| r.side == Side::HeldOut && r.label.is_none())
         .count() as u32;
 
-    // Per-row pairs.
+    // The comparison set (B4): the held_out rows with a resolved label, a calibrated controller p
+    // AND a generator raw p. Every forecaster's Brier and log loss is over exactly this set, so the
+    // printed advantage is not an artefact of two different row sets.
     let mut ctrl_pairs: Vec<(f64, f64)> = Vec::new();
     let mut gen_pairs: Vec<(f64, f64)> = Vec::new();
     let mut op_pairs: Vec<(f64, f64)> = Vec::new();
@@ -284,8 +292,12 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
     let mut fam_gen: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
     let mut fam_op: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
 
-    // The paired difference, per task: (task, lineage, controller_brier - generator_brier).
-    let mut per_task: BTreeMap<String, (String, f64, f64)> = BTreeMap::new();
+    // The paired difference, per task: (task, lineage, sum controller Brier, sum generator Brier,
+    // row count). B5: the task's difference is the MEAN over its rows, so the sums are divided by
+    // the count before the tasks are averaged.
+    let mut per_task: BTreeMap<String, (String, f64, f64, u32)> = BTreeMap::new();
+    // Per family, the same per-task unit: (family, task) -> (lineage, sum ctrl, sum gen, count).
+    let mut fam_task: BTreeMap<(String, String), (String, f64, f64, u32)> = BTreeMap::new();
 
     for r in &rows {
         let y = if r.label == Some(true) { 1.0 } else { 0.0 };
@@ -294,14 +306,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         if ctrl.is_none() {
             uncalibrated += 1;
         }
-        if let Some(g) = gen {
-            gen_pairs.push((g, y));
-            fam_gen.entry(r.family.clone()).or_default().push((g, y));
-        }
-        if let Some(c) = ctrl {
-            ctrl_pairs.push((c, y));
-            fam_ctrl.entry(r.family.clone()).or_default().push((c, y));
-        }
+        // The operator is scored on the subset where it recorded a forecast, with that n.
         if let Some(o) = r.operator_raw {
             op_pairs.push((o, y));
             fam_op.entry(r.family.clone()).or_default().push((o, y));
@@ -309,14 +314,26 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         if let Some(l) = r.controller_logged {
             logged_pairs.push((l, y));
         }
-        // The pair: only rows with both a calibrated controller p and a generator p.
+        // The comparison set: only rows with both a calibrated controller p and a generator p.
         if let (Some(c), Some(g)) = (ctrl, gen) {
+            ctrl_pairs.push((c, y));
+            gen_pairs.push((g, y));
+            fam_ctrl.entry(r.family.clone()).or_default().push((c, y));
+            fam_gen.entry(r.family.clone()).or_default().push((g, y));
             let key = r.task.0.to_hex();
             let entry = per_task
-                .entry(key)
-                .or_insert_with(|| (r.lineage.clone(), 0.0, 0.0));
+                .entry(key.clone())
+                .or_insert_with(|| (r.lineage.clone(), 0.0, 0.0, 0));
             entry.1 += (c - y) * (c - y);
             entry.2 += (g - y) * (g - y);
+            entry.3 += 1;
+            let fkey = (r.family.clone(), key);
+            let fentry = fam_task
+                .entry(fkey)
+                .or_insert_with(|| (r.lineage.clone(), 0.0, 0.0, 0));
+            fentry.1 += (c - y) * (c - y);
+            fentry.2 += (g - y) * (g - y);
+            fentry.3 += 1;
         }
     }
 
@@ -334,10 +351,13 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
     };
 
     let mut families: BTreeMap<String, FamilyScores> = BTreeMap::new();
+    // B6: every family in the bundle's population appears, even with no rows, so an empty family
+    // prints n=0 and n/a rather than being silently absent.
     let mut all_fams: Vec<String> = fam_ctrl
         .keys()
         .chain(fam_gen.keys())
         .chain(fam_op.keys())
+        .chain(bundle.population.keys())
         .cloned()
         .collect();
     all_fams.sort();
@@ -356,25 +376,20 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         );
     }
 
-    // The paired difference: per task, controller minus generator.
+    // The paired difference (B5): per task, the MEAN over its rows of (controller − generator).
     let diffs: Vec<(String, f64)> = per_task
         .values()
-        .map(|(lineage, cb, gb)| (lineage.clone(), cb - gb))
+        .map(|(lineage, cb, gb, n)| (lineage.clone(), (cb - gb) / *n as f64))
         .collect();
     let paired = paired_difference(&diffs, seed);
 
-    // Per family paired difference.
+    // Per family paired difference: the same per-task unit, `tasks=` counts tasks.
     let mut paired_by_family: BTreeMap<String, Paired> = BTreeMap::new();
     for f in families.keys() {
-        let fam_diffs: Vec<(String, f64)> = rows
+        let fam_diffs: Vec<(String, f64)> = fam_task
             .iter()
-            .filter(|r| &r.family == f)
-            .filter_map(|r| {
-                let c = calibrated_p(bundle, r)?;
-                let g = r.generator_raw?;
-                let y = if r.label == Some(true) { 1.0 } else { 0.0 };
-                Some((r.lineage.clone(), (c - y) * (c - y) - (g - y) * (g - y)))
-            })
+            .filter(|((fam, _), _)| fam == f)
+            .map(|(_, (lineage, cb, gb, n))| (lineage.clone(), (cb - gb) / *n as f64))
             .collect();
         paired_by_family.insert(f.clone(), paired_difference(&fam_diffs, seed));
     }
@@ -555,11 +570,15 @@ pub fn render_report(r: &Report, json: bool) -> String {
     for (name, points) in &r.floor_sweep {
         out.push_str(&format!("family {name}\n"));
         for p in points {
+            // B6: a floor with no coverage prints n/a, never 0.000000.
+            let brier = match p.brier {
+                Some(v) => proxy("brier", v),
+                None => "brier=n/a".to_string(),
+            };
             out.push_str(&format!(
-                "  floor={} {} {}\n",
+                "  floor={} {} {brier}\n",
                 p.floor,
                 proxy("coverage", p.coverage as f64),
-                proxy("brier", p.brier)
             ));
         }
     }
@@ -568,12 +587,16 @@ pub fn render_report(r: &Report, json: bool) -> String {
 
 fn render_scores(label: &str, s: &Scores) -> String {
     let mut out = String::new();
-    out.push_str(&format!(
-        "  {label} n={} {} {}\n",
-        s.n,
-        proxy("brier", s.brier),
-        proxy("log_loss", s.log_loss)
-    ));
+    // B6: an empty set prints n/a, never a number.
+    let brier = match s.brier {
+        Some(v) => proxy("brier", v),
+        None => "brier=n/a".to_string(),
+    };
+    let log_loss = match s.log_loss {
+        Some(v) => proxy("log_loss", v),
+        None => "log_loss=n/a".to_string(),
+    };
+    out.push_str(&format!("  {label} n={} {brier} {log_loss}\n", s.n));
     for (lo, hi, c) in &s.reliability {
         out.push_str(&format!(
             "    bin [{lo:.1},{hi:.1}) {}\n",
@@ -595,11 +618,15 @@ fn render_paired(label: &str, p: &Paired) -> String {
     } else {
         "conclusive"
     };
+    // B6: an empty pair prints n/a, never a number.
+    let mean = if p.tasks == 0 {
+        "mean=n/a".to_string()
+    } else {
+        format!("mean={}", proxy("brier", p.mean))
+    };
     format!(
-        "  {label} tasks={} clusters={} mean={} {interval} {verdict}\n",
-        p.tasks,
-        p.clusters,
-        proxy("brier", p.mean)
+        "  {label} tasks={} clusters={} {mean} {interval} {verdict}\n",
+        p.tasks, p.clusters,
     )
 }
 
@@ -758,11 +785,11 @@ mod tests {
         }
         let ds = dataset(&b, rows);
         let r = report(&b, &ds, 11);
+        let cb = r.controller.brier.expect("controller has rows");
+        let gb = r.generator.brier.expect("generator has rows");
         assert!(
-            r.controller.brier < r.generator.brier,
-            "controller {} < generator {}",
-            r.controller.brier,
-            r.generator.brier
+            cb < gb,
+            "controller {cb} < generator {gb}"
         );
         let p = &r.paired;
         assert!(p.interval.is_some(), "two or more clusters");
@@ -987,5 +1014,114 @@ mod tests {
         let cal = text.find("family calibrated").unwrap();
         let over = text.find("family overconfident").unwrap();
         assert!(cal < over, "families in name order: {text}");
+    }
+
+    /// A row whose task and lineage are set explicitly, so a test can put several rows in one task.
+    fn row_in_task(
+        b: &Bundle,
+        family: &str,
+        lineage: &str,
+        task: &str,
+        signal: f64,
+        label: bool,
+        gen: f64,
+        i: u64,
+    ) -> Row {
+        let mut r = row(b, family, lineage, signal, label, gen, i);
+        r.task = TaskId(Hash::of(&[task.as_bytes()]));
+        r
+    }
+
+    /// B4: the controller and the generator must be scored over exactly the same comparison set —
+    /// the held_out rows with a resolved label, a calibrated controller p and a generator raw p.
+    /// Today the controller is scored over every row with a calibrated p and the generator over
+    /// every row with a generator p, so the printed advantage is about doubled.
+    #[test]
+    fn b4_forecasters_share_the_comparison_set() {
+        let b = bundle_for(&["calibrated", "underconfident"], &["calibrated"]);
+        let mut rows = Vec::new();
+        // 20 calibrated rows, each with a generator p: in the comparison set.
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i));
+        }
+        // 10 calibrated rows with NO generator p: the controller can score them, the generator cannot.
+        for i in 20..30u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            let mut r = row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i);
+            r.generator_raw = None;
+            rows.push(r);
+        }
+        // 10 underconfident rows (uncalibrated) WITH a generator p: the generator can score them,
+        // the controller cannot.
+        for i in 30..40u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "underconfident", &format!("l{}", i % 3), signal, label, 0.9, i));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        assert_eq!(
+            r.controller.n, r.generator.n,
+            "B4: controller n={} and generator n={} must be the same comparison set",
+            r.controller.n, r.generator.n
+        );
+        assert_eq!(r.controller.n, 20, "the comparison set is the 20 rows with both p's");
+        // The uncalibrated rows are excluded from the pair and counted.
+        assert_eq!(r.uncalibrated, 10, "the ten underconfident rows are uncalibrated");
+    }
+
+    /// B5: a task's paired difference is the MEAN over its rows of (controller − generator), so the
+    /// overall pair is the mean of the per-task means, not the per-row mean. Today the per-task
+    /// entry sums its rows' Briers, so the printed difference is the per-row difference scaled by
+    /// the row count.
+    #[test]
+    fn b5_paired_difference_is_the_per_task_mean() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // The head reads the last feature: signal 1.0 -> raw ~0.982 -> isotonic 0.9; signal 0.0 ->
+        // raw 0.5 -> isotonic 0.1.
+        // Task A: one row, signal 1.0, label true: controller 0.9, generator 0.9, y=1 -> diff 0.
+        // Task B: three rows, signal 0.0, label false: controller 0.1, generator 0.5, y=0 ->
+        //   (0.1-0)^2 - (0.5-0)^2 = 0.01 - 0.25 = -0.24 each.
+        // Per-task mean = (0 + (-0.24))/2 = -0.12; per-row mean = (0 + (-0.24)*3)/4 = -0.18.
+        let mut rows = Vec::new();
+        rows.push(row_in_task(&b, "calibrated", "lA", "taskA", 1.0, true, 0.9, 0));
+        for i in 1..4u64 {
+            rows.push(row_in_task(&b, "calibrated", "lB", "taskB", 0.0, false, 0.5, i));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        assert_eq!(r.paired.tasks, 2, "two tasks in the pair");
+        assert!(
+            (r.paired.mean - (-0.12)).abs() < 1e-9,
+            "B5: the pair is the mean of the per-task means (-0.12), got {}",
+            r.paired.mean
+        );
+    }
+
+    /// B6: an empty set prints `n=0` and `n/a`, never a number (PRD Appendix A). Today an empty
+    /// family prints brier=0.000000.
+    #[test]
+    fn b6_empty_set_prints_na_not_a_number() {
+        let b = bundle_for(&["calibrated", "overconfident"], &["calibrated", "overconfident"]);
+        let mut rows = Vec::new();
+        for i in 0..20u64 {
+            let label = i % 2 == 0;
+            let signal = if label { 1.0 } else { 0.0 };
+            rows.push(row(&b, "calibrated", &format!("l{}", i % 3), signal, label, 0.9, i));
+        }
+        let ds = dataset(&b, rows);
+        let r = report(&b, &ds, 7);
+        // The overconfident family has no rows: its scores must be n=0 and n/a, not 0.000000.
+        let over = &r.families["overconfident"];
+        assert_eq!(over.controller.n, 0);
+        let text = render_report(&r, false);
+        assert!(
+            !text.contains("brier=0.000000"),
+            "B6: an empty set must not print a number:\n{text}"
+        );
+        assert!(text.contains("n/a"), "B6: an empty set prints n/a:\n{text}");
     }
 }
