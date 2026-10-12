@@ -22,7 +22,6 @@
 //! which is provenance for the estimator, not a belief.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::ExitCode;
 
 use tsr_domain::{
@@ -487,7 +486,9 @@ pub struct ReviewArgs {
     pub family: Option<String>,
     /// `--stats`: print the false-accept rate.
     pub stats: bool,
-    pub store: String,
+    /// The store holding the log: `--store` when given, else the M0 resolver (`TSR_DB`, else
+    /// `.tsr/tsr.db`).
+    pub store: Option<String>,
 }
 
 /// Run `tsr review <task> [label] [--reason <text>] [--sample <rate> --seed <n>] [--family <f> --stats]`.
@@ -499,10 +500,21 @@ pub struct ReviewArgs {
 /// | 0 | the label was appended, or the listing printed |
 /// | 2 | the task id, the store, the label or the arguments are malformed |
 pub fn run(args: &ReviewArgs) -> ExitCode {
-    let store = match Store::open(Path::new(&args.store)) {
+    // R5: the store is the one the M0 commands use — `--store` when given, else the shared
+    // resolver (`TSR_DB`, else `.tsr/tsr.db`). Review only reads the log, so a store that does
+    // not exist is an error naming the path, never a store created here.
+    let path = match &args.store {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => crate::store_path::db_path(),
+    };
+    if !path.is_file() {
+        eprintln!("tsr: no store at {}", path.display());
+        return ExitCode::from(2);
+    }
+    let store = match Store::open(&path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("tsr: cannot open store {:?}: {e}", args.store);
+            eprintln!("tsr: cannot open store {}: {e}", path.display());
             return ExitCode::from(2);
         }
     };

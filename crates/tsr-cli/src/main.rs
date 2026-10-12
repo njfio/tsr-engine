@@ -83,9 +83,9 @@ enum Cmd {
         /// A short note on friction or trust; never reward truth.
         #[arg(long)]
         text: String,
-        /// The store holding the task's log.
-        #[arg(long, default_value = "tsr.db")]
-        store: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
     },
     /// Label outcomes after close (M2, B5, B7).
     Review {
@@ -111,9 +111,9 @@ enum Cmd {
         /// Print the false-accept rate (green but rejected), weighted and unweighted.
         #[arg(long)]
         stats: bool,
-        /// The store holding the task's log.
-        #[arg(long, default_value = "tsr.db")]
-        store: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
     },
     /// The Mirror view: one closed episode, in the book's order (M2, B7).
     Reflect {
@@ -125,9 +125,9 @@ enum Cmd {
         /// Emit the same content as a JSON document.
         #[arg(long)]
         json: bool,
-        /// The store holding the task's log.
-        #[arg(long, default_value = "tsr.db")]
-        store: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
     },
     /// Corpus tooling: mine, mutants (M3, B9).
     Corpus {
@@ -174,9 +174,9 @@ enum TaskCmd {
     /// Reconcile dispatches with no recorded outcome (M2, B4/B6).
     Reconcile {
         task: String,
-        /// The store holding the task's log.
-        #[arg(long, default_value = "tsr.db")]
-        store: String,
+        /// The store holding the task's log (defaults to the M0 store: `TSR_DB`, else `.tsr/tsr.db`).
+        #[arg(long)]
+        store: Option<String>,
     },
 }
 
@@ -235,7 +235,7 @@ fn main() -> ExitCode {
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
-        Cmd::Note { task, text, store } => note_cmd::run(&task, &text, &store),
+        Cmd::Note { task, text, store } => note_cmd::run(&task, &text, store.as_deref()),
         Cmd::Review {
             task,
             label,
@@ -324,7 +324,7 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
                 }
             }
         }
-        TaskCmd::Reconcile { task, store } => reconcile_cmd::run(&task, &store),
+        TaskCmd::Reconcile { task, store } => reconcile_cmd::run(&task, store.as_deref()),
         TaskCmd::Export { task: name } => {
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {

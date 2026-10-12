@@ -15,7 +15,6 @@
 //! the operator's experience entries in sequence order so they can be rendered beside the
 //! system's own numbers.
 
-use std::path::Path;
 use std::process::ExitCode;
 
 use tsr_domain::{Event, EventId, EventKind, Hash, Observation, Source, TaskId};
@@ -137,7 +136,7 @@ pub fn notes_in(events: &[(i64, Event)]) -> Vec<(EventId, String)> {
 /// | --- | --- |
 /// | 0 | the note was appended |
 /// | 2 | the task id, the store or the note text is malformed |
-pub fn run(task_hex: &str, text: &str, store_path: &str) -> ExitCode {
+pub fn run(task_hex: &str, text: &str, store_path: Option<&str>) -> ExitCode {
     let task = match Hash::from_hex(task_hex) {
         Ok(h) => TaskId(h),
         Err(e) => {
@@ -149,10 +148,17 @@ pub fn run(task_hex: &str, text: &str, store_path: &str) -> ExitCode {
         eprintln!("tsr: {e}");
         return ExitCode::from(2);
     }
-    let store = match Store::open(Path::new(store_path)) {
+    // R5: the store is the one the M0 commands use — `--store` when given, else the shared
+    // resolver (`TSR_DB`, else `.tsr/tsr.db`). A note writes, so it may create the store, but it
+    // must resolve the same path the M0 commands do.
+    let path = match store_path {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => crate::store_path::db_path(),
+    };
+    let store = match Store::open(&path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("tsr: cannot open store {store_path:?}: {e}");
+            eprintln!("tsr: cannot open store {}: {e}", path.display());
             return ExitCode::from(2);
         }
     };

@@ -21,7 +21,6 @@
 //! sequence, and no screen prints a TSR term with a number.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::ExitCode;
 
 use serde::Serialize;
@@ -42,8 +41,9 @@ pub struct ReflectArgs {
     pub family: Option<String>,
     /// Emit the same content as a JSON document.
     pub json: bool,
-    /// The store holding the log.
-    pub store: String,
+    /// The store holding the log: `--store` when given, else the M0 resolver (`TSR_DB`, else
+    /// `.tsr/tsr.db`).
+    pub store: Option<String>,
 }
 
 /// Why a reflect command was refused before anything was printed.
@@ -767,10 +767,21 @@ pub fn render_family_curves(fc: &FamilyCurves) -> String {
 /// | 0 | the Mirror or the curves printed |
 /// | 2 | the task id, the store or the arguments are malformed |
 pub fn run(args: &ReflectArgs) -> ExitCode {
-    let store = match Store::open(Path::new(&args.store)) {
+    // R5: the store is the one the M0 commands use — `--store` when given, else the shared
+    // resolver (`TSR_DB`, else `.tsr/tsr.db`). Reflect only reads the log, so a store that does
+    // not exist is an error naming the path, never a store created here.
+    let path = match &args.store {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => crate::store_path::db_path(),
+    };
+    if !path.is_file() {
+        eprintln!("tsr: no store at {}", path.display());
+        return ExitCode::from(2);
+    }
+    let store = match Store::open(&path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("tsr: cannot open store {:?}: {e}", args.store);
+            eprintln!("tsr: cannot open store {}: {e}", path.display());
             return ExitCode::from(2);
         }
     };
