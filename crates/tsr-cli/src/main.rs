@@ -228,6 +228,10 @@ enum CorpusCmd {
         /// The suite command (default: `cargo test`).
         #[arg(long)]
         suite: Option<String>,
+        /// Run each named test exactly (`cargo test -- <name> --exact`), so a filter that matches
+        /// nothing is a failure rather than a silent pass (D3, P3).
+        #[arg(long)]
+        exact: bool,
     },
 }
 
@@ -326,7 +330,14 @@ fn main() -> ExitCode {
                 tests,
                 full_suite,
                 suite,
-            } => corpus_cmd::oracle_cmd(&snapshot, tests.as_deref(), full_suite, suite.as_deref()),
+                exact,
+            } => corpus_cmd::oracle_cmd(
+                &snapshot,
+                tests.as_deref(),
+                full_suite,
+                suite.as_deref(),
+                exact,
+            ),
         },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train => not_yet("train", "B8 Tier 1 (M4)"),

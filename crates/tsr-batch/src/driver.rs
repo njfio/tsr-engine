@@ -192,6 +192,11 @@ pub struct ScriptedEdit {
     pub path: String,
     /// The file's new contents.
     pub contents: String,
+    /// When set, the edit creates a symlink at `path` pointing at this target instead of writing
+    /// `contents`. A session can plant a symlink the snapshot did not have; the tamper check (D3)
+    /// rejects it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symlink: Option<String>,
 }
 
 impl ScriptedEdit {
@@ -200,6 +205,7 @@ impl ScriptedEdit {
         Self {
             path: path.into(),
             contents: contents.into(),
+            symlink: None,
         }
     }
 
@@ -270,6 +276,15 @@ impl ScriptedEdit {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| DriverError::Fixture(format!("creating {}: {e}", parent.display())))?;
+        }
+        if let Some(link) = &self.symlink {
+            // A session can plant a symlink the snapshot did not have; the tamper check (D3) rejects
+            // it. The link target is written verbatim, so a link to a path outside the copy is
+            // exactly the escape the tamper check must catch.
+            let _ = std::fs::remove_file(&target);
+            return std::os::unix::fs::symlink(link, &target).map_err(|e| {
+                DriverError::Fixture(format!("symlinking {}: {e}", target.display()))
+            });
         }
         std::fs::write(&target, &self.contents)
             .map_err(|e| DriverError::Fixture(format!("writing {}: {e}", target.display())))

@@ -92,6 +92,11 @@ pub struct RunResult {
     pub stdout_digest: String,
     pub stderr_digest: String,
     pub duration_ms: u64,
+    /// The run's real stdout bytes (D3, P3). The digest above is what the store records; the bytes
+    /// are what the oracle reads to decide whether the exact test it asked for actually ran. They
+    /// are not serialized: a recorded result carries the digest, and a replayed one has no bytes.
+    #[serde(default, skip_serializing)]
+    pub stdout: Vec<u8>,
 }
 
 impl RunResult {
@@ -103,6 +108,7 @@ impl RunResult {
             stdout_digest: digest(stdout),
             stderr_digest: digest(stderr),
             duration_ms,
+            stdout: stdout.to_vec(),
         }
     }
 

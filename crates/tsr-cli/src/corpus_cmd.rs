@@ -122,8 +122,9 @@ pub fn oracle_cmd(
     tests: Option<&str>,
     full_suite: bool,
     suite: Option<&str>,
+    exact: bool,
 ) -> ExitCode {
-    let argv = match oracle_argv(tests, full_suite, suite) {
+    let argv = match oracle_argv_exact(tests, full_suite, suite, exact) {
         Some(argv) => argv,
         None => {
             eprintln!("tsr: corpus oracle needs --tests <csv> or --full-suite");
@@ -141,44 +142,43 @@ pub fn oracle_cmd(
     // exits 0 having run nothing, so a session that renames the flipped test would otherwise be
     // accepted with the bug still present. The run's stdout is read back from the CAS by digest and
     // must carry a cargo test summary with at least one test run.
-    if tests.is_some() && !ran_a_test(&result) {
-        println!("oracle: fail (the filter matched no test)");
-        return ExitCode::from(1);
+    if let Some(tests) = tests {
+        if !ran_a_test(&result, tests) {
+            println!("oracle: fail (the filter matched no test)");
+            return ExitCode::from(1);
+        }
     }
     println!("oracle: pass (exit 0)");
     ExitCode::SUCCESS
 }
 
-/// Whether a run's stdout carries a cargo test summary with at least one test run.
+/// Whether a run's stdout shows the named tests actually ran (D3, P3).
 ///
-/// The stdout is read from the CAS by digest. Output that is not a cargo test summary at all (a
-/// non-cargo suite) is not judged by this rule — the restore step is what closes that gap.
-fn ran_a_test(result: &tsr_corpus::RunResult) -> bool {
-    let Ok(bytes) = tsr_corpus::mine::read_cas(
-        &tsr_corpus::mine::cas_dir(std::path::Path::new(".")),
-        &result.stdout_digest,
-    ) else {
+/// The run's *real* stdout is read — not a CAS nothing writes. With `--exact` the run must carry
+/// `test <name> ... ok` for each named test; without it, a cargo test summary with at least one
+/// test run is enough. A filter that matched nothing is a failure.
+fn ran_a_test(result: &tsr_corpus::RunResult, tests: &str) -> bool {
+    let text = String::from_utf8_lossy(&result.stdout);
+    let names: Vec<&str> = tests.split(',').filter(|t| !t.is_empty()).collect();
+    if names.is_empty() {
         return true;
-    };
-    let text = String::from_utf8_lossy(&bytes);
+    }
     let mut saw_summary = false;
     for line in text.lines() {
         let line = line.trim();
-        if !line.starts_with("test result:") {
-            continue;
-        }
-        saw_summary = true;
-        let Some(rest) = line.split("; ").nth(1) else {
-            continue;
-        };
-        let Some(n) = rest.split_whitespace().next() else {
-            continue;
-        };
-        if n.parse::<u64>().map(|n| n > 0).unwrap_or(false) {
-            return true;
+        if line.starts_with("test result:") {
+            saw_summary = true;
         }
     }
-    !saw_summary
+    if !saw_summary {
+        // Output that is not a cargo test summary at all (a non-cargo suite) is left to the exit
+        // code; the token comparison in the batch is what closes that gap.
+        return true;
+    }
+    names.iter().all(|name| {
+        text.lines()
+            .any(|l| l.trim() == format!("test {name} ... ok"))
+    })
 }
 
 /// The argv the oracle runs: the suite command, then the flipped tests after `--`.
@@ -194,6 +194,17 @@ pub fn oracle_argv(
     full_suite: bool,
     suite: Option<&str>,
 ) -> Option<Vec<String>> {
+    oracle_argv_exact(tests, full_suite, suite, false)
+}
+
+/// As [`oracle_argv`], but with `--exact` appended after the test names when `exact` is set (D3,
+/// P3): `cargo test -- <name> --exact` runs that one test and fails the filter when it is absent.
+pub fn oracle_argv_exact(
+    tests: Option<&str>,
+    full_suite: bool,
+    suite: Option<&str>,
+    exact: bool,
+) -> Option<Vec<String>> {
     let mut argv: Vec<String> = suite
         .map(|s| s.split_whitespace().map(str::to_string).collect())
         .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
@@ -203,6 +214,9 @@ pub fn oracle_argv(
             argv.push("--".to_string());
             for t in names {
                 argv.push(t.to_string());
+            }
+            if exact {
+                argv.push("--exact".to_string());
             }
         }
     } else if !full_suite {

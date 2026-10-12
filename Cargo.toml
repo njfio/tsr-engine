@@ -20,6 +20,9 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 # RATCHET protection profiles are TOML (PRD B5); tsr-policy parses them with `toml`.
 toml = "0.8"
+syn = { version = "2", features = ["full", "parsing", "printing"] }
+quote = "1"
+proc-macro2 = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

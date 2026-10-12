@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use tsr_batch::driver::{read_session, Mode, ScriptedDriver};
 use tsr_batch::invariants::{check_session_invariants, session_from_store};
 use tsr_batch::results::{read_results, Outcome};
-use tsr_batch::run::{flipped_tests_argv, run_all, run_one, BatchConfig};
+use tsr_batch::run::{run_all, run_one, BatchConfig};
 use tsr_batch::session::SessionCtx;
 use tsr_batch::task::{read_tasks, CorpusTask};
 use tsr_batch::{ClaudeCodeDriver, Driver, DRIVER_UNAVAILABLE_EXIT};
@@ -47,10 +47,12 @@ fn ok_runner() -> ScriptedRunner {
 /// `dest`, not the parent snapshot.
 fn flipped_fails_runner(dest: &Path) -> ScriptedRunner {
     let mut r = ScriptedRunner::ok();
-    // The flipped-tests argv carries `--tests`; the full-suite argv carries `--full-suite`.
+    // D3/P3: each oracle test is run on its own with `cargo test -- <name> --exact`.
     for task in tasks() {
-        let flipped = tsr_batch::run::flipped_tests_argv(dest, &task.failing_tests());
-        r.script(dest, &flipped, RunResult::exit_only(1));
+        for name in task.failing_tests() {
+            let argv = tsr_batch::run::exact_test_argv(dest, &name);
+            r.script(dest, &argv, RunResult::exit_only(1));
+        }
     }
     r
 }
@@ -399,11 +401,13 @@ fn d3_a_session_that_leaves_the_flipped_test_failing_is_not_accepted() {
     // The session's copy fails the flipped tests (exit 1) but the full suite passes.
     let mut runner = ScriptedRunner::ok();
     let dest = dir.path().join("copies").join(&task.id).join("rules");
-    runner.script(
-        &dest,
-        &flipped_tests_argv(&dest, &task.failing_tests()),
-        RunResult::exit_only(1),
-    );
+    for name in task.failing_tests() {
+        runner.script(
+            &dest,
+            &tsr_batch::run::exact_test_argv(&dest, &name),
+            RunResult::exit_only(1),
+        );
+    }
 
     let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
     assert_eq!(
@@ -428,11 +432,13 @@ fn d3_a_session_that_fixes_the_flipped_test_is_accepted() {
     // The session's copy passes the flipped tests and the full suite.
     let mut runner = ScriptedRunner::ok();
     let dest = dir.path().join("copies").join(&task.id).join("rules");
-    runner.script(
-        &dest,
-        &flipped_tests_argv(&dest, &task.failing_tests()),
-        RunResult::exit_only(0),
-    );
+    for name in task.failing_tests() {
+        runner.script(
+            &dest,
+            &tsr_batch::run::exact_test_argv(&dest, &name),
+            RunResult::exit_only(0),
+        );
+    }
 
     let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
     assert_eq!(

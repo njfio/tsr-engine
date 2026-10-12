@@ -544,8 +544,11 @@ name = "tsr-batch"
 version = "0.0.1"
 dependencies = [
  "blake3",
+ "proc-macro2",
+ "quote",
  "serde",
  "serde_json",
+ "syn 2.0.119",
  "tempfile",
  "thiserror",
  "tsr-corpus",
