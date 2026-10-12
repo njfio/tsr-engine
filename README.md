@@ -149,7 +149,8 @@ The thirty episodes under `fixtures/m2/episodes/` are **synthetic**: a seeded ge
 (`crates/tsr-cli/tests/m2_episodes.rs`) drives the store API through
 open -> propose -> forecast -> commit -> dispatch -> execute -> close -> review across three families
 with different generator calibration. The real thirty come from operator sessions after M3's batch
-runner. `fixtures/m2/store/tsr.db` is the same corpus as a store the CLI can fold. See
+runner. `fixtures/m2/store/tsr.db` is the same corpus as a store the CLI can fold: the generator
+writes it only under `TSR_REGEN_FIXTURES=1`, and it is git-ignored (`*.db`), not committed. See
 [`docs/m2-evidence.md`](docs/m2-evidence.md) for every command and its captured output.
 
 ## Layout
