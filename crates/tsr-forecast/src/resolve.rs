@@ -107,6 +107,12 @@ impl TaskFacts {
                     ..
                 } => {
                     f.executed.push((*candidate, *exit_code));
+                    // D10: an execution of an Intuition candidate is the `intuition_executed`
+                    // stage. The candidate's source is known from the `Proposed` event that named
+                    // it, which precedes this `Executed` in log order.
+                    if f.intuition_candidates.contains(candidate) {
+                        f.intuition_executed = true;
+                    }
                     f.evidence.push(ev.id);
                 }
                 EventKind::TaskClosed { reason, .. } => {
@@ -118,14 +124,29 @@ impl TaskFacts {
                     if reason == "budget" {
                         f.budget_breached = true;
                     }
+                    // R2: the lane's own cancellation close is an operator stop for external
+                    // reasons, so it censors the common decision event exactly as a
+                    // `Stop { reason: "operator" }` does.
+                    if reason == "operator" {
+                        f.operator_stop = true;
+                    }
                     f.evidence.push(ev.id);
                 }
                 EventKind::Stop { reason } => {
                     // The Stop stage of the hook (B4/B5): `operator` is an external stop that
                     // censors the common event; `budget` is a breached ceiling that resolves it
                     // false. The hook records it and never blocks.
+                    //
+                    // R3: the hook writes `Stop { done | operator }` and never `TaskClosed`, so a
+                    // hook-recorded forecast could never resolve. A `Stop { done }` is the task's
+                    // close (its criteria were met); `Stop { operator }` is an operator stop.
                     if reason == "operator" {
                         f.operator_stop = true;
+                    }
+                    if reason == "done" {
+                        f.closed = true;
+                        f.close_reason = Some(reason.clone());
+                        f.criteria_met = true;
                     }
                     if reason == "budget" {
                         f.budget_breached = true;

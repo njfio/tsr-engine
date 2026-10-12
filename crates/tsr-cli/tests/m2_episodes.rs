@@ -490,14 +490,21 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
     parents = vec![observed.id];
     events.push(observed);
 
-    // 9. Close the task.
+    // 9. Close the task. R3: the close reason must match the episode's story. Every generated
+    //    episode is reviewed (accepted, rejected or disputed), so every one closes `done`; the
+    //    `operator` close is reserved for a censored episode (closed with no review), of which the
+    //    corpus has none. Closing every episode `operator` censored the whole corpus, so the
+    //    accepted episodes resolved false and every reliability bin read `observed 0.0000`.
+    let close_reason = match outcome {
+        EpisodeOutcome::Accepted | EpisodeOutcome::Rejected | EpisodeOutcome::Disputed => "done",
+    };
     let closed = Event::new(
         task,
         parents.clone(),
         Source::Operator,
         EventKind::TaskClosed {
             task,
-            reason: "operator".to_string(),
+            reason: close_reason.to_string(),
         },
         stamp(index, 9),
     );
@@ -968,4 +975,49 @@ fn generator_curve_differs_across_families() {
         alpha > beta,
         "the over-confident family scores worse than the unbiased one: alpha {alpha} > beta {beta}"
     );
+}
+
+/// R3: the fixture families' calibration curves must show a non-zero observed rate.
+///
+/// Every fixture episode used to close `TaskClosed { reason: "operator" }`, which censors the
+/// common decision event, so every reliability bin of `tsr reflect --family` read
+/// `observed 0.0000` — the M2 exit evidence was an artifact. With the episodes closing as their
+/// story says (`done` for the reviewed ones), each family's curve carries real observations.
+#[test]
+fn r3_fixture_family_curves_have_nonzero_observed() {
+    use tsr_cli::reflect_cmd::build_family_curves;
+
+    let committed = committed_store();
+    let db = if committed.exists() {
+        committed
+    } else {
+        build_store(&scratch_dir("r3-curve"), SEED)
+    };
+    let store = Store::open(&db).expect("open committed store");
+    let events = store.all().expect("all events");
+
+    for family in ["alpha", "beta", "gamma"] {
+        let curves = build_family_curves(family, &events);
+        assert!(
+            !curves.curves.is_empty(),
+            "family {family} has at least one forecaster curve"
+        );
+        let mut observed_total = 0.0f64;
+        let mut bins_with_observations = 0usize;
+        for curve in &curves.curves {
+            for bin in &curve.bins {
+                if let Some(o) = bin.observed {
+                    observed_total += o;
+                    if o > 0.0 {
+                        bins_with_observations += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            bins_with_observations > 0,
+            "R3: family {family}'s curve has a bin with a non-zero observed rate \
+             (observed_total={observed_total})"
+        );
+    }
 }

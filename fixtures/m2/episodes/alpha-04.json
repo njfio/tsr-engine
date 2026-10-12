@@ -420,7 +420,7 @@
       }
     },
     {
-      "id": "0f92a77a1aca07c9a9f47f2fd131d52989eda2c5dd79cb1c992ab3b8b01b2243",
+      "id": "f133f8e1859dbaf320138d4d6e974396dc9237d294ef1e09bc3a0bab463cbbe2",
       "schema_version": 1,
       "task": "6e47ce6dece9fe584de7b668f405f3214a16306612320332ac2b36002cbabaa8",
       "parents": [
@@ -432,15 +432,15 @@
       "kind": {
         "kind": "task_closed",
         "task": "6e47ce6dece9fe584de7b668f405f3214a16306612320332ac2b36002cbabaa8",
-        "reason": "operator"
+        "reason": "done"
       }
     },
     {
-      "id": "2020fd53868d8445765bf4fd0de1ced4027019ae5fe83c4b1535951355c0f70e",
+      "id": "90c077063efdfcbc8b0df503725c8eb35b2d88dac069f3ebdd55ec787bea3e90",
       "schema_version": 1,
       "task": "6e47ce6dece9fe584de7b668f405f3214a16306612320332ac2b36002cbabaa8",
       "parents": [
-        "0f92a77a1aca07c9a9f47f2fd131d52989eda2c5dd79cb1c992ab3b8b01b2243"
+        "f133f8e1859dbaf320138d4d6e974396dc9237d294ef1e09bc3a0bab463cbbe2"
       ],
       "recorded_at": "2024-01-01T00:00:04.010Z",
       "observed_at": "2024-01-01T00:00:04.010Z",
@@ -460,11 +460,11 @@
       }
     },
     {
-      "id": "5b334b8828e8ab279d1437400c6c001a9ce23ab3d6a94e91ff4fa2564f85f241",
+      "id": "6035f60e16602053f40bb2fd38716f8842d4b0b5d2ce8d31070004b33039ad71",
       "schema_version": 1,
       "task": "6e47ce6dece9fe584de7b668f405f3214a16306612320332ac2b36002cbabaa8",
       "parents": [
-        "2020fd53868d8445765bf4fd0de1ced4027019ae5fe83c4b1535951355c0f70e"
+        "90c077063efdfcbc8b0df503725c8eb35b2d88dac069f3ebdd55ec787bea3e90"
       ],
       "recorded_at": "2024-01-01T00:00:04.010Z",
       "observed_at": null,
@@ -496,13 +496,13 @@
       }
     },
     {
-      "id": "4c22936aff390ec9ab9d2f746ad1bd61e19ed8ba47c7f9a6a356010e81e2ffec",
+      "id": "eb59800c3474a53c78d412ebe89164a25be657ca9d823be7941f6235e21dfe0b",
       "schema_version": 1,
       "task": "6e47ce6dece9fe584de7b668f405f3214a16306612320332ac2b36002cbabaa8",
       "parents": [
-        "5b334b8828e8ab279d1437400c6c001a9ce23ab3d6a94e91ff4fa2564f85f241"
+        "6035f60e16602053f40bb2fd38716f8842d4b0b5d2ce8d31070004b33039ad71"
       ],
-      "recorded_at": "5b334b8828e8ab279d1437400c6c001a9ce23ab3d6a94e91ff4fa2564f85f241+expand",
+      "recorded_at": "6035f60e16602053f40bb2fd38716f8842d4b0b5d2ce8d31070004b33039ad71+expand",
       "observed_at": null,
       "source": "operator",
       "kind": {

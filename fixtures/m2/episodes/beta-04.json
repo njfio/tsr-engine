@@ -420,7 +420,7 @@
       }
     },
     {
-      "id": "f5efde359ff2bf5d5c01dd6a601a8045d2347c71bb453523f58782ec047e6cbf",
+      "id": "d31cc3e73014ff4d50e1084c276971ad0f0b5ef0296ad5eda83b3ea6b5423c96",
       "schema_version": 1,
       "task": "3dd04080d37002b643d069e1d792f9349c7291481efeed787162518b4af1aaa2",
       "parents": [
@@ -432,15 +432,15 @@
       "kind": {
         "kind": "task_closed",
         "task": "3dd04080d37002b643d069e1d792f9349c7291481efeed787162518b4af1aaa2",
-        "reason": "operator"
+        "reason": "done"
       }
     },
     {
-      "id": "3efa513951361785cd4a79e529391c37535df2cd57703ed8f84277e1fa3fecb3",
+      "id": "83fe668e319305dc4835dda8a5e055535ce71846c1f78d4b7419764161e52885",
       "schema_version": 1,
       "task": "3dd04080d37002b643d069e1d792f9349c7291481efeed787162518b4af1aaa2",
       "parents": [
-        "f5efde359ff2bf5d5c01dd6a601a8045d2347c71bb453523f58782ec047e6cbf"
+        "d31cc3e73014ff4d50e1084c276971ad0f0b5ef0296ad5eda83b3ea6b5423c96"
       ],
       "recorded_at": "2024-01-01T00:00:04.010Z",
       "observed_at": "2024-01-01T00:00:04.010Z",
@@ -460,11 +460,11 @@
       }
     },
     {
-      "id": "6bedfce45528b82ba18ca522f7a79a748263a990a99c408b17cc87e6a3f61d17",
+      "id": "3369247c8e1eb4ae1c960bd08d8f758c4e75f5b86bf06be78d801241777f5463",
       "schema_version": 1,
       "task": "3dd04080d37002b643d069e1d792f9349c7291481efeed787162518b4af1aaa2",
       "parents": [
-        "3efa513951361785cd4a79e529391c37535df2cd57703ed8f84277e1fa3fecb3"
+        "83fe668e319305dc4835dda8a5e055535ce71846c1f78d4b7419764161e52885"
       ],
       "recorded_at": "2024-01-01T00:00:04.010Z",
       "observed_at": null,
@@ -496,13 +496,13 @@
       }
     },
     {
-      "id": "e241e31ff5dcbd034e0e8bd441dd0fc202795d22ce4173013e8de3d96adcac46",
+      "id": "a4c77fe2c3056356b917860f432bb257ac56e4e2bf878fd820c5f73425ab71e1",
       "schema_version": 1,
       "task": "3dd04080d37002b643d069e1d792f9349c7291481efeed787162518b4af1aaa2",
       "parents": [
-        "6bedfce45528b82ba18ca522f7a79a748263a990a99c408b17cc87e6a3f61d17"
+        "3369247c8e1eb4ae1c960bd08d8f758c4e75f5b86bf06be78d801241777f5463"
       ],
-      "recorded_at": "6bedfce45528b82ba18ca522f7a79a748263a990a99c408b17cc87e6a3f61d17+expand",
+      "recorded_at": "3369247c8e1eb4ae1c960bd08d8f758c4e75f5b86bf06be78d801241777f5463+expand",
       "observed_at": null,
       "source": "operator",
       "kind": {

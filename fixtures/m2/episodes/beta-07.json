@@ -420,7 +420,7 @@
       }
     },
     {
-      "id": "d0a4659756e35ee10f04b82a50d9801e8bbb84083f42e13420f117465bac14ec",
+      "id": "afce593fe35a0e207e2212b65f05af249fb8a6f1541148fa886fa1e0fc775181",
       "schema_version": 1,
       "task": "31f602593980025f7d3d65d53d697b1dbb89142f7fbff0c3dd188835656896ad",
       "parents": [
@@ -432,15 +432,15 @@
       "kind": {
         "kind": "task_closed",
         "task": "31f602593980025f7d3d65d53d697b1dbb89142f7fbff0c3dd188835656896ad",
-        "reason": "operator"
+        "reason": "done"
       }
     },
     {
-      "id": "ae3236e37dbf58136e1ad4147cbed41d0dbfdd44260114d919175ee12db6ab5d",
+      "id": "7d19b96c80c0fdfcead55aa38a8e185043e23ff21d1931bab23876b41a688abc",
       "schema_version": 1,
       "task": "31f602593980025f7d3d65d53d697b1dbb89142f7fbff0c3dd188835656896ad",
       "parents": [
-        "d0a4659756e35ee10f04b82a50d9801e8bbb84083f42e13420f117465bac14ec"
+        "afce593fe35a0e207e2212b65f05af249fb8a6f1541148fa886fa1e0fc775181"
       ],
       "recorded_at": "2024-01-01T00:00:07.010Z",
       "observed_at": "2024-01-01T00:00:07.010Z",
@@ -460,11 +460,11 @@
       }
     },
     {
-      "id": "3fd05545829a0bb86f6fde22bfd9ce8c6bfbff7fc20259f36eabee462c946c40",
+      "id": "ee9a9c4f2be44eb423528f66675ac512d36b1c117897f2dda687eb7d7b6f7848",
       "schema_version": 1,
       "task": "31f602593980025f7d3d65d53d697b1dbb89142f7fbff0c3dd188835656896ad",
       "parents": [
-        "ae3236e37dbf58136e1ad4147cbed41d0dbfdd44260114d919175ee12db6ab5d"
+        "7d19b96c80c0fdfcead55aa38a8e185043e23ff21d1931bab23876b41a688abc"
       ],
       "recorded_at": "2024-01-01T00:00:07.010Z",
       "observed_at": null,
@@ -496,13 +496,13 @@
       }
     },
     {
-      "id": "0a21b6082c9f95b6650a95afe5c1b1a9be111d0bbd901418ffdcc2a30902db92",
+      "id": "ab19322507a15d8af735d8a53aadcb3ea74a118e44b943442f2e4a24469512c3",
       "schema_version": 1,
       "task": "31f602593980025f7d3d65d53d697b1dbb89142f7fbff0c3dd188835656896ad",
       "parents": [
-        "3fd05545829a0bb86f6fde22bfd9ce8c6bfbff7fc20259f36eabee462c946c40"
+        "ee9a9c4f2be44eb423528f66675ac512d36b1c117897f2dda687eb7d7b6f7848"
       ],
-      "recorded_at": "3fd05545829a0bb86f6fde22bfd9ce8c6bfbff7fc20259f36eabee462c946c40+expand",
+      "recorded_at": "ee9a9c4f2be44eb423528f66675ac512d36b1c117897f2dda687eb7d7b6f7848+expand",
       "observed_at": null,
       "source": "operator",
       "kind": {

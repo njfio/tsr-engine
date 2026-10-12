@@ -475,3 +475,18 @@ carry no bias.
   `calibrated_p` is `null` and `calibrator` is `null`.
 - **No committed store.** `fixtures/m2/store/tsr.db` is derived and git-ignored; rebuild it with the
   generator before running the commands above.
+- **`reflect --family` needs a `Scope::Family` preference no hook session has.** The family curve
+  folds the episodes of one family, which requires a preference scoped to that family
+  (`Scope::Family`). A hook session records only task-scoped preferences, so a session recorded by
+  the hook has no family scope and `tsr reflect --family <f>` over it draws no curve. The command
+  that shows it, over the hook's own session store:
+
+  ```console
+  $ tsr reflect --family alpha --store fixtures/m0/claude-session.db
+  Calibration curves — family alpha
+
+  no scored forecasts for family alpha
+  ```
+
+  The fixture corpus carries the family scope, so the curves above are drawn from it; a real hook
+  session will need M3's batch runner to record the family scope.

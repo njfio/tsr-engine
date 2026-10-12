@@ -416,7 +416,7 @@
       }
     },
     {
-      "id": "6580604faa6a164ea56530446cc45d772d850a18136605b790a712880e5fdfd2",
+      "id": "8304bd3f874ed8f79c3c1f78865d0e761711a1aa49602be3f331bfb45bfa788f",
       "schema_version": 1,
       "task": "f1f40c07055057743e5446b29494dc32485171d399a89fbe183c5a20f8cb41bf",
       "parents": [
@@ -428,15 +428,15 @@
       "kind": {
         "kind": "task_closed",
         "task": "f1f40c07055057743e5446b29494dc32485171d399a89fbe183c5a20f8cb41bf",
-        "reason": "operator"
+        "reason": "done"
       }
     },
     {
-      "id": "7e5a74072bb2260b70c4d94231e69c0e53d388702106a679fba307647603b841",
+      "id": "a0a8c2764ac73c432f411ef4032880204a150b749618d41eabdadf26f6dca0c0",
       "schema_version": 1,
       "task": "f1f40c07055057743e5446b29494dc32485171d399a89fbe183c5a20f8cb41bf",
       "parents": [
-        "6580604faa6a164ea56530446cc45d772d850a18136605b790a712880e5fdfd2"
+        "8304bd3f874ed8f79c3c1f78865d0e761711a1aa49602be3f331bfb45bfa788f"
       ],
       "recorded_at": "2024-01-01T00:00:03.010Z",
       "observed_at": "2024-01-01T00:00:03.010Z",
