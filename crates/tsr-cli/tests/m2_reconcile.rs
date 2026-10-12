@@ -163,8 +163,14 @@ fn task() -> TaskId {
 }
 
 fn candidate(tag: &str) -> Candidate {
+    candidate_kind(tag, ActionKind::RunApprovedTest)
+}
+
+/// A candidate of a given action kind. `RunApprovedTest` is idempotent; `Generate` is not, so
+/// `ToolCheck::from_log` leaves it non-idempotent (the safe default).
+fn candidate_kind(tag: &str, kind: ActionKind) -> Candidate {
     Candidate::new(
-        ActionKind::RunApprovedTest,
+        kind,
         Source::Rules,
         Hash::of(&[tag.as_bytes()]),
         vec![],
@@ -206,6 +212,73 @@ fn dispatched(cand: &Candidate) -> (Store, Event) {
     );
     s.append(&dispatch).unwrap();
     (s, dispatch)
+}
+
+/// D5: the store the executor had written before its crash point, and the CAS root beside it.
+///
+/// The four rows differ in what the executor had written when it crashed, so each reconciles a
+/// different store:
+/// - `Intent`: nothing — the crash landed before the intent was committed, so no `Dispatched`.
+/// - `Send`: `Dispatched` only — the effect was sent, but the tool's log never reached the CAS.
+/// - `Acknowledgement`: `Dispatched` and the tool's log in the CAS, but no `Executed`.
+/// - `None`: `Dispatched` and `Executed` — the effect and its acknowledgement both landed.
+fn store_at_crash_point(cand: &Candidate, crash: CrashPoint, cas: &std::path::Path) -> Store {
+    let s = Store::open_in_memory().unwrap();
+    let opened = Event::new(
+        task(),
+        vec![],
+        Source::Rules,
+        EventKind::TaskOpened { task: task() },
+        "t0",
+    );
+    s.append(&opened).unwrap();
+    let proposed = Event::new(
+        task(),
+        vec![opened.id],
+        Source::Rules,
+        EventKind::Proposed {
+            candidate: cand.clone(),
+        },
+        "t1",
+    );
+    s.append(&proposed).unwrap();
+    if crash == CrashPoint::Intent {
+        // The crash landed before the intent was committed: nothing was dispatched.
+        return s;
+    }
+    let dispatch = Event::new(
+        task(),
+        vec![proposed.id],
+        Source::Rules,
+        EventKind::Dispatched {
+            candidate: cand.id,
+            in_sandbox: true,
+        },
+        "t2",
+    );
+    s.append(&dispatch).unwrap();
+    if crash == CrashPoint::Acknowledgement {
+        // The tool ran: its log is in the CAS. The crash landed before the `Executed` was appended.
+        let digest = Hash::of(&[b"tool-log"]);
+        std::fs::write(cas.join(digest.to_hex()), b"the tool's log").unwrap();
+    }
+    if crash == CrashPoint::None {
+        // The effect and its acknowledgement both landed.
+        let executed = Event::new(
+            task(),
+            vec![dispatch.id],
+            Source::Rules,
+            EventKind::Executed {
+                candidate: cand.id,
+                exit_code: Some(0),
+                log_digest: Some(Hash::of(&[b"tool-log"])),
+                duration_ms: 1,
+            },
+            "t3",
+        );
+        s.append(&executed).unwrap();
+    }
+    s
 }
 
 /// The kinds appended to a task, in sequence order.
@@ -305,175 +378,160 @@ fn row_intent_non_idempotent_unknown_is_blocked() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Row 2: crash at send — the tool's own check settles it
+// Row 2: crash at send — the effect was sent, but the log holds no Executed
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn row_send_idempotent_check_finds_the_effect_and_appends_executed() {
+fn row_send_dispatched_only_is_unresolved_idempotent() {
+    // D5: the send crash point leaves `Dispatched` and nothing else — the effect was sent, but
+    // the tool's log never reached the CAS and no `Executed` was appended. The CLI's own check
+    // (`ToolCheck::from_log`) therefore cannot say, and the dispatch is `Unresolved` (idempotent,
+    // retryable). The old row fed `ex.tool_check(...)`, whose private `seen_keys` claimed the
+    // effect happened, and asserted `Executed` — a result the CLI can never produce.
     let cand = candidate("send-idem");
-    let (s, dispatch) = dispatched(&cand);
-    let digest = Hash::of(&[b"tool-log"]);
-    let mut ex = FakeExecutor::new(
-        FakeTool {
-            idempotent: true,
-            log_digest: digest,
-        },
-        CrashPoint::Send,
-    );
-    // The effect was sent, so the tool has seen the key even though the ack never landed.
-    let intent = tsr_domain::DispatchIntent {
-        candidate: cand.id,
-        idempotency_key: intent_key(&cand.id),
-        expected_state_version: 3,
-    };
-    assert!(ex.dispatch(&intent).is_err(), "the crash is at send");
-    assert!(ex.has_seen(&intent.idempotency_key), "the effect happened");
-
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-    let check = ex.tool_check(std::path::Path::new("/nonexistent-cas"), cand.id);
-    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-    assert_eq!(res, Resolution::Executed);
-
-    let events = s.by_task(&task()).unwrap();
+    let cas = std::env::temp_dir().join(format!("tsr-d5-send-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Send, &cas);
     assert_eq!(
         kinds(&s),
-        vec!["task_opened", "proposed", "dispatched", "executed"]
+        vec!["task_opened", "proposed", "dispatched"],
+        "the send crash point leaves Dispatched only"
     );
-    let last = &events.last().unwrap().1;
-    assert_eq!(last.parents, vec![dispatch.id]);
-    match &last.kind {
-        EventKind::Executed {
-            candidate,
-            log_digest,
-            ..
-        } => {
-            assert_eq!(*candidate, cand.id);
-            assert_eq!(*log_digest, Some(digest));
-        }
-        other => panic!("expected Executed, got {other:?}"),
-    }
-    assert_eq!(ex.effects_for(&cand.id), 1, "exactly one effect");
-}
 
-#[test]
-fn row_send_non_idempotent_unknown_stays_blocked() {
-    let cand = candidate("send-nonidem");
-    let (s, _) = dispatched(&cand);
-    let mut ex = FakeExecutor::new(
-        FakeTool {
-            idempotent: false,
-            log_digest: Hash::of(&[b"tool-log-2"]),
-        },
-        CrashPoint::Send,
-    );
-    let intent = tsr_domain::DispatchIntent {
-        candidate: cand.id,
-        idempotency_key: intent_key(&cand.id),
-        expected_state_version: 3,
-    };
-    assert!(ex.dispatch(&intent).is_err());
-    // The tool has no record of the key (it is not idempotent, so it keeps none), and the log
-    // digest is not in the CAS: the check cannot say.
-    let check = ToolCheck::new("/nonexistent-cas");
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&cas, &events);
+    let pending = pending_dispatches(&events);
+    assert_eq!(pending.len(), 1, "the dispatch has no outcome yet");
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-    assert_eq!(res, Resolution::UnresolvedBlocked);
+    assert_eq!(res, Resolution::UnresolvedIdempotent);
+    assert!(res.retryable(), "an idempotent unknown may be retried once");
     assert_eq!(
         kinds(&s),
         vec!["task_opened", "proposed", "dispatched", "unresolved"]
     );
+    let events = s.by_task(&task()).unwrap();
+    let last = &events.last().unwrap().1;
+    match &last.kind {
+        EventKind::Unresolved { candidate, reason } => {
+            assert_eq!(*candidate, cand.id);
+            assert_eq!(reason, UNKNOWN_IDEMPOTENT);
+        }
+        other => panic!("expected Unresolved, got {other:?}"),
+    }
+    std::fs::remove_dir_all(&cas).ok();
+}
+
+#[test]
+fn row_send_non_idempotent_unknown_stays_blocked() {
+    let cand = candidate_kind("send-nonidem", ActionKind::Generate);
+    let cas = std::env::temp_dir().join(format!("tsr-d5-send-nonidem-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Send, &cas);
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&cas, &events);
+    let pending = pending_dispatches(&events);
+    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+    assert_eq!(res, Resolution::UnresolvedBlocked);
+    assert!(!res.retryable(), "a non-idempotent unknown stays blocked");
+    assert_eq!(
+        kinds(&s),
+        vec!["task_opened", "proposed", "dispatched", "unresolved"]
+    );
+    std::fs::remove_dir_all(&cas).ok();
 }
 
 // ---------------------------------------------------------------------------------------------
-// Row 3: crash at acknowledgement — the CAS digest settles it
+// Row 3: crash at acknowledgement — the tool ran, but the log holds no Executed
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn row_acknowledgement_cas_digest_settles_the_dispatch() {
+fn row_acknowledgement_tool_ran_without_executed_is_unresolved_idempotent() {
+    // D5: the acknowledgement crash point leaves `Dispatched` and the tool's log in the CAS, but
+    // no `Executed` in the log. The CLI's check (`ToolCheck::from_log`) records a digest only from
+    // an `Executed` event, so an orphaned CAS digest is not evidence: the dispatch is `Unresolved`
+    // (idempotent, retryable). The old row hand-built a `ToolCheck` with the digest and asserted
+    // `Executed` — a result the CLI can never produce.
     let cand = candidate("ack-idem");
-    let (s, _) = dispatched(&cand);
-    let digest = Hash::of(&[b"tool-log-3"]);
-    let dir = std::env::temp_dir().join(format!("tsr-cas-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(digest.to_hex()), b"the tool's log").unwrap();
-
-    let check = ToolCheck::new(&dir)
-        .with_idempotent(cand.id)
-        .with_log_digest(cand.id, digest);
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-    assert_eq!(res, Resolution::Executed);
+    let cas = std::env::temp_dir().join(format!("tsr-d5-ack-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
     assert_eq!(
         kinds(&s),
-        vec!["task_opened", "proposed", "dispatched", "executed"]
+        vec!["task_opened", "proposed", "dispatched"],
+        "the acknowledgement crash point leaves Dispatched and no Executed"
+    );
+    // The tool ran: its log is in the CAS. But the log holds no `Executed` to name the digest.
+    let digest = Hash::of(&[b"tool-log"]);
+    assert!(
+        cas.join(digest.to_hex()).exists(),
+        "the tool's log is in the CAS"
     );
 
-    std::fs::remove_dir_all(&dir).ok();
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&cas, &events);
+    let pending = pending_dispatches(&events);
+    assert_eq!(pending.len(), 1, "the dispatch has no outcome yet");
+    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+    assert_eq!(res, Resolution::UnresolvedIdempotent);
+    assert!(res.retryable(), "an idempotent unknown may be retried once");
+    assert_eq!(
+        kinds(&s),
+        vec!["task_opened", "proposed", "dispatched", "unresolved"]
+    );
+    std::fs::remove_dir_all(&cas).ok();
 }
 
 #[test]
 fn row_acknowledgement_missing_digest_is_unknown() {
+    // The tool's log never reached the CAS either: the check still cannot say.
     let cand = candidate("ack-missing");
-    let (s, _) = dispatched(&cand);
-    let digest = Hash::of(&[b"never-written"]);
-    let check = ToolCheck::new("/nonexistent-cas")
-        .with_idempotent(cand.id)
-        .with_log_digest(cand.id, digest);
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
+    let cas = std::env::temp_dir().join(format!("tsr-d5-ack-missing-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&cas, &events);
+    let pending = pending_dispatches(&events);
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
     assert_eq!(res, Resolution::UnresolvedIdempotent);
     assert_eq!(
         kinds(&s),
         vec!["task_opened", "proposed", "dispatched", "unresolved"]
     );
+    std::fs::remove_dir_all(&cas).ok();
 }
 
-#[test]
-fn d5_acknowledgement_crash_point_drives_fake_executor_reconcile() {
-    // D5: the acknowledgement crash point must be exercised through the executor's own
-    // `reconcile`, not only through a hand-built ToolCheck. The crash lands after the effect
-    // happened, before the ack is recorded: `reconcile` must fail, and the tool's check must
-    // then settle the dispatch to exactly one Executed.
-    let cand = candidate("ack-executor");
-    let (s, dispatch) = dispatched(&cand);
-    let digest = Hash::of(&[b"tool-log-ack-executor"]);
-    let mut ex = FakeExecutor::new(
-        FakeTool {
-            idempotent: true,
-            log_digest: digest,
-        },
-        CrashPoint::Acknowledgement,
-    );
-    let intent = tsr_domain::DispatchIntent {
-        candidate: cand.id,
-        idempotency_key: intent_key(&cand.id),
-        expected_state_version: 3,
-    };
-    // The effect happened (the tool saw the key), but the acknowledgement never landed.
-    let handle = ex.dispatch(&intent).expect("the effect is sent");
-    assert!(ex.has_seen(&intent.idempotency_key), "the effect happened");
-    assert!(
-        ex.reconcile(&handle).is_err(),
-        "the acknowledgement crash point must make reconcile fail"
-    );
-    assert_eq!(ex.effects_for(&cand.id), 1, "exactly one effect");
+// ---------------------------------------------------------------------------------------------
+// Row 4: no crash — the effect and its acknowledgement both landed
+// ---------------------------------------------------------------------------------------------
 
-    // The tool's own check settles it: the log digest is in the CAS.
-    let dir = std::env::temp_dir().join(format!("tsr-cas-ack-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(digest.to_hex()), b"the tool's log").unwrap();
-    let check = ex.tool_check(&dir, cand.id);
-    let pending = pending_dispatches(&s.by_task(&task()).unwrap());
-    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-    assert_eq!(res, Resolution::Executed);
+#[test]
+fn row_none_dispatched_and_executed_is_settled() {
+    // D5: the no-crash row leaves `Dispatched` and `Executed` in the log, so the dispatch is
+    // already settled: `pending_dispatches` finds nothing and reconcile appends nothing. The old
+    // matrix asserted `UnresolvedIdempotent` for this row too, because it built the same
+    // three-event store as every other row.
+    let cand = candidate("none-settled");
+    let cas = std::env::temp_dir().join(format!("tsr-d5-none-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::None, &cas);
+    assert_eq!(
+        kinds(&s),
+        vec!["task_opened", "proposed", "dispatched", "executed"],
+        "the no-crash row leaves Dispatched and Executed"
+    );
+
+    let events = s.by_task(&task()).unwrap();
+    let pending = pending_dispatches(&events);
+    assert!(
+        pending.is_empty(),
+        "the Executed settles the dispatch: {pending:?}"
+    );
+    // Reconcile has nothing to settle, so the log is unchanged.
     assert_eq!(
         kinds(&s),
         vec!["task_opened", "proposed", "dispatched", "executed"]
     );
-    let events = s.by_task(&task()).unwrap();
-    assert_eq!(events.last().unwrap().1.parents, vec![dispatch.id]);
-    assert_eq!(ex.effects_for(&cand.id), 1, "still exactly one effect");
-    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_dir_all(&cas).ok();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -613,11 +671,24 @@ fn d5_forecast_update_after_executed_is_refused_specifically() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The matrix as a whole: at most one Executed per idempotent dispatch, across every crash point
+// The matrix as a whole: each row reconciles the store its crash point left behind
 // ---------------------------------------------------------------------------------------------
 
+/// D5: the crash matrix, one row per crash point, each reconciling the store the executor had
+/// written before that crash point — not the same three events for every row. The old matrix
+/// built `dispatched()` for every row, so Intent, Send, Acknowledgement and None got identical
+/// input and all asserted `UnresolvedIdempotent`, including the no-crash row whose effect and
+/// acknowledgement both landed. Here each row builds its own store, drives `ToolCheck::from_log`
+/// exactly as `reconcile_cmd::run` does, and asserts the result the CLI gives:
+///
+/// | row             | store the crash left                          | CLI result            |
+/// |-----------------|-----------------------------------------------|-----------------------|
+/// | Intent          | nothing dispatched                            | no pending dispatch   |
+/// | Send            | Dispatched only                               | UnresolvedIdempotent  |
+/// | Acknowledgement | Dispatched + tool log in CAS, no Executed     | UnresolvedIdempotent  |
+/// | None            | Dispatched + Executed                         | settled, nothing new  |
 #[test]
-fn d5_at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
+fn d5_matrix_rows_reconcile_the_store_their_crash_point_left() {
     for crash in [
         CrashPoint::Intent,
         CrashPoint::Send,
@@ -625,141 +696,55 @@ fn d5_at_most_one_executed_per_idempotent_dispatch_across_every_crash_point() {
         CrashPoint::None,
     ] {
         let cand = candidate(&format!("matrix-{crash:?}"));
-        let (s, _) = dispatched(&cand);
-        let digest = Hash::of(&[format!("log-{crash:?}").as_bytes()]);
-        let mut ex = FakeExecutor::new(
-            FakeTool {
-                idempotent: true,
-                log_digest: digest,
-            },
-            crash,
-        );
-        let intent = tsr_domain::DispatchIntent {
-            candidate: cand.id,
-            idempotency_key: intent_key(&cand.id),
-            expected_state_version: 3,
-        };
-        // Dispatch, then retry once: an idempotent tool yields at most one effect.
-        let _ = ex.dispatch(&intent);
-        let _ = ex.dispatch(&intent);
-        assert!(
-            ex.effects_for(&cand.id) <= 1,
-            "idempotent tool ran twice at {crash:?}"
-        );
-
-        // D5: the row drives the reconciler the way the CLI does — `ToolCheck::from_log` over
-        // the store's own events, never the fake executor's private keys. The old matrix fed
-        // `ex.tool_check(...)`, so its Acknowledgement row settled as `Executed` from the fake's
-        // in-memory `seen_keys` even though the log held no `Executed` and the CAS held no
-        // digest; the CLI, which loads its evidence from the log, records `Unresolved`.
         let cas = std::env::temp_dir().join(format!(
             "tsr-d5-matrix-cas-{}-{crash:?}",
             std::process::id()
         ));
         std::fs::create_dir_all(&cas).unwrap();
+        let s = store_at_crash_point(&cand, crash, &cas);
+        let before = kinds(&s);
         let events = s.by_task(&task()).unwrap();
         let check = ToolCheck::from_log(&cas, &events);
         let pending = pending_dispatches(&events);
-        assert_eq!(pending.len(), 1, "one pending dispatch at {crash:?}");
-        let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-        // Whatever the crash point, the reconciliation appends exactly one settling event.
-        let ks = kinds(&s);
-        assert_eq!(ks.len(), 4, "one settling event at {crash:?}: {ks:?}");
-        assert!(
-            ks[3] == "executed" || ks[3] == "unresolved",
-            "settled at {crash:?}: {ks:?}"
-        );
-        // D5: the log itself holds at most one Executed for the idempotent dispatch, at every
-        // crash point — the effect is never recorded twice.
-        let executed = ks.iter().filter(|k| *k == "executed").count();
-        assert!(
-            executed <= 1,
-            "at most one Executed per idempotent dispatch at {crash:?}: {ks:?}"
-        );
-        // The log's evidence decides: with no `Executed` in the log and no digest in the CAS,
-        // the check cannot say, so the dispatch is `Unresolved` (idempotent, retryable) at every
-        // crash point — including acknowledgement, which the old matrix settled as `Executed`
-        // from the fake's private keys.
-        assert_eq!(
-            res,
-            Resolution::UnresolvedIdempotent,
-            "the log holds no Executed and the CAS no digest at {crash:?}: {ks:?}"
-        );
-        assert_eq!(executed, 0, "no Executed is invented at {crash:?}: {ks:?}");
-        assert_eq!(ks[3], "unresolved", "settled at {crash:?}: {ks:?}");
 
-        std::fs::remove_dir_all(&cas).ok();
-    }
-}
-
-/// D5: every crash-matrix row drives the reconciler the way the CLI does — with
-/// `ToolCheck::from_log` over the store's own events, never with the fake executor's private
-/// keys. The old matrix fed `ex.tool_check(...)`, so its Acknowledgement row settled as
-/// `Executed` from the fake's in-memory `seen_keys` even though the log held no `Executed` and
-/// the CAS held no digest; the CLI, which loads its evidence from the log, would have recorded
-/// `Unresolved`. This test builds the check exactly as `reconcile_cmd::run` does and asserts the
-/// log's own evidence decides, with at most one `Executed` per idempotent dispatch.
-#[test]
-fn d5_matrix_rows_drive_reconcile_from_the_log() {
-    for crash in [
-        CrashPoint::Intent,
-        CrashPoint::Send,
-        CrashPoint::Acknowledgement,
-        CrashPoint::None,
-    ] {
-        let cand = candidate(&format!("matrix-log-{crash:?}"));
-        let (s, _) = dispatched(&cand);
-        let digest = Hash::of(&[format!("log-{crash:?}").as_bytes()]);
-        let mut ex = FakeExecutor::new(
-            FakeTool {
-                idempotent: true,
-                log_digest: digest,
-            },
-            crash,
-        );
-        let intent = tsr_domain::DispatchIntent {
-            candidate: cand.id,
-            idempotency_key: intent_key(&cand.id),
-            expected_state_version: 3,
-        };
-        // Dispatch, then retry once: an idempotent tool yields at most one effect.
-        let _ = ex.dispatch(&intent);
-        let _ = ex.dispatch(&intent);
-        assert!(
-            ex.effects_for(&cand.id) <= 1,
-            "idempotent tool ran twice at {crash:?}"
-        );
-
-        // The CLI's own check: evidence from the log and the CAS, not the fake's keys. The CAS
-        // directory is empty, so a digest is evidence only if the log recorded an `Executed`.
-        let cas = std::env::temp_dir().join(format!("tsr-d5-cas-{}-{crash:?}", std::process::id()));
-        std::fs::create_dir_all(&cas).unwrap();
-        let events = s.by_task(&task()).unwrap();
-        let check = ToolCheck::from_log(&cas, &events);
-
-        let pending = pending_dispatches(&events);
-        assert_eq!(pending.len(), 1, "one pending dispatch at {crash:?}");
-        let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
-
-        let ks = kinds(&s);
-        assert_eq!(ks.len(), 4, "one settling event at {crash:?}: {ks:?}");
-        // D5: at most one Executed per idempotent dispatch, at every crash point.
-        let executed = ks.iter().filter(|k| *k == "executed").count();
-        assert!(
-            executed <= 1,
-            "at most one Executed per idempotent dispatch at {crash:?}: {ks:?}"
-        );
-        // The log's evidence decides. With no `Executed` in the log and no digest in the CAS,
-        // the check cannot say: the dispatch is `Unresolved` (idempotent, retryable), never
-        // `Executed` from the fake's private keys.
-        assert_eq!(
-            res,
-            Resolution::UnresolvedIdempotent,
-            "the log holds no Executed and the CAS no digest at {crash:?}: {ks:?}"
-        );
-        assert_eq!(executed, 0, "no Executed is invented at {crash:?}: {ks:?}");
-        assert_eq!(ks[3], "unresolved", "settled at {crash:?}: {ks:?}");
-
+        match crash {
+            CrashPoint::Intent => {
+                // Nothing was dispatched: there is nothing to reconcile.
+                assert_eq!(before, vec!["task_opened", "proposed"], "{crash:?}");
+                assert!(pending.is_empty(), "nothing dispatched at {crash:?}");
+                assert_eq!(kinds(&s), before, "reconcile appends nothing at {crash:?}");
+            }
+            CrashPoint::Send | CrashPoint::Acknowledgement => {
+                // Dispatched, but no Executed in the log: the CLI cannot say.
+                assert_eq!(
+                    before,
+                    vec!["task_opened", "proposed", "dispatched"],
+                    "{crash:?}"
+                );
+                assert_eq!(pending.len(), 1, "one pending dispatch at {crash:?}");
+                let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+                assert_eq!(
+                    res,
+                    Resolution::UnresolvedIdempotent,
+                    "the log holds no Executed at {crash:?}"
+                );
+                assert_eq!(
+                    kinds(&s),
+                    vec!["task_opened", "proposed", "dispatched", "unresolved"],
+                    "settled at {crash:?}"
+                );
+            }
+            CrashPoint::None => {
+                // The effect and its acknowledgement both landed: the dispatch is settled.
+                assert_eq!(
+                    before,
+                    vec!["task_opened", "proposed", "dispatched", "executed"],
+                    "{crash:?}"
+                );
+                assert!(pending.is_empty(), "the Executed settles it at {crash:?}");
+                assert_eq!(kinds(&s), before, "reconcile appends nothing at {crash:?}");
+            }
+        }
         std::fs::remove_dir_all(&cas).ok();
     }
 }
@@ -774,7 +759,6 @@ fn d5_matrix_rows_drive_reconcile_from_the_log() {
 #[test]
 fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
     let cand = candidate("matrix-ack-not-fake");
-    let (s, _) = dispatched(&cand);
     let digest = Hash::of(&[b"log-Acknowledgement"]);
     let mut ex = FakeExecutor::new(
         FakeTool {
@@ -799,8 +783,9 @@ fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
     );
     // The CLI's check, built from the log and the CAS, cannot say: no `Executed` in the log and
     // no digest in the CAS.
-    let cas = std::env::temp_dir().join(format!("tsr-d5-ack-{}", std::process::id()));
+    let cas = std::env::temp_dir().join(format!("tsr-d5-ack-not-fake-{}", std::process::id()));
     std::fs::create_dir_all(&cas).unwrap();
+    let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
     let events = s.by_task(&task()).unwrap();
     let check = ToolCheck::from_log(&cas, &events);
     let pending = pending_dispatches(&events);
