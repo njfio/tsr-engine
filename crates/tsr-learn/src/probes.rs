@@ -111,7 +111,16 @@ pub fn probe_post_action(
     let mut leaks = Vec::new();
     let mut refusals = Vec::new();
     let held_out = ds.rows.iter().filter(|r| r.side == Side::HeldOut).count();
+    let fit_rows = ds.rows.iter().filter(|r| r.side == Side::Fit).count();
+    let calibrate_rows = ds.rows.iter().filter(|r| r.side == Side::Calibrate).count();
     let mut examined = 0usize;
+    let mut examined_fit = 0usize;
+    let mut examined_calibrate = 0usize;
+    let mut examined_held_out = 0usize;
+    let mut missing_event = 0usize;
+    let mut first_missing_event: Option<String> = None;
+    let mut missing_commitment = 0usize;
+    let mut first_missing_commitment: Option<String> = None;
     for row in &ds.rows {
         let Some(index_row) = index_of.get(&row.task) else {
             continue;
@@ -119,12 +128,10 @@ pub fn probe_post_action(
         // F9/B3: never index into data the probe did not check. A row whose task has no events in
         // the log is a refusal naming the file, not a panic.
         let Some(task_events) = by_task.get(&row.task) else {
-            refusals.push(format!(
-                "probe post_action_events refused: events.jsonl holds no event for task {} \
-                 (row {}), so the row cannot be recomputed",
-                row.task,
-                row.id.to_hex()
-            ));
+            missing_event += 1;
+            if first_missing_event.is_none() {
+                first_missing_event = Some(format!("task {} (row {})", row.task, row.id.to_hex()));
+            }
             continue;
         };
         let before: Vec<(i64, Event)> = task_events
@@ -144,13 +151,15 @@ pub fn probe_post_action(
             .find(|(_, e)| e.id == row.commitment)
             .cloned()
         else {
-            refusals.push(format!(
-                "probe post_action_events refused: events.jsonl holds no commitment event {} for \
-                 task {} (row {}), so the row cannot be recomputed",
-                row.commitment,
-                row.task,
-                row.id.to_hex()
-            ));
+            missing_commitment += 1;
+            if first_missing_commitment.is_none() {
+                first_missing_commitment = Some(format!(
+                    "commitment {} for task {} (row {})",
+                    row.commitment,
+                    row.task,
+                    row.id.to_hex()
+                ));
+            }
             continue;
         };
         let upto: Vec<(i64, Event)> = task_events
@@ -160,6 +169,11 @@ pub fn probe_post_action(
             .chain(std::iter::once(commitment))
             .collect();
         examined += 1;
+        match row.side {
+            Side::Fit => examined_fit += 1,
+            Side::Calibrate => examined_calibrate += 1,
+            Side::HeldOut => examined_held_out += 1,
+        }
         let raw = crate::decision::decision_rows(&upto)
             .into_iter()
             .find(|dr| dr.commitment == row.commitment)
@@ -179,10 +193,31 @@ pub fn probe_post_action(
         }
     }
     let _ = spec;
+    // F9/B3 (d): the refusal names the first offending row and the count, not one line per row (a
+    // cut events log produced a single 271 KB stderr line).
+    if missing_event > 0 {
+        refusals.push(format!(
+            "probe post_action_events refused: events.jsonl holds no event for {missing_event} \
+             indexed rows, the first being {}",
+            first_missing_event.unwrap_or_default()
+        ));
+    }
+    if missing_commitment > 0 {
+        refusals.push(format!(
+            "probe post_action_events refused: events.jsonl holds no commitment event for \
+             {missing_commitment} indexed rows, the first being {}",
+            first_missing_commitment.unwrap_or_default()
+        ));
+    }
     // F9/B3: a probe that examines no rows, or fewer rows than the dataset's held-out slice, is
     // refused naming the probe and the counts -- never skipped, never a silent clean pass. An
     // absent index (no `tasks.jsonl`) is not a probe that examined nothing: the CLI refuses a
     // missing or empty index before it reaches here, so the refusal is gated on a present index.
+    //
+    // F9/B3 (b): a count is not coverage. A `tasks.jsonl` cut to the fit-side tasks examines 696
+    // rows and none of the 215 held-out, and a held-out-only or calibrate-only index also passes a
+    // bare count. The probe must cover every split side: at least one row of fit, calibrate and
+    // held-out, and every held-out row.
     if !index.is_empty() {
         if examined == 0 {
             refusals.push(format!(
@@ -190,12 +225,28 @@ pub fn probe_post_action(
                  no row), so it checked nothing",
                 ds.rows.len()
             ));
-        } else if examined < held_out {
-            refusals.push(format!(
-                "probe post_action_events refused: it examined {examined} of {} rows, fewer than \
-                 the held-out slice of {held_out}",
-                ds.rows.len()
-            ));
+        } else {
+            // A side with no rows in the dataset is not a coverage gap here: an empty fit or
+            // calibrate slice is refused by `fit` itself (F3/R2), naming the slice. Coverage is
+            // required of every side that has rows, and of every held-out row.
+            let mut missing: Vec<String> = Vec::new();
+            if fit_rows > 0 && examined_fit == 0 {
+                missing.push(format!("fit (0 of {fit_rows})"));
+            }
+            if calibrate_rows > 0 && examined_calibrate == 0 {
+                missing.push(format!("calibrate (0 of {calibrate_rows})"));
+            }
+            if examined_held_out < held_out {
+                missing.push(format!("held_out ({examined_held_out} of {held_out})"));
+            }
+            if !missing.is_empty() {
+                refusals.push(format!(
+                    "probe post_action_events refused: it examined {examined} of {} rows but did \
+                     not cover every split side: {}",
+                    ds.rows.len(),
+                    missing.join(", ")
+                ));
+            }
         }
     }
     ProbeReport { leaks, refusals }

@@ -199,6 +199,21 @@ pub fn read_events(dir: &Path) -> Result<Vec<(i64, tsr_domain::Event)>, LearnErr
     crate::dataset::read_events_records(&path)
 }
 
+/// F9/B3: read a structural input file as UTF-8 text, refusing a missing or non-UTF-8 file with
+/// `Invalid` naming the file -- so `fit` exits 2 rather than 1 with a bare `io:` error.
+fn read_text_named(dir: &Path, name: &str) -> Result<String, LearnError> {
+    let path = dir.join(name);
+    match std::fs::read(&path) {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|_| LearnError::Invalid(format!("{name}: the file is not valid UTF-8"))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(LearnError::Invalid(format!(
+            "{name}: the file is missing from the dataset directory {}",
+            dir.display()
+        ))),
+        Err(e) => Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),
+    }
+}
+
 /// Load a dataset directory written by `write_dataset`.
 ///
 /// Reads `rows.jsonl`, `split.json`, `features.json` and `data-manifest.json`.
@@ -206,12 +221,12 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     // F9/B3: rows.jsonl goes through the one loader too, so a line that is not a row record names
     // the file, the line and the missing or wrong field.
     let rows: Vec<Row> = crate::dataset::read_records(&dir.join("rows.jsonl"), "row")?;
-    let split: SplitManifest =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("split.json"))?)?;
-    let spec: FeatureSpec =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("features.json"))?)?;
+    // F9/B3: a missing or non-UTF-8 structural input is bad input, refused naming the file -- not a
+    // generic `io:` failure. `read_text_named` turns both into `Invalid`, so `fit` exits 2.
+    let split: SplitManifest = serde_json::from_str(&read_text_named(dir, "split.json")?)?;
+    let spec: FeatureSpec = serde_json::from_str(&read_text_named(dir, "features.json")?)?;
     let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("data-manifest.json"))?)?;
+        serde_json::from_str(&read_text_named(dir, "data-manifest.json")?)?;
 
     // B2: recompute every row id, both roots and the split digest from `rows.jsonl` and
     // `split.json`, and refuse when `data-manifest.json` disagrees. The manifest's roots are
@@ -453,15 +468,20 @@ pub fn write_bundle(
         // F9/B3: a probe that examined no rows, or fewer rows than the held-out slice, is refused
         // naming the probe and the counts -- never a silent clean pass.
         let refused = probe_report.refusals.join("; ");
+        let nothing_leaked = caught.is_empty();
         let detail = match (caught.is_empty(), refused.is_empty()) {
             (false, false) => format!("{caught}; {refused}"),
             (false, true) => caught,
             (true, false) => refused,
             (true, true) => String::new(),
         };
-        return Err(LearnError::Invalid(format!(
-            "probe caught a leak: {detail}"
-        )));
+        // F9/B3 (d): when nothing leaked, the refusal says `refused`, not `probe caught a leak`.
+        let msg = if nothing_leaked {
+            format!("probe refused: {detail}")
+        } else {
+            format!("probe caught a leak: {detail}")
+        };
+        return Err(LearnError::Invalid(msg));
     }
 
     // F3/R2: an empty fit or calibrate slice must be refused, naming the slice. An empty fit slice

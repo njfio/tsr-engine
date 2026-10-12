@@ -2286,3 +2286,544 @@ fn p2_report_and_apply_refuse_a_dataset_with_another_data_root() {
         "P2: apply names the data root: {err}"
     );
 }
+
+/// F9/B3 (a): `fit` on a dataset directory whose `rows.jsonl` is missing must exit 2 naming the
+/// file, not exit 1 with "fit failed: io: …". A missing structural input is bad input.
+#[test]
+fn f9_fit_refuses_a_missing_rows_jsonl_with_exit_2() {
+    let dir = temp_dir("f9-fit-missing-rows");
+    let ds = build_dataset(&dir, "7");
+    std::fs::remove_file(ds.join("rows.jsonl")).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a missing rows.jsonl with exit 2 (never exit 1):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("rows.jsonl"),
+        "F9/B3: the refusal names rows.jsonl: {err}"
+    );
+}
+
+/// F9/B3 (a): `fit` on a dataset directory whose `features.json` is missing must exit 2 naming the
+/// file, not exit 1.
+#[test]
+fn f9_fit_refuses_a_missing_features_json_with_exit_2() {
+    let dir = temp_dir("f9-fit-missing-features");
+    let ds = build_dataset(&dir, "7");
+    std::fs::remove_file(ds.join("features.json")).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a missing features.json with exit 2 (never exit 1):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("features.json"),
+        "F9/B3: the refusal names features.json: {err}"
+    );
+}
+
+/// F9/B3 (a): `fit` on a dataset directory whose `split.json` is missing must exit 2 naming the
+/// file, not exit 1.
+#[test]
+fn f9_fit_refuses_a_missing_split_json_with_exit_2() {
+    let dir = temp_dir("f9-fit-missing-split");
+    let ds = build_dataset(&dir, "7");
+    std::fs::remove_file(ds.join("split.json")).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a missing split.json with exit 2 (never exit 1):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("split.json"),
+        "F9/B3: the refusal names split.json: {err}"
+    );
+}
+
+/// F9/B3 (a): `fit` on a dataset directory whose `data-manifest.json` is missing must exit 2 naming
+/// the file, not exit 1.
+#[test]
+fn f9_fit_refuses_a_missing_data_manifest_json_with_exit_2() {
+    let dir = temp_dir("f9-fit-missing-manifest");
+    let ds = build_dataset(&dir, "7");
+    std::fs::remove_file(ds.join("data-manifest.json")).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a missing data-manifest.json with exit 2 (never exit 1):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("data-manifest.json"),
+        "F9/B3: the refusal names data-manifest.json: {err}"
+    );
+}
+
+/// F9/B3 (a): `fit` on a non-UTF-8 `rows.jsonl` must exit 2 naming the file, not exit 1 with
+/// "fit failed: io: …". A file that is not UTF-8 is bad input.
+#[test]
+fn f9_fit_refuses_a_non_utf8_rows_jsonl_with_exit_2() {
+    let dir = temp_dir("f9-fit-non-utf8-rows");
+    let ds = build_dataset(&dir, "7");
+    std::fs::write(ds.join("rows.jsonl"), [0xffu8, 0xfe, 0x00, 0x01]).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a non-UTF-8 rows.jsonl with exit 2 (never exit 1):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("rows.jsonl"),
+        "F9/B3: the refusal names rows.jsonl: {err}"
+    );
+}
+
+/// F9/B3 (b): a `tasks.jsonl` cut to the fit-side tasks examines 696 rows and none of the 215
+/// held-out, yet the old gate (`examined < held_out`) passed and `fit` exited 0 with the acceptance
+/// id. The probe must cover every split side: refuse (exit 2) naming the side and the counts.
+#[test]
+fn f9_fit_refuses_a_tasks_index_cut_to_the_fit_side() {
+    let dir = temp_dir("f9-fit-side-fit-only");
+    let ds = build_dataset(&dir, "7");
+    let loaded = tsr_learn::bundle::load_dataset(&ds).expect("the dataset loads");
+    let fit_tasks: std::collections::HashSet<String> = loaded
+        .rows
+        .iter()
+        .filter(|r| r.side == tsr_learn::dataset::Side::Fit)
+        .map(|r| r.task.to_string())
+        .collect();
+    let text = std::fs::read_to_string(ds.join("tasks.jsonl")).unwrap();
+    let cut: String = text
+        .lines()
+        .filter(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            fit_tasks.contains(v["task"].as_str().unwrap())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(ds.join("tasks.jsonl"), cut).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a tasks index cut to the fit side (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("held_out") || err.contains("held-out"),
+        "F9/B3: the refusal names the held-out side: {err}"
+    );
+}
+
+/// F9/B3 (b): a held-out-only `tasks.jsonl` (76 lines) passes the old count gate and `fit` exits 0.
+/// The probe must refuse it, naming the missing fit and calibrate sides.
+#[test]
+fn f9_fit_refuses_a_held_out_only_tasks_index() {
+    let dir = temp_dir("f9-fit-side-heldout-only");
+    let ds = build_dataset(&dir, "7");
+    let loaded = tsr_learn::bundle::load_dataset(&ds).expect("the dataset loads");
+    let held_tasks: std::collections::HashSet<String> = loaded
+        .rows
+        .iter()
+        .filter(|r| r.side == tsr_learn::dataset::Side::HeldOut)
+        .map(|r| r.task.to_string())
+        .collect();
+    let text = std::fs::read_to_string(ds.join("tasks.jsonl")).unwrap();
+    let cut: String = text
+        .lines()
+        .filter(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            held_tasks.contains(v["task"].as_str().unwrap())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(ds.join("tasks.jsonl"), cut).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a held-out-only tasks index (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("fit") || err.contains("calibrate"),
+        "F9/B3: the refusal names the missing side: {err}"
+    );
+}
+
+/// F9/B3 (b): a calibrate-only `tasks.jsonl` (75 lines, 218 rows) passes the old count gate and
+/// `fit` exits 0. The probe must refuse it, naming the missing fit and held-out sides.
+#[test]
+fn f9_fit_refuses_a_calibrate_only_tasks_index() {
+    let dir = temp_dir("f9-fit-side-calibrate-only");
+    let ds = build_dataset(&dir, "7");
+    let loaded = tsr_learn::bundle::load_dataset(&ds).expect("the dataset loads");
+    let cal_tasks: std::collections::HashSet<String> = loaded
+        .rows
+        .iter()
+        .filter(|r| r.side == tsr_learn::dataset::Side::Calibrate)
+        .map(|r| r.task.to_string())
+        .collect();
+    let text = std::fs::read_to_string(ds.join("tasks.jsonl")).unwrap();
+    let cut: String = text
+        .lines()
+        .filter(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            cal_tasks.contains(v["task"].as_str().unwrap())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(ds.join("tasks.jsonl"), cut).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a calibrate-only tasks index (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("fit") || err.contains("held_out") || err.contains("held-out"),
+        "F9/B3: the refusal names the missing side: {err}"
+    );
+}
+
+/// F9/B3 (c): a wrong-typed `seq` in an events wrapper (`"x"`) is silently replaced by line
+/// position (dataset.rs:630, 636). `dataset` must refuse it like any other bad field, exit 2.
+#[test]
+fn f9_dataset_refuses_a_string_seq_in_an_events_wrapper() {
+    let dir = temp_dir("f9-seq-string");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&ev).unwrap();
+    let bad: String = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 5 {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v["seq"] = serde_json::Value::String("x".into());
+                serde_json::to_string(&v).unwrap()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&ev, bad).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a string seq in an events wrapper (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl") && err.contains("seq"),
+        "F9/B3: the refusal names events.jsonl and seq: {err}"
+    );
+}
+
+/// F9/B3 (c): a float `seq` (`1.5`) in an events wrapper is silently replaced by line position.
+/// `dataset` must refuse it, exit 2.
+#[test]
+fn f9_dataset_refuses_a_float_seq_in_an_events_wrapper() {
+    let dir = temp_dir("f9-seq-float");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&ev).unwrap();
+    let bad: String = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 5 {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v["seq"] = serde_json::json!(1.5);
+                serde_json::to_string(&v).unwrap()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&ev, bad).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a float seq in an events wrapper (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl") && err.contains("seq"),
+        "F9/B3: the refusal names events.jsonl and seq: {err}"
+    );
+}
+
+/// F9/B3 (c): a `null` `seq` in an events wrapper is silently replaced by line position. `dataset`
+/// must refuse it, exit 2.
+#[test]
+fn f9_dataset_refuses_a_null_seq_in_an_events_wrapper() {
+    let dir = temp_dir("f9-seq-null");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&ev).unwrap();
+    let bad: String = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 5 {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v["seq"] = serde_json::Value::Null;
+                serde_json::to_string(&v).unwrap()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&ev, bad).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses a null seq in an events wrapper (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl") && err.contains("seq"),
+        "F9/B3: the refusal names events.jsonl and seq: {err}"
+    );
+}
+
+/// F9/B3 (c): an absent `seq` in an events wrapper is silently replaced by line position. `dataset`
+/// must refuse it, exit 2.
+#[test]
+fn f9_dataset_refuses_an_absent_seq_in_an_events_wrapper() {
+    let dir = temp_dir("f9-seq-absent");
+    let (ev, tk, lb) = regenerate(&dir);
+    let text = std::fs::read_to_string(&ev).unwrap();
+    let bad: String = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 5 {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v.as_object_mut().unwrap().remove("seq");
+                serde_json::to_string(&v).unwrap()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&ev, bad).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: dataset refuses an absent seq in an events wrapper (never exit 0):\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl") && err.contains("seq"),
+        "F9/B3: the refusal names events.jsonl and seq: {err}"
+    );
+}
+
+/// F9/B3 (d): the events-cut refusal must name the first offending row and the count, and say
+/// "refused" rather than "probe caught a leak" when nothing leaked. Before the fix it was one
+/// 271 KB stderr line prefixed "probe caught a leak".
+#[test]
+fn f9_fit_events_cut_refusal_is_short_and_says_refused() {
+    let dir = temp_dir("f9-events-cut-short");
+    let ds = build_dataset(&dir, "7");
+    let text = std::fs::read_to_string(ds.join("events.jsonl")).unwrap();
+    let cut: String = text.lines().take(20).collect::<Vec<_>>().join("\n") + "\n";
+    std::fs::write(ds.join("events.jsonl"), cut).unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 2, "F9/B3: fit refuses an events cut:\n{out}\n{err}");
+    assert!(
+        !err.contains("probe caught a leak"),
+        "F9/B3: nothing leaked, so the refusal must not say `probe caught a leak`: {err}"
+    );
+    assert!(
+        err.contains("refused"),
+        "F9/B3: the refusal says `refused`: {err}"
+    );
+    assert!(
+        err.len() < 4096,
+        "F9/B3: the refusal is short (names the first offending row and the count), not {} bytes",
+        err.len()
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+}
+
+/// F9/B3 (d): one parser. A truncated events line must be refused with the loader's message format
+/// (the file name, not the full path), so there is one message format, not two.
+#[test]
+fn f9_fit_refuses_a_truncated_events_line_with_the_loader_message() {
+    let dir = temp_dir("f9-one-parser-events");
+    let ds = build_dataset(&dir, "7");
+    let text = std::fs::read_to_string(ds.join("events.jsonl")).unwrap();
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    // Truncate the 6th line mid-JSON.
+    let l6 = &lines[5];
+    lines[5] = l6[..l6.len() / 2].to_string();
+    std::fs::write(ds.join("events.jsonl"), lines.join("\n") + "\n").unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses a truncated events line:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl line 6"),
+        "F9/B3: the refusal names events.jsonl and the line: {err}"
+    );
+    // The loader names the file, not the full path: the message must not carry the dataset dir.
+    assert!(
+        !err.contains(ds.to_str().unwrap()),
+        "F9/B3: one message format -- the loader names the file, not the full path: {err}"
+    );
+}

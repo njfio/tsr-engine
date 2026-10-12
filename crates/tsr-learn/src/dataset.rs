@@ -583,11 +583,24 @@ pub fn read_records<T>(path: &Path, what: &str) -> Result<Vec<T>, LearnError>
 where
     T: serde::de::DeserializeOwned,
 {
-    let text = std::fs::read_to_string(path)?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
+    // F9/B3: a missing or non-UTF-8 file is bad input, refused naming the file -- not a bare `io:`.
+    let text = match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|_| LearnError::Invalid(format!("{name}: the file is not valid UTF-8")))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(LearnError::Invalid(format!(
+                "{name}: the file is missing from the dataset directory {}",
+                path.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            )))
+        }
+        Err(e) => return Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),
+    };
     let mut out = Vec::new();
     for (i, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -613,11 +626,24 @@ where
 /// a `{"seq": n, "event": …}` wrapper, and a line that is not an event record is refused naming the
 /// file, the line and the missing or wrong field.
 pub fn read_events_records(path: &Path) -> Result<Vec<(i64, tsr_domain::Event)>, LearnError> {
-    let text = std::fs::read_to_string(path)?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
+    // F9/B3: a missing or non-UTF-8 file is bad input, refused naming the file -- not a bare `io:`.
+    let text = match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|_| LearnError::Invalid(format!("{name}: the file is not valid UTF-8")))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(LearnError::Invalid(format!(
+                "{name}: the file is missing from the dataset directory {}",
+                path.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            )))
+        }
+        Err(e) => return Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),
+    };
     let mut out: Vec<(i64, tsr_domain::Event)> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -627,7 +653,26 @@ pub fn read_events_records(path: &Path) -> Result<Vec<(i64, tsr_domain::Event)>,
         let value: serde_json::Value = serde_json::from_str(line)
             .map_err(|e| LearnError::Invalid(format!("{name} line {}: {e}", i + 1)))?;
         let (seq, event_value) = match value.get("event") {
-            Some(ev) => (value.get("seq").and_then(|s| s.as_i64()), ev.clone()),
+            Some(ev) => {
+                // F9/B3 (c): a wrapper's `seq` is a field like any other. A wrong-typed (`"x"`,
+                // 1.5, null) or absent `seq` must be refused, never silently replaced by the line
+                // position.
+                let seq = match value.get("seq") {
+                    Some(s) => s.as_i64().ok_or_else(|| {
+                        LearnError::Invalid(format!(
+                            "{name} line {}: `seq` must be an integer, found {s}",
+                            i + 1
+                        ))
+                    })?,
+                    None => {
+                        return Err(LearnError::Invalid(format!(
+                            "{name} line {}: the events wrapper has no `seq` field",
+                            i + 1
+                        )))
+                    }
+                };
+                (Some(seq), ev.clone())
+            }
             None => (None, value),
         };
         let event: tsr_domain::Event = serde_json::from_value(event_value).map_err(|e| {
