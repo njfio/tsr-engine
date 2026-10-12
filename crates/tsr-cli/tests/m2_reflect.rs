@@ -335,7 +335,9 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
         ))
         .unwrap();
 
-    // Close the task so the common decision event resolves and the forecasts score.
+    // Close the task so the common decision event resolves and the forecasts score. R2/R3: a
+    // `TaskClosed { reason: "operator" }` is an operator stop that CENSORS the common event, so
+    // this reviewed-and-labelled episode closes `done` (its criteria were met) to score.
     store
         .append(&Event::new(
             *t,
@@ -343,7 +345,7 @@ fn episode(store: &tsr_store::Store, t: &TaskId) {
             Source::Operator,
             EventKind::TaskClosed {
                 task: *t,
-                reason: "operator".to_string(),
+                reason: "done".to_string(),
             },
             "unix:1",
         ))
