@@ -194,7 +194,7 @@ fn d6_a_denial_ends_the_attempt() {
     let driver = ScriptedDriver::new(Mode::Rules, session).with_tier0(repo, 60);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
 
     assert_eq!(report.denials.len(), 1, "exactly one denial");
@@ -218,7 +218,7 @@ fn d6_a_well_formed_tier0_session_reaches_stop() {
         .with_tier0(scripted_repo(), 60);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
 
     assert!(report.denials.is_empty(), "no denial: {:?}", report.denials);
@@ -246,7 +246,7 @@ fn d6_the_controller_is_behind_the_driver_trait() {
     let record = ScriptedDriver::new(Mode::Record, session.clone());
     let mut ctx = ctx_for(task, dir.path(), Mode::Record);
     ctx.open_task().unwrap();
-    let report = record.drive(&mut ctx, task).unwrap();
+    let report = record.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
     assert!(
         report.denials.is_empty(),
@@ -261,7 +261,7 @@ fn d6_the_controller_is_behind_the_driver_trait() {
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
     let report = rules
-        .drive(&mut ctx, task)
+        .drive(&mut ctx, task, dir.path())
         .expect("D6 (F2): a read-before-test refusal ends the task, it does not abort the batch");
     assert!(
         report.stopped_on_tier0,
@@ -352,7 +352,7 @@ fn d6_tier0_session_satisfies_reconstruct_invariants() {
         .with_tier0(scripted_repo(), 60);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    driver.drive(&mut ctx, task).unwrap();
+    driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
     let session = session_from_store(ctx.store(), &ctx.task()).unwrap();
     check_session_invariants(&session).expect("a Tier 0 session satisfies the invariants");

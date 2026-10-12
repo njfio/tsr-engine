@@ -372,7 +372,7 @@ pub fn run_one(
     }
 
     // (4) Drive the session.
-    let report = match driver.drive(&mut ctx, task) {
+    let report = match driver.drive(&mut ctx, task, &dest) {
         Ok(r) => r,
         Err(DriverError::Unavailable(reason)) => {
             // The driver cannot run here: record the task as unavailable and close it.

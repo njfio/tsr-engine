@@ -130,7 +130,17 @@ pub trait Driver {
     fn name(&self) -> &'static str;
 
     /// Drive the session to a close. The session is already open (`TaskOpened` recorded).
-    fn drive(&self, ctx: &mut SessionCtx, task: &CorpusTask) -> Result<DriverReport, DriverError>;
+    ///
+    /// `copy` is the absolute path of the task's disposable copy (D3): every session step that
+    /// touches files or runs a command runs with `copy` as its working directory, and only there.
+    /// A driver that edits the repository instead of the copy leaves the fix where the oracle
+    /// cannot see it, so the copy is an argument, not ambient state.
+    fn drive(
+        &self,
+        ctx: &mut SessionCtx,
+        task: &CorpusTask,
+        copy: &Path,
+    ) -> Result<DriverReport, DriverError>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -513,7 +523,12 @@ impl Driver for ScriptedDriver {
         }
     }
 
-    fn drive(&self, ctx: &mut SessionCtx, _task: &CorpusTask) -> Result<DriverReport, DriverError> {
+    fn drive(
+        &self,
+        ctx: &mut SessionCtx,
+        _task: &CorpusTask,
+        _copy: &Path,
+    ) -> Result<DriverReport, DriverError> {
         let mut report = DriverReport::default();
         // The Tier 0 controller (D6) is consulted for each step in rules mode, before the step is
         // proposed. A refusal ends the attempt: the driver returns the error and does not continue.
@@ -675,6 +690,7 @@ impl Driver for ClaudeCodeDriver {
         &self,
         _ctx: &mut SessionCtx,
         _task: &CorpusTask,
+        _copy: &Path,
     ) -> Result<DriverReport, DriverError> {
         Err(DriverError::Unavailable(Self::UNAVAILABLE.to_string()))
     }

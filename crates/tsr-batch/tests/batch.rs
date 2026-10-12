@@ -89,7 +89,7 @@ fn record_session_satisfies_reconstruct_invariants() {
     let driver = ScriptedDriver::new(Mode::Record, session);
     let mut ctx = ctx_for(task, dir.path(), Mode::Record);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
     assert!(report.stopped, "the session reached a Stop");
 
@@ -105,7 +105,7 @@ fn rules_session_satisfies_reconstruct_invariants() {
     let driver = ScriptedDriver::new(Mode::Rules, session);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
     assert!(report.stopped, "the session reached a Stop");
     assert!(
@@ -126,7 +126,7 @@ fn rules_mode_denies_a_gated_action_without_a_forecast() {
     let driver = ScriptedDriver::new(Mode::Rules, session);
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
 
     assert_eq!(
@@ -159,7 +159,7 @@ fn record_mode_gates_nothing() {
     let driver = ScriptedDriver::new(Mode::Record, session);
     let mut ctx = ctx_for(task, dir.path(), Mode::Record);
     ctx.open_task().unwrap();
-    let report = driver.drive(&mut ctx, task).unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
     ctx.close("done").unwrap();
 
     assert!(report.denials.is_empty(), "system 1 gates nothing");
@@ -329,7 +329,7 @@ fn claude_code_driver_runs_on_a_host() {
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
     let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
-    let err = driver.drive(&mut ctx, task).unwrap_err();
+    let err = driver.drive(&mut ctx, task, dir.path()).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("no Claude Code"), "got: {msg}");
     assert_eq!(DRIVER_UNAVAILABLE_EXIT, 2);
@@ -343,7 +343,7 @@ fn claude_code_driver_is_a_documented_stub() {
     let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
     ctx.open_task().unwrap();
     let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
-    let err = driver.drive(&mut ctx, task).unwrap_err();
+    let err = driver.drive(&mut ctx, task, dir.path()).unwrap_err();
     assert!(err.to_string().contains("no Claude Code"));
     assert_eq!(driver.name(), "claude-code");
 }
