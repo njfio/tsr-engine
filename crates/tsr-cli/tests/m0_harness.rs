@@ -204,10 +204,13 @@ fn structural_trace_of_fixture(path: &Path) -> Vec<StructuralEvent> {
         .collect()
 }
 
-/// Run `tsr hook --selftest` with `cwd` as the working directory, returning the produced fixture.
+/// Run `tsr hook --selftest --out <cwd>/out` with `cwd` as the working directory, returning the
+/// produced trace. The selftest writes to the named directory, never into `fixtures/m0`.
 fn run_selftest(cwd: &Path) -> Vec<u8> {
+    let out_dir = cwd.join("out");
     let out = Command::new(tsr_bin())
-        .args(["hook", "--selftest"])
+        .args(["hook", "--selftest", "--out"])
+        .arg(&out_dir)
         .current_dir(cwd)
         .output()
         .expect("run tsr hook --selftest");
@@ -217,7 +220,7 @@ fn run_selftest(cwd: &Path) -> Vec<u8> {
         out.status,
         String::from_utf8_lossy(&out.stderr)
     );
-    std::fs::read(cwd.join("fixtures/m0/session.events.jsonl")).expect("selftest wrote the fixture")
+    std::fs::read(out_dir.join("session.events.jsonl")).expect("selftest wrote the trace")
 }
 
 /// Two selftests are reproducible when their structural traces agree — `duration_ms` is excluded
@@ -225,9 +228,10 @@ fn run_selftest(cwd: &Path) -> Vec<u8> {
 /// function of the inputs.
 ///
 /// The two runs compared are two harness replays through the `FakeRunner` (always available), and —
-/// when a container runtime is reachable — the real selftest on the host. The committed fixture is
-/// deliberately *not* compared here: it is the operator's real record, regenerated on a host after
-/// this repair, and the frozen `tests/m0_reconstruct.rs` is what turns green on it.
+/// when a container runtime is reachable — the real selftest on the host, which now writes to
+/// `--out <scratch>/out` and never into `fixtures/m0`. The committed fixture is deliberately *not*
+/// compared here: it is the operator's real record, regenerated on a host after this repair, and
+/// the frozen `tests/m0_reconstruct.rs` is what turns green on it.
 #[test]
 fn selftest_is_reproducible_structurally_excluding_duration_ms_by_name() {
     // Two independent harness replays through the FakeRunner: the same calls the selftest makes,
@@ -254,11 +258,9 @@ fn selftest_is_reproducible_structurally_excluding_duration_ms_by_name() {
     // Two independent real runs in two scratch directories must agree structurally with each other
     // and with the FakeRunner replay. A wall-clock timestamp in the id input would break this.
     let _ = run_selftest(&scratch("run1"));
-    let first =
-        structural_trace_of_fixture(&scratch("run1").join("fixtures/m0/session.events.jsonl"));
+    let first = structural_trace_of_fixture(&scratch("run1").join("out/session.events.jsonl"));
     let _ = run_selftest(&scratch("run2"));
-    let second =
-        structural_trace_of_fixture(&scratch("run2").join("fixtures/m0/session.events.jsonl"));
+    let second = structural_trace_of_fixture(&scratch("run2").join("out/session.events.jsonl"));
 
     assert_eq!(
         first, second,

@@ -74,7 +74,10 @@ impl Runtime {
     }
 
     /// Detect a reachable runtime: Podman first, then Docker. A runtime counts as reachable only if
-    /// its binary exists on `PATH` and `--version` succeeds — a binary that cannot run is no runtime.
+    /// its binary exists on `PATH` **and its daemon answers** — a binary that cannot run, or a CLI
+    /// with no daemon behind it, is no runtime. The probe asks the daemon (`info`), not the binary
+    /// (`--version`): a host with the docker CLI but no daemon must refuse, not record a run that
+    /// never happened (repair item 3, PRD §B10).
     pub fn detect() -> Option<Runtime> {
         [Runtime::Podman, Runtime::Docker]
             .into_iter()
@@ -94,24 +97,65 @@ fn which(bin: &str) -> Option<PathBuf> {
     None
 }
 
-/// Probe a runtime with `--version`; a non-zero exit or a spawn failure means "not reachable".
+/// Probe a runtime's **daemon** with `info`; a non-zero exit, a spawn failure, or a daemon that
+/// does not answer within [`PROBE_TIMEOUT`] means "not reachable". `--version` only proves the CLI
+/// is installed, which is exactly the false positive this repair removes: a docker CLI with no
+/// daemon answers `--version` and fails `info`.
 fn probe(rt: Runtime) -> bool {
-    Command::new(rt.binary())
-        .arg("--version")
+    let mut child = match Command::new(rt.binary())
+        .arg("info")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    // A short timeout: a daemon that hangs must not hang `tsr exec`. Poll until the deadline, then
+    // kill and treat as unreachable.
+    let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(_) => return false,
+        }
+    }
 }
+
+/// How long the daemon probe may take before the runtime is treated as unreachable.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The sealed-container invocation for a runtime and an argv. Pure: it builds the argument vector
 /// and never runs anything, so it can be asserted on without a runtime present.
 ///
 /// The container is a *sibling*: the workspace is bind-mounted at the same path, the root is
 /// read-only, the network is off, and the cgroup limits are fixed. The image is [`image`].
+///
+/// The store's directory is mounted **read-only** over the same path whenever it lies inside the
+/// workspace, so a command inside the sandbox cannot rewrite the event log or the session file
+/// (repair item 3, PRD §B10). The store directory is `TSR_DB`'s parent if set, else
+/// `<workspace>/.tsr`; a store outside the workspace is not mounted at all.
 pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<String> {
+    container_argv_with_store(rt, workspace, argv, None)
+}
+
+/// [`container_argv`] with the store path injected, so the read-only mount can be asserted on
+/// without touching the ambient `TSR_DB`. `store` is the store *file*; its parent is mounted.
+pub fn container_argv_with_store(
+    rt: Runtime,
+    workspace: &Path,
+    argv: &[String],
+    store: Option<&Path>,
+) -> Vec<String> {
     let ws = workspace.display().to_string();
     let mut v: Vec<String> = vec![
         rt.binary().to_string(),
@@ -136,12 +180,43 @@ pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<Str
         "no-new-privileges".to_string(),
         "--cap-drop".to_string(),
         "ALL".to_string(),
-        image(),
     ];
+    // The store's directory, read-only, after the workspace mount and before the image (docker
+    // options must precede the image). Only when it lies inside the workspace: a store outside it
+    // is not reachable from the container anyway, and mounting it would widen the sandbox.
+    if let Some(dir) = store_dir_inside_workspace(workspace, store) {
+        let d = dir.display().to_string();
+        v.push("--mount".to_string());
+        v.push(format!("type=bind,src={d},dst={d},readonly"));
+    }
+    v.push(image());
     v.extend(argv.iter().cloned());
     v
 }
 
+/// The store's directory when it lies inside `workspace`, else `None`.
+///
+/// The store file is `TSR_DB` if set, else `<workspace>/.tsr/tsr.db`; the directory mounted is its
+/// parent. A store whose directory *is* the workspace is refused by the caller (exit 2) — mounting
+/// the workspace read-only over itself would contradict the writable workspace mount.
+pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Option<PathBuf> {
+    let db = match store {
+        Some(p) => p.to_path_buf(),
+        None => match std::env::var_os("TSR_DB") {
+            Some(p) if !p.is_empty() => PathBuf::from(p),
+            _ => workspace.join(crate::store_path::DEFAULT_DB),
+        },
+    };
+    let dir = db.parent()?.to_path_buf();
+    if dir == workspace {
+        return None;
+    }
+    if dir.starts_with(workspace) {
+        Some(dir)
+    } else {
+        None
+    }
+}
 /// What a [`Runner`] observed: the process exit code and the combined log bytes.
 ///
 /// The log is the raw stdout+stderr the container produced; the caller hashes it into the
@@ -204,6 +279,12 @@ impl Runner for RealRunner {
     }
 
     fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal> {
+        // Create the store's directory before the mount, so a read-only bind mount of a
+        // not-yet-existing directory cannot fail the container start (repair item 3).
+        if let Some(dir) = store_dir_inside_workspace(workspace, None) {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| ExecRefusal::StartFailed(format!("cannot create store dir: {e}")))?;
+        }
         let args = container_argv(self.runtime, workspace, argv);
         let out = Command::new(&args[0])
             .args(&args[1..])
@@ -211,8 +292,17 @@ impl Runner for RealRunner {
             .map_err(|e| ExecRefusal::StartFailed(e.to_string()))?;
         let mut log = out.stdout;
         log.extend_from_slice(&out.stderr);
+        // A runtime that exits 125/126/127 from `run` did not start the container: that is not the
+        // command's exit code, so it must never be recorded as `Executed` (repair item 3).
+        let code = out.status.code().unwrap_or(-1);
+        if matches!(code, 125..=127) {
+            return Err(ExecRefusal::StartFailed(format!(
+                "container runtime exited {code} without starting the container: {}",
+                String::from_utf8_lossy(&log).trim()
+            )));
+        }
         Ok(RunOutput {
-            exit_code: out.status.code().unwrap_or(-1),
+            exit_code: code,
             log,
         })
     }
@@ -277,7 +367,8 @@ pub struct ExecOutcome {
 ///
 /// Returns `Err(EXIT_NO_RUNTIME)`-shaped refusal via [`ExecRefusal`] when no runtime is reachable:
 /// in that case **nothing is recorded**. Otherwise it records `Dispatched { in_sandbox: true }`
-/// then `Executed` (or `Unresolved` if the runtime itself failed to produce an exit code).
+/// then `Executed` (or, if the runtime itself failed to start the container, `Unresolved` and a
+/// `StartFailed` refusal so the caller exits 3 — never `Executed`).
 ///
 /// If the task already holds a `Committed`-but-not-`Dispatched` `RunApprovedTest` candidate whose
 /// args digest matches this argv (the hook committed it a moment ago), that candidate is dispatched
@@ -288,10 +379,25 @@ pub fn run(
     workspace: &Path,
     argv: &[String],
 ) -> Result<ExecOutcome, ExecRefusal> {
+    // A store whose directory *is* the workspace cannot be mounted read-only over itself: refuse
+    // (exit 2) before anything is recorded (repair item 3).
+    if store_dir_is_workspace(workspace) {
+        return Err(ExecRefusal::StoreIsWorkspace);
+    }
     // The refusal is decided here, before `run_with` records anything: no runtime → exit 3 and an
     // untouched log.
     let runner = RealRunner::detect()?;
     run_with(store, task, workspace, argv, &runner)
+}
+
+/// Whether the store file's parent is the workspace itself (`TSR_DB=<workspace>/tsr.db`), which
+/// cannot be mounted read-only over the writable workspace mount.
+pub fn store_dir_is_workspace(workspace: &Path) -> bool {
+    let db = match std::env::var_os("TSR_DB") {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => workspace.join(crate::store_path::DEFAULT_DB),
+    };
+    db.parent().map(|d| d == workspace).unwrap_or(false)
 }
 
 /// [`run`] with the container invocation injected. The harness drives this with a [`FakeRunner`] to
@@ -394,20 +500,19 @@ pub fn run_with(
             })
         }
         Err(e) => {
+            let reason = format!("container runtime failed to start: {e}");
             append(
                 store,
                 task,
                 Source::Rules,
                 EventKind::Unresolved {
                     candidate: cid,
-                    reason: format!("container runtime failed to start: {e}"),
+                    reason: reason.clone(),
                 },
             )?;
-            Ok(ExecOutcome {
-                exit_code: -1,
-                log_digest: None,
-                duration_ms,
-            })
+            // The dispatch is recorded `Unresolved`, never `Executed`, and the caller exits 3: a
+            // container that did not start is not a run that happened (repair item 3).
+            Err(ExecRefusal::StartFailed(reason))
         }
     }
 }
@@ -421,6 +526,10 @@ pub enum ExecRefusal {
     /// run at all: the dispatch is recorded `Unresolved`.
     #[error("container runtime failed to start: {0}")]
     StartFailed(String),
+    /// `TSR_DB` names a store directly in the workspace, whose directory cannot be mounted
+    /// read-only over the writable workspace mount. Refused with exit 2, nothing recorded.
+    #[error("TSR_DB must not be the workspace itself: refusing to mount the workspace read-only")]
+    StoreIsWorkspace,
 }
 
 /// The candidate id an argv would produce: the same identity the hook mints for the equivalent
@@ -562,8 +671,8 @@ mod tests {
         );
         assert!(!img.contains(char::is_whitespace), "image slot: {img:?}");
         let v = container_argv(Runtime::Docker, Path::new("/work"), &["echo".to_string()]);
-        let img_at = v.len() - 2;
-        assert_eq!(v[img_at], img);
+        // The image sits immediately before the argv; the read-only store mount may precede it.
+        let img_at = v.iter().position(|a| a == &img).expect("image in argv");
         assert!(!v[img_at].starts_with('-'));
     }
 
@@ -574,7 +683,7 @@ mod tests {
         assert_eq!(v[0], "docker");
         assert_eq!(v[1], "run");
         // The image sits immediately before the argv, and the argv is passed verbatim.
-        let img_at = v.len() - argv.len() - 1;
+        let img_at = v.iter().position(|a| a == &image()).expect("image in argv");
         assert_eq!(v[img_at], image());
         assert_eq!(&v[img_at + 1..], &argv[..]);
     }
@@ -733,7 +842,8 @@ mod tests {
         );
     }
 
-    /// A fake runner whose container cannot be started records `Unresolved`, not `Executed`.
+    /// A fake runner whose container cannot be started records `Unresolved`, not `Executed`, and
+    /// refuses with `StartFailed` so the CLI exits 3.
     #[test]
     fn run_with_a_fake_runner_that_cannot_start_records_unresolved() {
         let store = Store::open_in_memory().expect("in-memory store");
@@ -741,11 +851,9 @@ mod tests {
         let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
         let fake = FakeRunner::failing_to_start("boom");
 
-        let outcome = run_with(&store, &task, Path::new("/work"), &argv, &fake)
-            .expect("a start failure is recorded, not refused");
-
-        assert_eq!(outcome.exit_code, -1);
-        assert_eq!(outcome.log_digest, None);
+        let err = run_with(&store, &task, Path::new("/work"), &argv, &fake)
+            .expect_err("a start failure refuses with exit 3");
+        assert!(matches!(err, ExecRefusal::StartFailed(_)));
         let has_unresolved = store
             .by_task(&task)
             .expect("by_task")
@@ -754,6 +862,15 @@ mod tests {
         assert!(
             has_unresolved,
             "a container that cannot start is Unresolved"
+        );
+        let has_executed = store
+            .by_task(&task)
+            .expect("by_task")
+            .into_iter()
+            .any(|(_, e)| matches!(e.kind, EventKind::Executed { .. }));
+        assert!(
+            !has_executed,
+            "a container that cannot start is never Executed"
         );
     }
 

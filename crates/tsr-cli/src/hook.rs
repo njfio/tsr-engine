@@ -727,10 +727,15 @@ pub fn record_forecast_for_candidate(
 /// a second run, a stop. Nothing is fabricated: the forecast is written by the forecast path and the
 /// dispatch by `tsr exec`. With no container runtime reachable the harness refuses (exit 3) and
 /// writes nothing.
-pub fn selftest() -> anyhow::Result<std::path::PathBuf> {
+pub fn selftest(
+    out: Option<&std::path::Path>,
+    update_frozen_fixture: bool,
+) -> anyhow::Result<std::path::PathBuf> {
     // `recorded_at` is hashed into every event id, so the fixture is only reproducible if the
     // clock is pinned. The production hook path is untouched and keeps real wall-clock time.
-    with_pinned_clock(SELFTEST_RECORDED_AT, selftest_inner)
+    with_pinned_clock(SELFTEST_RECORDED_AT, || {
+        selftest_inner(out, update_frozen_fixture)
+    })
 }
 
 /// The fixed provenance stamp the self-test fixture is recorded under. Any change to this value
@@ -779,7 +784,10 @@ fn forecast_call_hooks(
     Ok(())
 }
 
-fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
+fn selftest_inner(
+    out: Option<&std::path::Path>,
+    update_frozen_fixture: bool,
+) -> anyhow::Result<std::path::PathBuf> {
     // Refuse before writing anything when no runtime is reachable: the fixture must never be
     // fabricated, and a half-written fixture is worse than none.
     if crate::exec::Runtime::detect().is_none() {
@@ -788,10 +796,34 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
         );
     }
 
-    let fixture_dir = std::path::Path::new("fixtures/m0");
-    std::fs::create_dir_all(fixture_dir)?;
-    let db = fixture_dir.join("session.db");
-    let _ = std::fs::remove_file(&db);
+    // Where the trace lands. `--update-frozen-fixture` is the *only* way to touch the committed
+    // `fixtures/m0`; otherwise the caller's `--out` (or a fresh temp dir) is used, so running the
+    // selftest from the repository root can never overwrite the frozen fixture (repair item 3).
+    let out_dir: std::path::PathBuf = if update_frozen_fixture {
+        std::path::PathBuf::from("fixtures/m0")
+    } else {
+        match out {
+            Some(p) => p.to_path_buf(),
+            None => {
+                let dir = std::env::temp_dir().join(format!(
+                    "tsr-m0-selftest-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0)
+                ));
+                dir
+            }
+        }
+    };
+
+    // The store is built in a scratch directory, not in `out_dir`: a refusal must write nothing
+    // into `out_dir`, and the trace is copied there only once every run executed in a container.
+    let scratch = std::env::temp_dir().join(format!("tsr-m0-selftest-db-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch)?;
+    let db = scratch.join("session.db");
     let store = crate::store_path::open_store_at(&db)?;
 
     let session = "m0-selftest-session";
@@ -868,6 +900,7 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     let argv: Vec<String> = SELFTEST_TEST_ARGV.iter().map(|s| s.to_string()).collect();
     crate::exec::run(&store, &task, &workspace, &argv)
         .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
+    ensure_last_run_executed(&store, &task)?;
     let post = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PostToolUse".to_string()),
@@ -947,6 +980,7 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     record_tool(&store, &pre2)?;
     crate::exec::run(&store, &task, &workspace, &argv)
         .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
+    ensure_last_run_executed(&store, &task)?;
     let post2 = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PostToolUse".to_string()),
@@ -966,9 +1000,11 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     };
     record_stop(&store, &stop)?;
 
-    // Write the trace as events.jsonl, in sequence order.
+    // Write the trace as events.jsonl, in sequence order, into the caller's directory. Only now —
+    // after every run was confirmed executed in a container — is anything written.
     let jsonl = crate::task::export(&store, &task)?;
-    let out = fixture_dir.join("session.events.jsonl");
+    std::fs::create_dir_all(&out_dir)?;
+    let out = out_dir.join("session.events.jsonl");
     std::fs::write(&out, jsonl)?;
 
     // Leave no session file behind: the selftest wrote one to prove the path, but it is not the
@@ -976,7 +1012,31 @@ fn selftest_inner() -> anyhow::Result<std::path::PathBuf> {
     let _ = std::fs::remove_file(crate::store_path::session_file_in(
         &crate::store_path::session_dir(),
     ));
+    let _ = std::fs::remove_dir_all(&scratch);
     Ok(out)
+}
+
+/// Refuse (exit 3, writing nothing) unless the task's most recent dispatch was actually executed in
+/// a container. A `Dispatched` with no `Executed` after it — or an `Unresolved` — means the run did
+/// not happen, and the selftest must not fabricate a fixture from it (repair item 3).
+fn ensure_last_run_executed(store: &Store, task: &TaskId) -> anyhow::Result<()> {
+    let events = store.by_task(task)?;
+    let mut last: Option<&EventKind> = None;
+    for (_, ev) in &events {
+        match &ev.kind {
+            EventKind::Dispatched { .. } => last = Some(&ev.kind),
+            EventKind::Executed { .. } => last = Some(&ev.kind),
+            EventKind::Unresolved { .. } => last = Some(&ev.kind),
+            _ => {}
+        }
+    }
+    match last {
+        Some(EventKind::Executed { .. }) => Ok(()),
+        Some(EventKind::Unresolved { reason, .. }) => anyhow::bail!(
+            "selftest run was not executed in a container (Unresolved: {reason}); refusing to write"
+        ),
+        _ => anyhow::bail!("selftest run was not executed in a container; refusing to write"),
+    }
 }
 
 #[cfg(test)]

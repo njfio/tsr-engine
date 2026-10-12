@@ -63,9 +63,16 @@ enum Cmd {
         /// PreToolUse | PostToolUse | SessionStart | Stop
         #[arg(long, default_value = "")]
         stage: String,
-        /// Drive realistic payloads through the hook and write fixtures/m0/session.events.jsonl
+        /// Drive realistic payloads through the hook and write the trace to `--out`
         #[arg(long)]
         selftest: bool,
+        /// Where the selftest writes `session.events.jsonl` (default: a fresh temp dir it prints).
+        #[arg(long)]
+        out: Option<String>,
+        /// Overwrite the committed `fixtures/m0/session.events.jsonl`. Without this the selftest
+        /// never touches `fixtures/m0`.
+        #[arg(long)]
+        update_frozen_fixture: bool,
     },
     /// Run a command in the sealed sibling sandbox and reconcile the result (M0, B4).
     Exec {
@@ -230,7 +237,12 @@ fn main() -> ExitCode {
             task.as_deref(),
             session.as_deref(),
         ),
-        Cmd::Hook { stage, selftest } => run_hook(&stage, selftest),
+        Cmd::Hook {
+            stage,
+            selftest,
+            out,
+            update_frozen_fixture,
+        } => run_hook(&stage, selftest, out.as_deref(), update_frozen_fixture),
         Cmd::Exec { argv } => run_exec(&argv),
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
@@ -423,9 +435,14 @@ fn run_forecast(
     }
 }
 
-fn run_hook(stage: &str, selftest: bool) -> ExitCode {
+fn run_hook(
+    stage: &str,
+    selftest: bool,
+    out: Option<&str>,
+    update_frozen_fixture: bool,
+) -> ExitCode {
     if selftest {
-        return match tsr_cli::hook::selftest() {
+        return match tsr_cli::hook::selftest(out.map(std::path::Path::new), update_frozen_fixture) {
             Ok(path) => {
                 println!("wrote {}", path.display());
                 ExitCode::SUCCESS
@@ -489,6 +506,10 @@ fn run_exec(argv: &[String]) -> ExitCode {
         Err(exec::ExecRefusal::StartFailed(reason)) => {
             eprintln!("tsr: container runtime failed to start: {reason}");
             ExitCode::from(exec::EXIT_NO_RUNTIME as u8)
+        }
+        Err(exec::ExecRefusal::StoreIsWorkspace) => {
+            eprintln!("tsr: TSR_DB must not be the workspace itself");
+            ExitCode::from(2)
         }
     }
 }
