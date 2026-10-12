@@ -36,6 +36,7 @@ fn task_json(id: &str, family: &str, flipped: &str) -> serde_json::Value {
         "commit": "d4e5f6",
         "parent_snapshot": "0000000000000000000000000000000000000000",
         "flipped_tests": [flipped],
+        "oracle_test_files": ["tests/parser.rs"],
         "hidden_diff": "cas-diff-rts-1",
         "family": family,
         "lineage": "rts",
