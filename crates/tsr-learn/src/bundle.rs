@@ -172,17 +172,64 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
         serde_json::from_str(&std::fs::read_to_string(dir.join("features.json"))?)?;
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("data-manifest.json"))?)?;
-    let data_root = Hash::from_hex(
+
+    // B2: recompute every row id, both roots and the split digest from `rows.jsonl` and
+    // `split.json`, and refuse when `data-manifest.json` disagrees. The manifest's roots are
+    // otherwise copied verbatim, so flipping a label in `rows.jsonl` would fit happily with the
+    // old training root.
+    for r in &rows {
+        let recomputed = crate::dataset::row_id(&r.commitment, &r.features, r.label, &r.evidence);
+        if recomputed != r.id {
+            return Err(LearnError::Invalid(format!(
+                "rows.jsonl: row {} has id {}, recomputed {}",
+                Hash::of(&[&r.commitment.0 .0]).to_hex(),
+                r.id.to_hex(),
+                recomputed.to_hex()
+            )));
+        }
+    }
+    let data_root = crate::dataset::data_root(&rows);
+    let training_root = crate::dataset::training_root(&rows);
+    let split_digest = crate::dataset::split_digest(split.by, split.seed, &split.assignments);
+
+    let stored_data_root = Hash::from_hex(
         manifest["data_root"]
             .as_str()
             .ok_or_else(|| LearnError::Invalid("data-manifest.json has no data_root".into()))?,
     )
     .map_err(|e| LearnError::Invalid(format!("data_root: {e}")))?;
-    let training_root =
+    if stored_data_root != data_root {
+        return Err(LearnError::Invalid(format!(
+            "data-manifest.json: data_root {} disagrees with the recomputed {}",
+            stored_data_root.to_hex(),
+            data_root.to_hex()
+        )));
+    }
+    let stored_training_root =
         Hash::from_hex(manifest["training_root"].as_str().ok_or_else(|| {
             LearnError::Invalid("data-manifest.json has no training_root".into())
         })?)
         .map_err(|e| LearnError::Invalid(format!("training_root: {e}")))?;
+    if stored_training_root != training_root {
+        return Err(LearnError::Invalid(format!(
+            "data-manifest.json: training_root {} disagrees with the recomputed {}",
+            stored_training_root.to_hex(),
+            training_root.to_hex()
+        )));
+    }
+    let stored_split_digest = Hash::from_hex(
+        manifest["split_digest"]
+            .as_str()
+            .ok_or_else(|| LearnError::Invalid("data-manifest.json has no split_digest".into()))?,
+    )
+    .map_err(|e| LearnError::Invalid(format!("split_digest: {e}")))?;
+    if stored_split_digest != split_digest {
+        return Err(LearnError::Invalid(format!(
+            "data-manifest.json: split_digest {} disagrees with the recomputed {}",
+            stored_split_digest.to_hex(),
+            split_digest.to_hex()
+        )));
+    }
     let source_root = Hash::from_hex(
         manifest["source_root"]
             .as_str()
@@ -264,6 +311,18 @@ pub fn write_bundle(
 ) -> Result<Hash, LearnError> {
     let ds = load_dataset(dataset_dir)?;
 
+    // B9: a bundle is written once. Refuse a non-empty `--out` so a second `fit` cannot overwrite
+    // a bundle that has already been verified.
+    if out_dir.exists() {
+        let non_empty = std::fs::read_dir(out_dir)?.next().is_some();
+        if non_empty {
+            return Err(LearnError::Invalid(format!(
+                "output directory {} exists and is not empty; a bundle is written once",
+                out_dir.display()
+            )));
+        }
+    }
+
     // §B8's minimum data: refuse with the counts when fit and calibrate hold fewer than 150 tasks
     // with resolved labels.
     let mature = mature_tasks(&ds);
@@ -284,9 +343,23 @@ pub fn write_bundle(
         }
     };
     let events = read_events(dataset_dir)?;
+    // B3: the probe pass reads every row, held_out included; log each held_out read.
+    for r in &ds.rows {
+        if r.side == crate::dataset::Side::HeldOut {
+            crate::probes::log_holdout_access(dataset_dir, r, "fit")?;
+        }
+    }
     let families = crate::features::families_from_spec(&ds.spec);
     let extractor = crate::probes::default_extractor(&ds.spec, &families);
-    let probe_report = crate::probes::run_all(&ds, &events, &index, &ds.spec, &extractor);
+    let split_json = dataset_dir.join("split.json");
+    let probe_report = crate::probes::run_all(
+        &ds,
+        &events,
+        &index,
+        &ds.spec,
+        &extractor,
+        Some(&split_json),
+    );
     if !probe_report.is_clean() {
         let caught = probe_report
             .leaks
@@ -510,6 +583,23 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
     }
     let recomputed = bundle_id(&content_digests, &manifest);
 
+    // B8: fields outside the id are either recomputed or fixed. The calibrator is the id's first
+    // 12 hex and the feature-schema version; the state is `draft` at M4. A forged calibrator or
+    // state is refused, naming manifest.toml.
+    let expected_calibrator = format!("{} {}", &recomputed.to_hex()[..12], manifest.feature_schema);
+    if manifest.calibrator != expected_calibrator {
+        return Err(VerifyError::Learn(LearnError::Invalid(format!(
+            "manifest.toml: calibrator {:?} disagrees with the recomputed {:?}",
+            manifest.calibrator, expected_calibrator
+        ))));
+    }
+    if manifest.state != "draft" {
+        return Err(VerifyError::Learn(LearnError::Invalid(format!(
+            "manifest.toml: state {:?} is not \"draft\"",
+            manifest.state
+        ))));
+    }
+
     // The stored id must equal the recomputed id.
     if manifest.id != recomputed.to_hex() {
         return Err(VerifyError::IdMismatch {
@@ -519,8 +609,17 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
     }
 
     if let Some(dataset_dir) = rebuild {
-        let rebuilt = write_bundle(dataset_dir, &dir.join("rebuild"), manifest.support_floor)
-            .map_err(VerifyError::Learn)?;
+        // B9: build in a temporary directory, compare ids, and remove it, so the bundle directory
+        // is unchanged and no `rebuild` subdirectory is left behind.
+        let tmp = std::env::temp_dir().join(format!(
+            "tsr-verify-rebuild-{}-{}",
+            std::process::id(),
+            recomputed.to_hex()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rebuilt = write_bundle(dataset_dir, &tmp, manifest.support_floor);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rebuilt = rebuilt.map_err(VerifyError::Learn)?;
         if rebuilt != recomputed {
             return Err(VerifyError::IdMismatch {
                 found: rebuilt.to_hex(),
@@ -547,18 +646,23 @@ mod tests {
     }
 
     fn row(family: &str, values: Vec<f64>, label: Option<bool>, side: Side, i: u64) -> Row {
+        let commitment = EventId(Hash::of(&[format!("c{i}").as_bytes()]));
+        let features = FeatureVector { values };
+        let evidence: Vec<EventId> = Vec::new();
+        // B2: the id is the real `row_id`, so `load_dataset`'s recompute agrees on a clean dataset.
+        let id = crate::dataset::row_id(&commitment, &features, label, &evidence);
         Row {
-            id: Hash::of(&[format!("row{i}").as_bytes()]),
+            id,
             task: TaskId(Hash::of(&[format!("t{i}").as_bytes()])),
-            commitment: EventId(Hash::of(&[format!("c{i}").as_bytes()])),
+            commitment,
             index: i,
             action: ActionKind::ProposePatch,
             family: family.to_string(),
             lineage: format!("l{}", i % 3),
             side,
-            features: FeatureVector { values },
+            features,
             label,
-            evidence: Vec::new(),
+            evidence,
             generator_raw: None,
             operator_raw: None,
             controller_logged: None,
@@ -576,19 +680,31 @@ mod tests {
             v[0] = 1.0;
             v[dim - 1] = (i % 5) as f64;
             let side = if i < 120 { Side::Fit } else { Side::Calibrate };
-            rows.push(row("calibrated", v, Some(i % 2 == 0), side, i));
+            let mut r = row("calibrated", v, Some(i % 2 == 0), side, i);
+            // Keep each lineage on one side, so the boundary probe does not fire on this clean
+            // fixture (a lineage on two sides is a real leak).
+            r.lineage = if side == Side::Fit { "l0" } else { "l1" }.to_string();
+            rows.push(r);
         }
+        // Every task's side must appear in split.json, or the split-manifest probe fires.
+        let mut assignments = std::collections::BTreeMap::new();
+        for r in &rows {
+            assignments.insert(r.task.to_string(), r.side);
+        }
+        let data_root = crate::dataset::data_root(&rows);
+        let training_root = crate::dataset::training_root(&rows);
+        let digest = crate::dataset::split_digest(SplitBy::Time, 7, &assignments);
         Dataset {
             rows,
             split: SplitManifest {
                 by: SplitBy::Time,
                 seed: 7,
-                assignments: std::collections::BTreeMap::new(),
-                digest: Hash::of(&[b"split"]),
+                assignments,
+                digest,
             },
             spec,
-            data_root: Hash::of(&[b"data"]),
-            training_root: Hash::of(&[b"train"]),
+            data_root,
+            training_root,
             source_root: Hash::of(&[b"source"]),
         }
     }
@@ -738,6 +854,178 @@ mod tests {
         assert!(
             msg.contains("missing content digest") && msg.contains("head.json"),
             "got: {msg}"
+        );
+    }
+
+    /// B2: flipping every fit row's label in `rows.jsonl` changes the row ids, so the data root and
+    /// the training root no longer match `data-manifest.json`. `load_dataset` must recompute them
+    /// from the rows and refuse, naming the file that disagrees — today it copies the manifest's
+    /// roots and fits happily with the old training root.
+    #[test]
+    fn b2_a_flipped_label_is_refused_naming_rows_jsonl() {
+        let ds = dataset();
+        let ddir = tmpdir("b2-flip");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let text = std::fs::read_to_string(ddir.join("rows.jsonl")).unwrap();
+        let mut out = String::new();
+        for line in text.lines() {
+            let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v["side"] == "fit" {
+                let l = v["label"].as_bool().unwrap();
+                v["label"] = serde_json::Value::Bool(!l);
+            }
+            out.push_str(&serde_json::to_string(&v).unwrap());
+            out.push('\n');
+        }
+        std::fs::write(ddir.join("rows.jsonl"), out).unwrap();
+        let err = match load_dataset(&ddir) {
+            Ok(_) => panic!("B2: a flipped label must be refused naming rows.jsonl"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("rows.jsonl"),
+            "B2: a flipped label must be refused naming rows.jsonl, got: {err}"
+        );
+    }
+
+    /// B2: a forged `training_root` in `data-manifest.json` must be refused, naming the file.
+    #[test]
+    fn b2_a_forged_training_root_is_refused_naming_the_manifest() {
+        let ds = dataset();
+        let ddir = tmpdir("b2-root");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let path = ddir.join("data-manifest.json");
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        v["training_root"] = serde_json::Value::String(Hash::of(&[b"forged"]).to_hex());
+        std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let err = match load_dataset(&ddir) {
+            Ok(_) => panic!("B2: a forged training_root must be refused naming data-manifest.json"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("data-manifest.json") && err.contains("training_root"),
+            "B2: a forged training_root must be refused naming data-manifest.json, got: {err}"
+        );
+    }
+
+    /// B2: a forged `split_digest` in `data-manifest.json` must be refused, naming the file.
+    #[test]
+    fn b2_a_forged_split_digest_is_refused_naming_the_manifest() {
+        let ds = dataset();
+        let ddir = tmpdir("b2-split");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let path = ddir.join("data-manifest.json");
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        v["split_digest"] = serde_json::Value::String(Hash::of(&[b"forged"]).to_hex());
+        std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let err = match load_dataset(&ddir) {
+            Ok(_) => panic!("B2: a forged split_digest must be refused naming data-manifest.json"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("data-manifest.json") && err.contains("split_digest"),
+            "B2: a forged split_digest must be refused naming data-manifest.json, got: {err}"
+        );
+    }
+
+    /// B8: a forged `calibrator` in `manifest.toml` must make `verify` refuse, naming manifest.toml.
+    /// Today the id does not cover the calibrator field, so the forgery verifies.
+    #[test]
+    fn b8_a_forged_calibrator_is_refused_naming_manifest_toml() {
+        let ds = dataset();
+        let ddir = tmpdir("b8-cal");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("b8-cal-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged: String = text
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("calibrator =") {
+                    "calibrator = \"deadbeefcafe features@v1\"".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, forged).unwrap();
+        let err = match verify_bundle(&out, None) {
+            Ok(_) => panic!("B8: a forged calibrator must be refused naming manifest.toml"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml"),
+            "B8: a forged calibrator must be refused naming manifest.toml, got: {err}"
+        );
+    }
+
+    /// B8: a forged `state` in `manifest.toml` must make `verify` refuse, naming manifest.toml.
+    #[test]
+    fn b8_a_forged_state_is_refused_naming_manifest_toml() {
+        let ds = dataset();
+        let ddir = tmpdir("b8-state");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("b8-state-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged: String = text
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("state =") {
+                    "state = \"released\"".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, forged).unwrap();
+        let err = match verify_bundle(&out, None) {
+            Ok(_) => panic!("B8: a forged state must be refused naming manifest.toml"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml"),
+            "B8: a forged state must be refused naming manifest.toml, got: {err}"
+        );
+    }
+
+    /// B9: a bundle is written once. `write_bundle` must refuse a non-empty `--out`.
+    #[test]
+    fn b9_a_non_empty_out_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("b9-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("b9-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let err = match write_bundle(&ddir, &out, 30) {
+            Ok(_) => panic!("B9: a non-empty --out must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("exists") || err.contains("not empty") || err.contains("written once"),
+            "B9: a non-empty --out must be refused, got: {err}"
+        );
+    }
+
+    /// B9: `verify --rebuild` builds in a temporary directory and removes it, so the bundle
+    /// directory is unchanged and no `rebuild` subdirectory is left behind.
+    #[test]
+    fn b9_rebuild_leaves_no_temporary_directory() {
+        let ds = dataset();
+        let ddir = tmpdir("b9-rb-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("b9-rb-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        verify_bundle(&out, Some(&ddir)).unwrap();
+        assert!(
+            !out.join("rebuild").exists(),
+            "B9: verify --rebuild must not leave a rebuild directory in the bundle"
         );
     }
 }
