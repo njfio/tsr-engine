@@ -5,10 +5,10 @@
 //!
 //! 1. **intent** — the crash lands after the intent is committed, before the effect. An
 //!    idempotent tool is reconciled to at most one `Executed`; a non-idempotent one is blocked.
-//! 2. **send** — the crash lands after the effect was sent, before the acknowledgement. The
-//!    tool's own check (a log digest in the CAS, an idempotency key seen) settles it.
+//! 2. **send** — the crash lands after the effect was sent, before the acknowledgement. The log
+//!    holds no `Executed`, so the check cannot say: the dispatch stays `Unresolved`.
 //! 3. **acknowledgement** — the crash lands after the effect, before the ack is recorded. Same
-//!    check, different evidence.
+//!    check, same answer: no `Executed`, so `Unresolved`.
 //! 4. **cancellation** — the operator cancels: `Unresolved { reason: "cancelled" }` and
 //!    `TaskClosed { reason: "operator" }`.
 //!
@@ -87,18 +87,6 @@ impl FakeExecutor {
     /// Whether the tool has seen this idempotency key.
     pub fn has_seen(&self, key: &str) -> bool {
         self.seen_keys.contains(key)
-    }
-
-    /// The tool's own check, as a [`Reconciler`] would ask it.
-    pub fn tool_check(&self, cas_root: &std::path::Path, candidate: CandidateId) -> ToolCheck {
-        let mut check = ToolCheck::new(cas_root).with_log_digest(candidate, self.tool.log_digest);
-        if self.tool.idempotent {
-            check = check.with_idempotent(candidate);
-        }
-        for key in &self.seen_keys {
-            check = check.with_seen_key(candidate, key.clone());
-        }
-        check
     }
 }
 
@@ -399,7 +387,7 @@ fn row_send_dispatched_only_is_unresolved_idempotent() {
     );
 
     let events = s.by_task(&task()).unwrap();
-    let check = ToolCheck::from_log(&cas, &events);
+    let check = ToolCheck::from_log(&events);
     let pending = pending_dispatches(&events);
     assert_eq!(pending.len(), 1, "the dispatch has no outcome yet");
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
@@ -428,7 +416,7 @@ fn row_send_non_idempotent_unknown_stays_blocked() {
     std::fs::create_dir_all(&cas).unwrap();
     let s = store_at_crash_point(&cand, CrashPoint::Send, &cas);
     let events = s.by_task(&task()).unwrap();
-    let check = ToolCheck::from_log(&cas, &events);
+    let check = ToolCheck::from_log(&events);
     let pending = pending_dispatches(&events);
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
     assert_eq!(res, Resolution::UnresolvedBlocked);
@@ -468,7 +456,7 @@ fn row_acknowledgement_tool_ran_without_executed_is_unresolved_idempotent() {
     );
 
     let events = s.by_task(&task()).unwrap();
-    let check = ToolCheck::from_log(&cas, &events);
+    let check = ToolCheck::from_log(&events);
     let pending = pending_dispatches(&events);
     assert_eq!(pending.len(), 1, "the dispatch has no outcome yet");
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
@@ -489,7 +477,7 @@ fn row_acknowledgement_missing_digest_is_unknown() {
     std::fs::create_dir_all(&cas).unwrap();
     let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
     let events = s.by_task(&task()).unwrap();
-    let check = ToolCheck::from_log(&cas, &events);
+    let check = ToolCheck::from_log(&events);
     let pending = pending_dispatches(&events);
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
     assert_eq!(res, Resolution::UnresolvedIdempotent);
@@ -704,7 +692,7 @@ fn d5_matrix_rows_reconcile_the_store_their_crash_point_left() {
         let s = store_at_crash_point(&cand, crash, &cas);
         let before = kinds(&s);
         let events = s.by_task(&task()).unwrap();
-        let check = ToolCheck::from_log(&cas, &events);
+        let check = ToolCheck::from_log(&events);
         let pending = pending_dispatches(&events);
 
         match crash {
@@ -787,7 +775,7 @@ fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
     std::fs::create_dir_all(&cas).unwrap();
     let s = store_at_crash_point(&cand, CrashPoint::Acknowledgement, &cas);
     let events = s.by_task(&task()).unwrap();
-    let check = ToolCheck::from_log(&cas, &events);
+    let check = ToolCheck::from_log(&events);
     let pending = pending_dispatches(&events);
     let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
     assert_eq!(
@@ -950,7 +938,7 @@ fn cli_reconcile_over_a_real_store_reports_and_settles() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// D1: the CLI loads its ToolCheck evidence from the log and the CAS, re-checks a blocked
+// D1: the CLI loads its ToolCheck evidence from the log, re-checks a blocked
 // dispatch, and enforces retry-once for an idempotent unknown.
 //
 // Defect D1 (repair brief item 4): `reconcile_cmd::run` built `ToolCheck::new(cas_root)` with no
@@ -1034,9 +1022,9 @@ fn d1_run_reconcile(db: &std::path::Path) -> (Option<i32>, String, String) {
     unreachable!("the retry loop returns")
 }
 
-/// D1: an idempotent (`RunApprovedTest`) dispatch whose log digest is in the CAS resolves to
-/// `Executed` — the CLI loads the digest from the log's `Executed` event and confirms the artifact
-/// is on disk. Before the fix the ToolCheck had no digest and no idempotency, so it stayed blocked.
+/// D1: an idempotent (`RunApprovedTest`) dispatch whose log holds its own `Executed` is settled —
+/// `pending_dispatches` finds nothing and reconcile appends nothing. The CAS is not consulted
+/// (D1, N3): the `Executed` is the evidence, not the artifact on disk.
 #[test]
 fn d1_reconcile_resolves_idempotent_dispatch_with_digest_in_cas() {
     let dir = d1_scratch("resolves-idempotent");
@@ -1197,14 +1185,14 @@ fn d1_second_retry_refuses() {
 
 // ---------------------------------------------------------------------------------------------
 // D1 + R4: evidence is per dispatch. An `Executed` settles only the dispatch it follows; a
-// re-dispatch is pending until its own evidence is found, and the CAS decides.
+// re-dispatch is pending until its own evidence is found. The CAS is not consulted (D1, N3).
 // ---------------------------------------------------------------------------------------------
 
 /// D1: a `RunApprovedTest` dispatch whose tool log reached `cas/` but whose `Executed` was never
 /// appended stays `unresolved retryable` — the CAS alone does not settle a dispatch, because the
 /// log holds no `Executed` naming the digest.
 #[test]
-fn d1_cas_digest_without_executed_stays_unresolved_retryable() {
+fn d1_cas_digest_without_executed_does_not_settle_dispatch() {
     let dir = d1_scratch("cas-without-executed");
     let db = dir.join("tsr.db");
     let cas = dir.join("cas");

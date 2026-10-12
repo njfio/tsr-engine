@@ -16,7 +16,6 @@
 //! happened, and the log is the only place it writes.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::process::ExitCode;
 
 use tsr_domain::{
@@ -53,82 +52,43 @@ pub enum Reconciled {
 
 /// A tool-specific check for a dispatch with no recorded outcome.
 ///
-/// Implementations answer from evidence the tool itself keeps — a log digest present in the
-/// CAS, an idempotency key the tool has seen — never from a guess. `Unknown` is a first-class
-/// answer: it is what makes the idempotent/non-idempotent split in §B6 meaningful.
+/// Implementations answer from evidence the log itself holds — the `Executed` that follows the
+/// dispatch — never from a guess. `Unknown` is a first-class answer: it is what makes the
+/// idempotent/non-idempotent split in §B6 meaningful.
 pub trait Reconciler {
     /// Whether a retry of this dispatch is safe: the tool yields at most one effect.
     fn idempotent(&self, candidate: &CandidateId) -> bool;
 
     /// The tool-specific check. `intent` is the dispatch's idempotency key.
     fn check(&self, candidate: &CandidateId, intent: &str) -> Reconciled;
-
-    /// Whether `digest` names an artifact the tool left behind — the evidence of the dispatch
-    /// whose `Executed` carried it. The default is "no": a check that keeps no artifacts cannot
-    /// confirm one, and an unconfirmed digest is not evidence.
-    fn digest_in_cas(&self, _digest: &Hash) -> bool {
-        false
-    }
 }
 
-/// The first [`Reconciler`]: answers from what the tool left behind.
+/// The first [`Reconciler`]: answers from what the log records.
 ///
-/// Two checks, both tool-specific and both cheap:
+/// One check, tool-specific and cheap: **an `Executed` that follows the dispatch** — the log's own
+/// record that the effect happened. The `Executed`'s `log_digest` is the artifact the tool produced
+/// for that dispatch, and the candidate's idempotency key is one the tool has seen.
 ///
-/// - **a log digest present in the CAS** — the tool wrote its log under `cas/<blake3>`; if the
-///   digest is on disk the effect happened, and the digest is the evidence;
-/// - **an idempotency key seen** — the tool's own record of the keys it has accepted; a key it
-///   has seen means the effect happened even if the log digest is gone.
-///
-/// Anything else is `Unknown`. The CAS root is the store's sibling `cas/` directory, which is
-/// where §B6 puts artifacts; a missing directory is not an error, it is simply no evidence.
+/// Anything else is `Unknown`. The CAS is **not** consulted: main's `exec` hashes the tool log but
+/// never writes it to `cas/`, so no artifact on disk can be linked to a dispatch without an
+/// `Executed` (D1, N3 — see `docs/m2-evidence.md`). A check that keeps no artifacts cannot confirm
+/// one, and an unconfirmed digest is not evidence.
 pub struct ToolCheck {
-    /// `cas/<blake3>` — artifacts (diffs, logs, feature views, bundles).
-    cas_root: std::path::PathBuf,
-    /// Idempotency keys the tool has seen, by candidate.
-    seen_keys: BTreeMap<CandidateId, BTreeSet<String>>,
     /// Candidates whose tool is idempotent. Absent means non-idempotent: the safe default.
     idempotent: BTreeSet<CandidateId>,
-    /// The log digest the tool produced for the dispatch being checked, by candidate. Evidence is
-    /// per dispatch (D1, R4): this is the digest of the `Executed` that immediately follows the
-    /// dispatch, never an earlier dispatch's.
-    log_digests: BTreeMap<CandidateId, Hash>,
 }
 
 impl ToolCheck {
-    /// A check over a CAS directory, with no keys seen and every tool non-idempotent.
-    pub fn new(cas_root: impl Into<std::path::PathBuf>) -> Self {
+    /// A check with every tool non-idempotent.
+    pub fn new() -> Self {
         Self {
-            cas_root: cas_root.into(),
-            seen_keys: BTreeMap::new(),
             idempotent: BTreeSet::new(),
-            log_digests: BTreeMap::new(),
         }
-    }
-
-    /// The CAS root this check reads.
-    pub fn cas_root(&self) -> &Path {
-        &self.cas_root
     }
 
     /// Declare a candidate's tool idempotent: a retry yields at most one effect.
     pub fn with_idempotent(mut self, candidate: CandidateId) -> Self {
         self.idempotent.insert(candidate);
-        self
-    }
-
-    /// Record that the tool has seen an idempotency key for this candidate.
-    pub fn with_seen_key(mut self, candidate: CandidateId, key: impl Into<String>) -> Self {
-        self.seen_keys
-            .entry(candidate)
-            .or_default()
-            .insert(key.into());
-        self
-    }
-
-    /// Record the log digest the tool produced for this candidate.
-    pub fn with_log_digest(mut self, candidate: CandidateId, digest: Hash) -> Self {
-        self.log_digests.insert(candidate, digest);
         self
     }
 
@@ -138,60 +98,28 @@ impl ToolCheck {
     /// from — never a guess:
     ///
     /// - a `Proposed` candidate whose action kind is idempotent (`RunApprovedTest`) marks the
-    ///   candidate idempotent: a retry yields at most one effect;
-    /// - the `Executed` that **immediately follows** a `Dispatched` is that dispatch's evidence:
-    ///   its `log_digest` is the artifact the tool produced for that dispatch, and the candidate's
-    ///   idempotency key is one the tool has seen. An `Executed` that follows a *later* `Dispatched`
-    ///   is that later dispatch's evidence, and an `Executed` with no `Dispatched` before it is no
-    ///   dispatch's evidence at all — a re-dispatch is pending until its own evidence is found.
+    ///   candidate idempotent: a retry yields at most one effect.
     ///
-    /// The CAS is consulted at check time ([`ToolCheck::check`]): a digest is evidence only if
-    /// `cas/<digest>` is on disk.
-    pub fn from_log(cas_root: impl Into<std::path::PathBuf>, events: &[(i64, Event)]) -> Self {
-        let mut check = Self::new(cas_root);
-        // The candidate of the last `Dispatched` seen, so an `Executed` can be attributed to the
-        // dispatch it follows rather than to the candidate's history.
-        let mut last_dispatched: Option<CandidateId> = None;
+    /// A dispatch is *pending* only when no `Executed` follows it ([`pending_dispatches`]), so the
+    /// log holds no `Executed` to name a digest for it: the check answers `Unknown` and the caller
+    /// records the `Unresolved`. The CAS is not consulted (D1, N3): main's `exec` never writes the
+    /// tool log to `cas/`, so a digest on disk cannot be linked to a dispatch without an `Executed`.
+    pub fn from_log(events: &[(i64, Event)]) -> Self {
+        let mut check = Self::new();
         for (_, e) in events {
-            match &e.kind {
-                EventKind::Proposed { candidate } => {
-                    if candidate.kind == ActionKind::RunApprovedTest {
-                        check.idempotent.insert(candidate.id);
-                    }
+            if let EventKind::Proposed { candidate } = &e.kind {
+                if candidate.kind == ActionKind::RunApprovedTest {
+                    check.idempotent.insert(candidate.id);
                 }
-                EventKind::Dispatched { candidate, .. } => {
-                    // A new dispatch re-opens the candidate: the evidence of an earlier dispatch
-                    // is not this dispatch's evidence (D1, R4). Clear it, so only the `Executed`
-                    // that follows *this* dispatch is recorded.
-                    check.seen_keys.remove(candidate);
-                    check.log_digests.remove(candidate);
-                    last_dispatched = Some(*candidate);
-                }
-                EventKind::Executed {
-                    candidate,
-                    log_digest,
-                    ..
-                } => {
-                    if last_dispatched == Some(*candidate) {
-                        check
-                            .seen_keys
-                            .entry(*candidate)
-                            .or_default()
-                            .insert(intent_key(candidate));
-                        if let Some(digest) = log_digest {
-                            check.log_digests.insert(*candidate, *digest);
-                        }
-                    }
-                }
-                _ => {}
             }
         }
         check
     }
+}
 
-    /// Whether `cas/<digest>` exists.
-    fn digest_in_cas(&self, digest: &Hash) -> bool {
-        self.cas_root.join(digest.to_hex()).is_file()
+impl Default for ToolCheck {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -200,35 +128,9 @@ impl Reconciler for ToolCheck {
         self.idempotent.contains(candidate)
     }
 
-    fn digest_in_cas(&self, digest: &Hash) -> bool {
-        self.cas_root.join(digest.to_hex()).is_file()
-    }
-
-    fn check(&self, candidate: &CandidateId, intent: &str) -> Reconciled {
-        // The tool's own record of the key it accepted is the strongest evidence: it means the
-        // effect happened even if the log has since been pruned.
-        if self
-            .seen_keys
-            .get(candidate)
-            .is_some_and(|keys| keys.contains(intent))
-        {
-            let log_digest = self.log_digests.get(candidate).copied();
-            return Reconciled::Executed {
-                exit_code: None,
-                log_digest,
-                duration_ms: 0,
-            };
-        }
-        // A log digest present in the CAS is the effect's own artifact.
-        if let Some(digest) = self.log_digests.get(candidate) {
-            if self.digest_in_cas(digest) {
-                return Reconciled::Executed {
-                    exit_code: None,
-                    log_digest: Some(*digest),
-                    duration_ms: 0,
-                };
-            }
-        }
+    fn check(&self, _candidate: &CandidateId, _intent: &str) -> Reconciled {
+        // A pending dispatch has no `Executed` following it, so the log holds no evidence to
+        // settle it: the check cannot say. The CAS is not consulted (D1, N3).
         Reconciled::Unknown
     }
 }
@@ -245,11 +147,6 @@ pub struct PendingDispatch {
     /// Whether an idempotent unknown was already recorded for this dispatch after its last
     /// `Dispatched`. §B6 allows one retry; a second is refused.
     pub retried: bool,
-    /// The log digest of the `Executed` that immediately follows this dispatch, if the log holds
-    /// one. Evidence is **per dispatch** (D1, R4): an `Executed` settles only the dispatch it
-    /// follows, so a re-dispatch is pending until its own evidence is found. The digest is the
-    /// artifact the tool wrote for *this* dispatch; the CAS is consulted at check time.
-    pub evidence_digest: Option<Hash>,
 }
 
 /// The idempotency key of a dispatch. `DispatchIntent.idempotency_key` is not part of the
@@ -278,30 +175,18 @@ pub fn pending_dispatches(events: &[(i64, Event)]) -> Vec<PendingDispatch> {
     let mut dispatched: BTreeMap<CandidateId, (i64, EventId)> = BTreeMap::new();
     let mut settled: BTreeSet<CandidateId> = BTreeSet::new();
     let mut retried: BTreeSet<CandidateId> = BTreeSet::new();
-    // The log digest of the `Executed` that immediately follows the last `Dispatched` of a
-    // candidate — the evidence of *that* dispatch, and of no other (D1, R4).
-    let mut evidence: BTreeMap<CandidateId, Hash> = BTreeMap::new();
     for (seq, e) in events {
         match &e.kind {
             EventKind::Dispatched { candidate, .. } => {
-                // A later dispatch re-opens the candidate. The earlier dispatch's evidence is not
-                // this dispatch's evidence, so it is cleared too: a re-dispatch is pending until
-                // its own `Executed` is found. The retry budget is **not** reset (D1, R4): "retry
-                // once" counts automatic retries per candidate across all its dispatches, so a
-                // second retry of the same candidate refuses.
+                // A later dispatch re-opens the candidate: a re-dispatch is pending until its own
+                // `Executed` is found. The retry budget is **not** reset (D1, R4): "retry once"
+                // counts automatic retries per candidate across all its dispatches, so a second
+                // retry of the same candidate refuses.
                 dispatched.insert(*candidate, (*seq, e.id));
                 settled.remove(candidate);
-                evidence.remove(candidate);
             }
-            EventKind::Executed {
-                candidate,
-                log_digest,
-                ..
-            } => {
+            EventKind::Executed { candidate, .. } => {
                 settled.insert(*candidate);
-                if let Some(digest) = log_digest {
-                    evidence.insert(*candidate, *digest);
-                }
             }
             EventKind::Unresolved { candidate, reason } => {
                 if reason == CANCELLED {
@@ -319,7 +204,6 @@ pub fn pending_dispatches(events: &[(i64, Event)]) -> Vec<PendingDispatch> {
         .filter(|(c, _)| !settled.contains(c))
         .map(|(candidate, (_, dispatched))| PendingDispatch {
             intent: intent_key(&candidate),
-            evidence_digest: evidence.get(&candidate).copied(),
             candidate,
             dispatched,
             retried: retried.contains(&candidate),
@@ -372,17 +256,11 @@ pub fn reconcile_one(
 ) -> Result<Resolution, StoreError> {
     let idempotent = reconciler.idempotent(&pending.candidate);
     // D1, R4: the evidence is the dispatch's own. An `Executed` that follows this `Dispatched`
-    // names the artifact the tool wrote for it; the CAS is asked whether that artifact is on disk.
-    // A re-dispatch has no such `Executed` yet, so it stays pending — never settled by an earlier
-    // dispatch's effect.
-    let reconciled = match pending.evidence_digest {
-        Some(digest) if reconciler.digest_in_cas(&digest) => Reconciled::Executed {
-            exit_code: None,
-            log_digest: Some(digest),
-            duration_ms: 0,
-        },
-        _ => reconciler.check(&pending.candidate, &pending.intent),
-    };
+    // settles it; a re-dispatch has no such `Executed` yet, so it stays pending — never settled by
+    // an earlier dispatch's effect. The CAS is not consulted (D1, N3): main's `exec` never writes
+    // the tool log to `cas/`, so no artifact on disk can be linked to a dispatch without an
+    // `Executed`.
+    let reconciled = reconciler.check(&pending.candidate, &pending.intent);
     let (kind, resolution) = match reconciled {
         Reconciled::Executed {
             exit_code,
@@ -532,10 +410,10 @@ pub fn run(task_hex: &str, store_path: Option<&str>) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let cas_root = path.parent().unwrap_or_else(|| Path::new(".")).join("cas");
-    // D1: the check's evidence comes from the log and the CAS, not from an empty ToolCheck.
-    // The log holds the digests of `Executed` events and the action kinds that decide
-    // idempotency; the CAS holds the artifacts those digests name.
+    // D1: the check's evidence comes from the log, not from an empty ToolCheck. The log holds the
+    // `Executed` that settles a dispatch and the action kinds that decide idempotency. The CAS is
+    // not consulted (D1, N3): main's `exec` never writes the tool log to `cas/`, so no artifact on
+    // disk can be linked to a dispatch without an `Executed`.
     let events = match store.by_task(&task) {
         Ok(e) => e,
         Err(e) => {
@@ -543,7 +421,7 @@ pub fn run(task_hex: &str, store_path: Option<&str>) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let reconciler = ToolCheck::from_log(cas_root, &events);
+    let reconciler = ToolCheck::from_log(&events);
     let recorded_at = now_iso8601();
 
     let resolutions = match reconcile_task(&store, &task, &reconciler, &recorded_at) {
