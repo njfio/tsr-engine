@@ -1,4 +1,5 @@
 //! The common decision event as a **pure view** over the log (PRD §B8, §B7).
+//! A1/A3/A11: events are indexed within their own task, and a forecast must precede the commitment.
 //!
 //! One row per commitment of a gated action — chosen actions only, so an unchosen `Proposed`
 //! candidate is never a row. Each row carries the task, the commitment's event id and its 0-based
@@ -69,25 +70,37 @@ impl DecisionRow {
 /// Build the common decision event as a pure view over `events` (in sequence order).
 ///
 /// A row is emitted for every `Committed` whose decision is `Selected` and whose candidate is a
-/// gated action. An unchosen `Proposed` candidate — one never committed — yields no row. The
-/// commitment's index is its 0-based position in the task's log; a forecast is paired when it names
-/// the committed candidate and its `state_version` equals that index.
+/// gated action. An unchosen `Proposed` candidate — one never committed — yields no row.
+///
+/// **A1/A3/A11: the index is task-local.** Main's hook records a forecast's `state_version` as the
+/// number of events in the task's own log (`hook.rs` `event_count`), and the brief says "0-based
+/// index in the task's log". So each event is indexed within its own task, not by its position in
+/// the whole session log: a session that holds several tasks would otherwise shift every task after
+/// the first. The commitment's `index` is its 0-based position in its task's log.
+///
+/// A forecast is paired when it is on the common event, names the committed candidate, carries
+/// `state_version` equal to that task-local index, and was recorded **before** the commitment in
+/// the task's log. A forecast appended after the commitment — after the execute or the close —
+/// never pairs (§B9's post-execution forecast edit).
 pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
     use std::collections::HashMap;
 
     let common = decision_event_id();
 
-    // Per task: the candidate kinds proposed, and the forecasts recorded, in log order.
+    // Per task: the candidate kinds proposed, and the forecasts recorded, in log order. Each
+    // forecast is stored with its 0-based index in the task's own log, so the pairing rule can
+    // require it to precede the commitment.
     let mut kinds: HashMap<CandidateId, ActionKind> = HashMap::new();
-    let mut forecasts: HashMap<CandidateId, Vec<Forecast>> = HashMap::new();
-    // The 0-based index of each event in the session's log. `reconstruct`'s M0 invariant
-    // (`every_gated_action_has_prior_forecast_at_same_state_version`) compares a forecast's
-    // `state_version` against the commitment's index in the session's event list, so the pairing
-    // rule uses the session-global index, not the task-local one.
+    let mut forecasts: HashMap<CandidateId, Vec<(u64, Forecast)>> = HashMap::new();
+    // The 0-based index of each event within its own task's log.
     let mut event_index: HashMap<EventId, u64> = HashMap::new();
+    // The running count of events seen so far for each task.
+    let mut task_len: HashMap<TaskId, u64> = HashMap::new();
 
-    for (i, (_, e)) in events.iter().enumerate() {
-        event_index.insert(e.id, i as u64);
+    for (_, e) in events {
+        let local = task_len.entry(e.task).or_insert(0);
+        event_index.insert(e.id, *local);
+        *local += 1;
         match &e.kind {
             EventKind::Proposed { candidate } => {
                 kinds.insert(candidate.id, candidate.kind);
@@ -100,7 +113,7 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
                     forecasts
                         .entry(*candidate)
                         .or_default()
-                        .push(forecast.clone());
+                        .push((event_index[&e.id], forecast.clone()));
                 }
             }
             _ => {}
@@ -135,8 +148,9 @@ pub fn decision_rows(events: &[(i64, Event)]) -> Vec<DecisionRow> {
             .get(candidate)
             .map(|fs| {
                 fs.iter()
-                    .filter(|f| f.state_version == index)
-                    .cloned()
+                    // The forecast must precede the commitment in the task's log.
+                    .filter(|(at, f)| *at < index && f.state_version == index)
+                    .map(|(_, f)| f.clone())
                     .collect()
             })
             .unwrap_or_default();
@@ -565,6 +579,156 @@ mod tests {
         let rows = decision_rows(&events);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].forecasts.is_empty());
+    }
+
+    // ---- A1/A3/A11: the index is task-local, and a forecast must precede the commitment ----
+
+    /// A1: two tasks in one session. Main's hook records a forecast's `state_version` as the number
+    /// of events in the **task's own** log, so each task's commitment is paired by its task-local
+    /// index. Under the old session-global index the second task's forecast (task-local 3) would be
+    /// compared against its session-global index (7) and never pair.
+    #[test]
+    fn a1_two_tasks_in_one_session_pair_by_task_local_index() {
+        let t1 = TaskId(Hash::of(&[b"task-1"]));
+        let t2 = TaskId(Hash::of(&[b"task-2"]));
+        let c1 = candidate(ActionKind::ProposePatch, b"p1");
+        let c2 = candidate(ActionKind::RunApprovedTest, b"p2");
+        let events = vec![
+            // Task 1: open(0), propose(1), forecast(2), commit(3).
+            (1, ev(&t1, EventKind::TaskOpened { task: t1 }, b"o1")),
+            (
+                2,
+                ev(
+                    &t1,
+                    EventKind::Proposed {
+                        candidate: c1.clone(),
+                    },
+                    b"p1",
+                ),
+            ),
+            (
+                3,
+                ev(&t1, forecast(c1.id, 0.9, 3, Forecaster::Generator), b"f1"),
+            ),
+            (4, ev(&t1, committed(c1.id, 0.5), b"c1")),
+            // Task 2: open(0), propose(1), forecast(2), commit(3) — task-local, not 4..7.
+            (5, ev(&t2, EventKind::TaskOpened { task: t2 }, b"o2")),
+            (
+                6,
+                ev(
+                    &t2,
+                    EventKind::Proposed {
+                        candidate: c2.clone(),
+                    },
+                    b"p2",
+                ),
+            ),
+            (
+                7,
+                ev(&t2, forecast(c2.id, 0.8, 3, Forecaster::Generator), b"f2"),
+            ),
+            (8, ev(&t2, committed(c2.id, 0.5), b"c2")),
+        ];
+        let rows = decision_rows(&events);
+        assert_eq!(rows.len(), 2, "one row per task");
+        assert_eq!(rows[0].task, t1);
+        assert_eq!(rows[0].index, 3, "task-local index");
+        assert_eq!(rows[0].generator_raw(), Some(0.9));
+        assert_eq!(rows[1].task, t2);
+        assert_eq!(rows[1].index, 3, "task-local index, not session-global 7");
+        assert_eq!(
+            rows[1].generator_raw(),
+            Some(0.8),
+            "the second task's forecast pairs by its task-local index"
+        );
+    }
+
+    /// A3: a forecast appended **after** the commitment never pairs, even at the right version.
+    #[test]
+    fn a3_a_forecast_after_the_commitment_never_pairs() {
+        let t = task();
+        let c = candidate(ActionKind::ProposePatch, b"p");
+        let events = vec![
+            (1, ev(&t, EventKind::TaskOpened { task: t }, b"open")),
+            (
+                2,
+                ev(
+                    &t,
+                    EventKind::Proposed {
+                        candidate: c.clone(),
+                    },
+                    b"prop",
+                ),
+            ),
+            (3, ev(&t, committed(c.id, 0.5), b"commit")),
+            // The commitment's index is 2; this forecast carries version 2 but is recorded after it.
+            (
+                4,
+                ev(&t, forecast(c.id, 0.9, 2, Forecaster::Generator), b"late"),
+            ),
+        ];
+        let rows = decision_rows(&events);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].index, 2);
+        assert!(
+            rows[0].forecasts.is_empty(),
+            "a forecast recorded after the commitment never pairs (§B9 post-execution edit)"
+        );
+    }
+
+    /// A11: a forecast appended after the execute (or the close) never pairs either.
+    #[test]
+    fn a11_a_forecast_after_the_execute_never_pairs() {
+        let t = task();
+        let c = candidate(ActionKind::RunApprovedTest, b"t");
+        let events = vec![
+            (1, ev(&t, EventKind::TaskOpened { task: t }, b"open")),
+            (
+                2,
+                ev(
+                    &t,
+                    EventKind::Proposed {
+                        candidate: c.clone(),
+                    },
+                    b"prop",
+                ),
+            ),
+            (3, ev(&t, committed(c.id, 0.5), b"commit")),
+            (
+                4,
+                ev(
+                    &t,
+                    EventKind::Executed {
+                        candidate: c.id,
+                        exit_code: Some(0),
+                        log_digest: None,
+                        duration_ms: 1,
+                    },
+                    b"exec",
+                ),
+            ),
+            (
+                5,
+                ev(&t, forecast(c.id, 0.9, 2, Forecaster::Generator), b"late"),
+            ),
+            (
+                6,
+                ev(
+                    &t,
+                    EventKind::TaskClosed {
+                        task: t,
+                        reason: "done".into(),
+                    },
+                    b"close",
+                ),
+            ),
+        ];
+        let rows = decision_rows(&events);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].forecasts.is_empty(),
+            "a forecast after the execute or the close never pairs"
+        );
     }
 
     #[test]

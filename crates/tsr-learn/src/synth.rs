@@ -505,10 +505,11 @@ pub fn generate(store: &Store) -> Result<Corpus, LearnError> {
 
                 // The forecast, at the version the commitment will occupy. The commitment is
                 // pushed after the generator forecast (and the operator forecast, when present),
-                // so its 0-based index in the session log is `global` plus those events.
-                // `reconstruct`'s M0 invariant compares this against the commitment's index in
-                // the session's event list, so the version is the session-global index.
-                let commit_version = global + 1 + u64::from(plan.operator_forecasts);
+                // so its 0-based index in the **task's own log** is `step` plus those events.
+                // Main's hook records a forecast's `state_version` as the number of events in the
+                // task's own log (`hook.rs` `event_count`), and `decision_rows` pairs on that
+                // task-local index (A1/A3/A11), so the version is task-local, not session-global.
+                let commit_version = step as u64 + 1 + u64::from(plan.operator_forecasts);
                 let f = Forecast::new(
                     crate::decision_event_id(),
                     Horizon::TaskClose,

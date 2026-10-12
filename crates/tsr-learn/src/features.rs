@@ -150,6 +150,11 @@ pub fn spec_for_families(families: &[String]) -> FeatureSpec {
     // Budget-ceiling-missing indicator (binary: width 0.0).
     names.push("budget_ceiling_missing".to_string());
     widths.push(0.0);
+    // Generator-missing indicator (binary: width 0.0). A1/A3/A11: a missing generator forecast is
+    // not imputed as p = 0.5 — the logit is 0 **only** with this indicator set, so the model can
+    // tell "the generator said 0.5" from "the generator said nothing".
+    names.push("generator_missing".to_string());
+    widths.push(0.0);
 
     FeatureSpec {
         version: FEATURE_SCHEMA_VERSION.to_string(),
@@ -234,7 +239,8 @@ pub fn pre_action_counts(events_before: &[(i64, Event)]) -> PreActionCounts {
 /// `index_row` is the task's index row. `action` is the committed action's kind. `families` is the
 /// fit slice's families, in name order. `generator_raw` is the generator's raw probability on the
 /// common event for this commitment, if the generator forecast it; `None` yields a generator-logit
-/// of `0.0` and zero interactions.
+/// of `0.0`, zero interactions, and `generator_missing = 1.0` (the logit is 0 only with the
+/// indicator set — a missing forecast is never imputed as p = 0.5).
 pub fn extract(
     spec: &FeatureSpec,
     events_before: &[(i64, Event)],
@@ -282,6 +288,15 @@ pub fn extract(
                 },
                 "budget_ceiling_missing" => {
                     if index_row.tool_ms_ceiling.is_none() {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                // A1/A3/A11: the logit is 0 only when the generator forecast is missing, and this
+                // indicator says so; a present forecast of 0.5 yields logit 0 with the indicator 0.
+                "generator_missing" => {
+                    if generator_raw.is_none() {
                         1.0
                     } else {
                         0.0
@@ -375,6 +390,7 @@ mod tests {
             .contains(&"family:b_x_generator_logit".to_string()));
         assert!(spec.names.contains(&"inspections_so_far".to_string()));
         assert!(spec.names.contains(&"budget_ceiling_missing".to_string()));
+        assert!(spec.names.contains(&"generator_missing".to_string()));
         assert_eq!(spec.names.len(), spec.numeric_widths.len());
         assert_eq!(spec.absent.len(), 4);
     }
@@ -496,6 +512,25 @@ mod tests {
         );
         assert_eq!(fv2.get(&spec, "budget_fraction_used"), Some(0.0));
         assert_eq!(fv2.get(&spec, "budget_ceiling_missing"), Some(1.0));
+    }
+
+    /// A1/A3/A11: a missing generator forecast is not imputed as p = 0.5. The logit is 0 **only**
+    /// with `generator_missing = 1`; a present forecast of 0.5 yields logit 0 with the indicator 0.
+    #[test]
+    fn a_missing_generator_forecast_sets_the_indicator_not_a_fake_logit() {
+        let spec = spec_for_families(&["a".to_string()]);
+        let row = index_row("a", Some(200));
+        let events = vec![ev(proposed(ActionKind::Inspect, b"i1"), b"1")];
+
+        let missing = extract(&spec, &events, &row, ActionKind::Inspect, &[], None);
+        assert_eq!(missing.get(&spec, "generator_missing"), Some(1.0));
+        assert_eq!(missing.get(&spec, "generator_logit"), Some(0.0));
+
+        let present = extract(&spec, &events, &row, ActionKind::Inspect, &[], Some(0.5));
+        assert_eq!(present.get(&spec, "generator_missing"), Some(0.0));
+        assert_eq!(present.get(&spec, "generator_logit"), Some(0.0));
+        // The two vectors differ: the indicator distinguishes "said 0.5" from "said nothing".
+        assert_ne!(missing.values, present.values);
     }
 
     #[test]
