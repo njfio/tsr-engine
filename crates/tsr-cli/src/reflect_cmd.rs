@@ -257,6 +257,12 @@ fn unmet_name(k: &tsr_domain::UnmetKind) -> &'static str {
     }
 }
 
+/// Whether a preference's text is a contrast's dimension (`tsr_ledger::dimension_text`) rather than
+/// a task's own intent. A dimension text always opens with this fixed phrase.
+fn is_dimension_text(text: &str) -> bool {
+    text.starts_with("the dimension this contrast clarified")
+}
+
 /// The first 12 hex characters of a hash, for a screen that must stay one line wide.
 fn short(h: &Hash) -> String {
     let hex = h.to_hex();
@@ -277,7 +283,10 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     let collective = tsr_ledger::fold(events, root);
     for entry in &collective.entries {
         if matches!(entry.preference.scope, tsr_domain::Scope::Task(t) if t == *task) {
-            if intent.is_none() {
+            // The intent is the task's own intent, not a rejection's dimension. A rejection on a
+            // task with no criteria expands into a task-scoped preference whose text is the
+            // contrast's dimension (`dimension_text`); that is a criterion, never the intent.
+            if intent.is_none() && !is_dimension_text(&entry.preference.text) {
                 intent = Some(entry.preference.text.clone());
             }
             criteria.push(CriterionRow {
@@ -303,9 +312,20 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     // --- Imagination: every candidate considered, its source, and conflict exclusions. --------
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut committed: Option<CandidateId> = None;
+    // The propensity comes from the commit record of the candidate the row shows: the *last*
+    // `Committed` (the one that set `committed`), not the first commit in the log. Two commits of
+    // the same candidate — 0.25 then 0.75 — must show 0.7500.
+    let mut committed_propensity: Option<f64> = None;
     for ev in &evs {
         match &ev.kind {
             EventKind::Proposed { candidate } => candidates.push(candidate.clone()),
+            EventKind::Committed {
+                candidate,
+                decision: Decision::Selected { propensity, .. },
+            } => {
+                committed = Some(*candidate);
+                committed_propensity = Some(*propensity);
+            }
             EventKind::Committed { candidate, .. } => committed = Some(*candidate),
             _ => {}
         }
@@ -332,13 +352,6 @@ pub fn build_mirror(task: &TaskId, events: &[(i64, Event)], root: Hash) -> Mirro
     // --- Belief: the committed candidate with each forecaster's number. -----------------------
     // Belief is about the *committed* candidate: only its forecasts are listed. The propensity is
     // the committed decision's propensity (the commit record), not a per-forecaster guess.
-    let committed_propensity: Option<f64> = evs.iter().find_map(|ev| match &ev.kind {
-        EventKind::Committed {
-            decision: Decision::Selected { propensity, .. },
-            ..
-        } => Some(*propensity),
-        _ => None,
-    });
     let mut belief_rows: Vec<BeliefRow> = Vec::new();
     for ev in &evs {
         if let EventKind::Forecast {
