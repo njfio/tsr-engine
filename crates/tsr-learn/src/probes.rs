@@ -68,15 +68,20 @@ impl std::fmt::Display for Leak {
     }
 }
 
-/// The result of running the probes: the leaks found (empty means clean).
+/// The result of running the probes: the leaks found (empty means clean) and the refusals -- a
+/// probe that could not examine the data it was given (a row whose task has no events, or a probe
+/// that examined no rows, or fewer rows than the dataset's held-out slice). A refusal is not a
+/// clean pass: the caller must exit 2 naming the probe and what is missing.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProbeReport {
     pub leaks: Vec<Leak>,
+    #[serde(default)]
+    pub refusals: Vec<String>,
 }
 
 impl ProbeReport {
     pub fn is_clean(&self) -> bool {
-        self.leaks.is_empty()
+        self.leaks.is_empty() && self.refusals.is_empty()
     }
 }
 
@@ -104,11 +109,24 @@ pub fn probe_post_action(
         by_task.entry(e.task).or_default().push((*seq, e.clone()));
     }
     let mut leaks = Vec::new();
+    let mut refusals = Vec::new();
+    let held_out = ds.rows.iter().filter(|r| r.side == Side::HeldOut).count();
+    let mut examined = 0usize;
     for row in &ds.rows {
         let Some(index_row) = index_of.get(&row.task) else {
             continue;
         };
-        let task_events = &by_task[&row.task];
+        // F9/B3: never index into data the probe did not check. A row whose task has no events in
+        // the log is a refusal naming the file, not a panic.
+        let Some(task_events) = by_task.get(&row.task) else {
+            refusals.push(format!(
+                "probe post_action_events refused: events.jsonl holds no event for task {} \
+                 (row {}), so the row cannot be recomputed",
+                row.task,
+                row.id.to_hex()
+            ));
+            continue;
+        };
         let before: Vec<(i64, Event)> = task_events
             .iter()
             .take_while(|(_, e)| e.id != row.commitment)
@@ -119,18 +137,29 @@ pub fn probe_post_action(
         // caught, not just a leak in the features. `decision_rows` needs the commitment event to
         // form a row, so we pass the task's log up to and including it; the pairing is task-local,
         // so events after the commitment cannot change the result.
+        // F9/B3: never index into data the probe did not check. A row whose commitment event is
+        // absent from the log is a refusal naming the file and what is missing, not a panic.
+        let Some(commitment) = task_events
+            .iter()
+            .find(|(_, e)| e.id == row.commitment)
+            .cloned()
+        else {
+            refusals.push(format!(
+                "probe post_action_events refused: events.jsonl holds no commitment event {} for \
+                 task {} (row {}), so the row cannot be recomputed",
+                row.commitment,
+                row.task,
+                row.id.to_hex()
+            ));
+            continue;
+        };
         let upto: Vec<(i64, Event)> = task_events
             .iter()
             .take_while(|(_, e)| e.id != row.commitment)
             .cloned()
-            .chain(std::iter::once(
-                task_events
-                    .iter()
-                    .find(|(_, e)| e.id == row.commitment)
-                    .cloned()
-                    .expect("the commitment is in the task's log"),
-            ))
+            .chain(std::iter::once(commitment))
             .collect();
+        examined += 1;
         let raw = crate::decision::decision_rows(&upto)
             .into_iter()
             .find(|dr| dr.commitment == row.commitment)
@@ -150,7 +179,26 @@ pub fn probe_post_action(
         }
     }
     let _ = spec;
-    ProbeReport { leaks }
+    // F9/B3: a probe that examines no rows, or fewer rows than the dataset's held-out slice, is
+    // refused naming the probe and the counts -- never skipped, never a silent clean pass. An
+    // absent index (no `tasks.jsonl`) is not a probe that examined nothing: the CLI refuses a
+    // missing or empty index before it reaches here, so the refusal is gated on a present index.
+    if !index.is_empty() {
+        if examined == 0 {
+            refusals.push(format!(
+                "probe post_action_events refused: it examined 0 of {} rows (the task index matches \
+                 no row), so it checked nothing",
+                ds.rows.len()
+            ));
+        } else if examined < held_out {
+            refusals.push(format!(
+                "probe post_action_events refused: it examined {examined} of {} rows, fewer than \
+                 the held-out slice of {held_out}",
+                ds.rows.len()
+            ));
+        }
+    }
+    ProbeReport { leaks, refusals }
 }
 
 /// Probe (b): a single feature that separates the fit slice's labels perfectly by a threshold
@@ -168,7 +216,10 @@ pub fn probe_label_reach(ds: &Dataset, spec: &FeatureSpec) -> ProbeReport {
         .collect();
     let mut leaks = Vec::new();
     if fit.is_empty() {
-        return ProbeReport { leaks };
+        return ProbeReport {
+            leaks,
+            refusals: Vec::new(),
+        };
     }
     for (i, name) in spec.names.iter().enumerate() {
         let mut true_vals: Vec<f64> = Vec::new();
@@ -207,7 +258,10 @@ pub fn probe_label_reach(ds: &Dataset, spec: &FeatureSpec) -> ProbeReport {
             });
         }
     }
-    ProbeReport { leaks }
+    ProbeReport {
+        leaks,
+        refusals: Vec::new(),
+    }
 }
 
 /// Probe (c): no task, clone group or (under repo) lineage on two sides, and under time every
@@ -384,7 +438,10 @@ pub fn probe_boundary(ds: &Dataset, index: &[TaskIndexRow]) -> ProbeReport {
         }
     }
 
-    ProbeReport { leaks }
+    ProbeReport {
+        leaks,
+        refusals: Vec::new(),
+    }
 }
 
 /// Probe (c), the split manifest: read `split.json` and check it against the rows' sides, then
@@ -403,7 +460,10 @@ pub fn probe_split_manifest(ds: &Dataset, split_json: &Path) -> ProbeReport {
                 row: "split.json".to_string(),
                 detail: format!("cannot read {}: {e}", split_json.display()),
             });
-            return ProbeReport { leaks };
+            return ProbeReport {
+                leaks,
+                refusals: Vec::new(),
+            };
         }
     };
     let manifest: crate::dataset::SplitManifest = match serde_json::from_str(&text) {
@@ -414,7 +474,10 @@ pub fn probe_split_manifest(ds: &Dataset, split_json: &Path) -> ProbeReport {
                 row: "split.json".to_string(),
                 detail: format!("{} is not a split manifest: {e}", split_json.display()),
             });
-            return ProbeReport { leaks };
+            return ProbeReport {
+                leaks,
+                refusals: Vec::new(),
+            };
         }
     };
 
@@ -470,7 +533,10 @@ pub fn probe_split_manifest(ds: &Dataset, split_json: &Path) -> ProbeReport {
             ),
         });
     }
-    ProbeReport { leaks }
+    ProbeReport {
+        leaks,
+        refusals: Vec::new(),
+    }
 }
 
 /// Run all three probes over a dataset.
@@ -486,13 +552,16 @@ pub fn run_all(
     split_json: Option<&Path>,
 ) -> ProbeReport {
     let mut leaks = Vec::new();
-    leaks.extend(probe_post_action(ds, events, index, spec, extractor).leaks);
+    let mut refusals = Vec::new();
+    let a = probe_post_action(ds, events, index, spec, extractor);
+    leaks.extend(a.leaks);
+    refusals.extend(a.refusals);
     leaks.extend(probe_label_reach(ds, spec).leaks);
     leaks.extend(probe_boundary(ds, index).leaks);
     if let Some(path) = split_json {
         leaks.extend(probe_split_manifest(ds, path).leaks);
     }
-    ProbeReport { leaks }
+    ProbeReport { leaks, refusals }
 }
 
 /// The default extractor: the features@v1 extractor, which reads only pre-action events.

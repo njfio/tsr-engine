@@ -162,28 +162,12 @@ fn read_log(store: Option<&Path>, events: Option<&Path>) -> Result<Vec<(i64, Eve
 }
 
 /// Read an `events.jsonl` file: one JSON object per line, each a bare `Event` or `{"seq": n, "event": …}`.
+///
+/// F9/B3: this goes through the one loader (`tsr_learn::dataset::read_events_records`), so a line
+/// that is valid JSON but not an event record (`{}`, `null`) is refused naming the file, the line
+/// and the missing or wrong field -- never exit 1.
 fn read_events_file(path: &Path) -> Result<Vec<(i64, Event)>, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let mut events: Vec<(i64, Event)> = Vec::new();
-    for (idx, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = serde_json::from_str(line)
-            .map_err(|e| format!("{} line {}: {e}", path.display(), idx + 1))?;
-        let (seq, event_value) = match value.get("event") {
-            Some(ev) => (value.get("seq").and_then(|s| s.as_i64()), ev.clone()),
-            None => (None, value),
-        };
-        let event: Event = serde_json::from_value(event_value)
-            .map_err(|e| format!("{} line {}: {e}", path.display(), idx + 1))?;
-        let seq = seq.unwrap_or_else(|| events.len() as i64 + 1);
-        events.push((seq, event));
-    }
-    events.sort_by_key(|(seq, _)| *seq);
-    Ok(events)
+    tsr_learn::dataset::read_events_records(path).map_err(|e| e.to_string())
 }
 
 /// F9/B3: refuse a JSONL input that is not data.
@@ -297,7 +281,9 @@ fn run_dataset(
         Ok(l) => l,
         Err(e) => {
             eprintln!("tsr: {e}");
-            return std::process::ExitCode::from(1);
+            // F9/B3: an events file that is not data is bad input -- exit 2, never exit 1.
+            let code = if events.is_some() { 2 } else { 1 };
+            return std::process::ExitCode::from(code);
         }
     };
     // R6: `--tasks` is required. Without it every task silently becomes its own lineage with family
@@ -305,16 +291,18 @@ fn run_dataset(
     let index = match read_task_index(tasks) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("tsr: cannot read task index: {e}");
-            return std::process::ExitCode::from(1);
+            // F9/B3: a tasks.jsonl line that is not a task record is bad input -- exit 2.
+            eprintln!("tsr: dataset refused: {e}");
+            return std::process::ExitCode::from(2);
         }
     };
     let labels = match labels {
         Some(path) => match read_labels(path) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("tsr: cannot read labels: {e}");
-                return std::process::ExitCode::from(1);
+                // F9/B3: a labels.jsonl line that is not a label record is bad input -- exit 2.
+                eprintln!("tsr: dataset refused: {e}");
+                return std::process::ExitCode::from(2);
             }
         },
         None => Vec::new(),
@@ -356,6 +344,11 @@ fn run_dataset(
                     leak.row,
                     leak.detail
                 );
+            }
+            // F9/B3: a probe that examined no rows, or fewer rows than the held-out slice, is
+            // refused naming the probe and the counts -- never skipped.
+            for refusal in &report.refusals {
+                eprintln!("tsr: {refusal}");
             }
             return std::process::ExitCode::from(2);
         }

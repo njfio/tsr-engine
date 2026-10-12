@@ -194,34 +194,18 @@ pub fn read_events(dir: &Path) -> Result<Vec<(i64, tsr_domain::Event)>, LearnErr
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = std::fs::read_to_string(path)?;
-    let mut out = Vec::new();
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let v: serde_json::Value = serde_json::from_str(line)?;
-        let seq = v["seq"]
-            .as_i64()
-            .ok_or_else(|| LearnError::Invalid("events.jsonl line has no seq".into()))?;
-        let event: tsr_domain::Event = serde_json::from_value(v["event"].clone())?;
-        out.push((seq, event));
-    }
-    Ok(out)
+    // F9/B3: the one loader, so a line that is not an event record names the file, the line and
+    // the missing or wrong field.
+    crate::dataset::read_events_records(&path)
 }
 
 /// Load a dataset directory written by `write_dataset`.
 ///
 /// Reads `rows.jsonl`, `split.json`, `features.json` and `data-manifest.json`.
 pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
-    let rows_text = std::fs::read_to_string(dir.join("rows.jsonl"))?;
-    let mut rows: Vec<Row> = Vec::new();
-    for line in rows_text.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        rows.push(serde_json::from_str(line)?);
-    }
+    // F9/B3: rows.jsonl goes through the one loader too, so a line that is not a row record names
+    // the file, the line and the missing or wrong field.
+    let rows: Vec<Row> = crate::dataset::read_records(&dir.join("rows.jsonl"), "row")?;
     let split: SplitManifest =
         serde_json::from_str(&std::fs::read_to_string(dir.join("split.json"))?)?;
     let spec: FeatureSpec =
@@ -466,8 +450,17 @@ pub fn write_bundle(
             .map(|l| l.to_string())
             .collect::<Vec<_>>()
             .join("; ");
+        // F9/B3: a probe that examined no rows, or fewer rows than the held-out slice, is refused
+        // naming the probe and the counts -- never a silent clean pass.
+        let refused = probe_report.refusals.join("; ");
+        let detail = match (caught.is_empty(), refused.is_empty()) {
+            (false, false) => format!("{caught}; {refused}"),
+            (false, true) => caught,
+            (true, false) => refused,
+            (true, true) => String::new(),
+        };
         return Err(LearnError::Invalid(format!(
-            "probe caught a leak: {caught}"
+            "probe caught a leak: {detail}"
         )));
     }
 

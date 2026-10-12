@@ -573,36 +573,86 @@ pub fn build_dataset(
     })
 }
 
-/// Read a task index from JSONL.
-pub fn read_task_index(path: &Path) -> Result<Vec<TaskIndexRow>, LearnError> {
+/// F9/B3: the one loader every input file `dataset` and `fit` read goes through.
+///
+/// Each non-blank line is parsed into the record type the file holds. A line that is not a record
+/// of that type -- `{}`, `null`, a truncated line, a line missing a field -- is refused naming the
+/// file, the line and the missing or wrong field, so no caller ever sees a half-read input and no
+/// probe ever indexes into data it did not check.
+pub fn read_records<T>(path: &Path, what: &str) -> Result<Vec<T>, LearnError>
+where
+    T: serde::de::DeserializeOwned,
+{
     let text = std::fs::read_to_string(path)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
     let mut out = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let line = line.trim();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
         if line.is_empty() {
             continue;
         }
-        let row: TaskIndexRow = serde_json::from_str(line)
-            .map_err(|e| LearnError::Invalid(format!("tasks.jsonl line {}: {e}", i + 1)))?;
-        out.push(row);
+        let value: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| LearnError::Invalid(format!("{name} line {}: {e}", i + 1)))?;
+        let record: T = serde_json::from_value(value).map_err(|e| {
+            LearnError::Invalid(format!("{name} line {}: not a {what} record: {e}", i + 1))
+        })?;
+        out.push(record);
+    }
+    if out.is_empty() {
+        return Err(LearnError::Invalid(format!(
+            "{name} line 1: no {what} record (the file is empty or holds only blank lines)"
+        )));
     }
     Ok(out)
 }
 
-/// Read a labels input from JSONL.
-pub fn read_labels(path: &Path) -> Result<Vec<LabelRecord>, LearnError> {
+/// Read an `events.jsonl` file through the same loader discipline: each line is a bare `Event` or
+/// a `{"seq": n, "event": …}` wrapper, and a line that is not an event record is refused naming the
+/// file, the line and the missing or wrong field.
+pub fn read_events_records(path: &Path) -> Result<Vec<(i64, tsr_domain::Event)>, LearnError> {
     let text = std::fs::read_to_string(path)?;
-    let mut out = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let line = line.trim();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    let mut out: Vec<(i64, tsr_domain::Event)> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
         if line.is_empty() {
             continue;
         }
-        let row: LabelRecord = serde_json::from_str(line)
-            .map_err(|e| LearnError::Invalid(format!("labels.jsonl line {}: {e}", i + 1)))?;
-        out.push(row);
+        let value: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| LearnError::Invalid(format!("{name} line {}: {e}", i + 1)))?;
+        let (seq, event_value) = match value.get("event") {
+            Some(ev) => (value.get("seq").and_then(|s| s.as_i64()), ev.clone()),
+            None => (None, value),
+        };
+        let event: tsr_domain::Event = serde_json::from_value(event_value).map_err(|e| {
+            LearnError::Invalid(format!("{name} line {}: not an event record: {e}", i + 1))
+        })?;
+        let seq = seq.unwrap_or_else(|| out.len() as i64 + 1);
+        out.push((seq, event));
     }
+    if out.is_empty() {
+        return Err(LearnError::Invalid(format!(
+            "{name} line 1: no event record (the file is empty or holds only blank lines)"
+        )));
+    }
+    out.sort_by_key(|(seq, _)| *seq);
     Ok(out)
+}
+
+/// Read a task index from JSONL through the one loader.
+pub fn read_task_index(path: &Path) -> Result<Vec<TaskIndexRow>, LearnError> {
+    read_records(path, "task index")
+}
+
+/// Read a labels input from JSONL through the one loader.
+pub fn read_labels(path: &Path) -> Result<Vec<LabelRecord>, LearnError> {
+    read_records(path, "label")
 }
 
 /// Write the dataset to `dir`: `rows.jsonl`, `split.json`, `data-manifest.json`.
