@@ -184,15 +184,6 @@ fn resolve_profile(profile_arg: Option<&Path>) -> Result<PathBuf, String> {
     ))
 }
 
-/// The scripted repository the Tier 0 controller checks a task's session against (D6).
-///
-/// The controller enforces read-before-test: before the allowlisted test that runs the failing
-/// test may run, the session must have inspected the failing assertion and its call site. The
-/// CLI derives those two paths from the task's flipped test — a test `parser::tests::x` lives in
-/// the `parser` module, so its assertion is `src/parser.rs` and its call site `tests/parser.rs` —
-/// and takes the failing test id from the profile's first allowlisted test command (the one whose
-/// argv runs the crate's tests). A task with no flipped test (a mutant) uses the profile's first
-/// test id and the crate's own source path.
 /// The scripted repository the Tier 0 controller checks, derived from the session itself.
 ///
 /// The controller's read-before-test rule compares the paths a session inspects against the
