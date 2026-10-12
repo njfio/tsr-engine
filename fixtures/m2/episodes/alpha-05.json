@@ -18,6 +18,40 @@
       }
     },
     {
+      "id": "450de9600ed6f74be0374bb05abc06cbe6708c15f8a30c5798f4387c4f01d1f6",
+      "schema_version": 1,
+      "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
+      "parents": [
+        "8d712a56e722f58628d0827566fe71d428c2260f4f56ff804b3d8224029a11b4"
+      ],
+      "recorded_at": "2024-01-01T00:00:05.001Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "observed",
+        "observation": {
+          "return": {
+            "surprise": [],
+            "contrast": {
+              "id": "d07a3de2ced898992c72fb7a7a896125a836aab17dbeee748e1af44b883d1704",
+              "from_return": "cc7b61ebb224c14042b70174e1f2030c3052371bdb55814ea2d3560f0c8c307e",
+              "unmet": [
+                [
+                  "d01b64c4cc8d5a5d8f29b84780fca2abd61ff0b2a58a18c685c8cd3c5bd3858c",
+                  {
+                    "rejected": {
+                      "reason": "the criterion went unmet"
+                    }
+                  }
+                ]
+              ],
+              "evidence": []
+            }
+          }
+        }
+      }
+    },
+    {
       "id": "91795230dd09697bf2b86d2ec0165d0e3138d402f10920b44061347990396dd7",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
@@ -39,6 +73,40 @@
           },
           "parents": [],
           "origin": "operator"
+        }
+      }
+    },
+    {
+      "id": "50e5310cd82b345187e8c1003cbbd2987893a390dbd2a5eac9dd3993b3930c81",
+      "schema_version": 1,
+      "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
+      "parents": [
+        "91795230dd09697bf2b86d2ec0165d0e3138d402f10920b44061347990396dd7"
+      ],
+      "recorded_at": "2024-01-01T00:00:05.002Z",
+      "observed_at": null,
+      "source": "rules",
+      "kind": {
+        "kind": "observed",
+        "observation": {
+          "return": {
+            "surprise": [],
+            "contrast": {
+              "id": "56b31ae4e87f926b1a1e8aeb4c512b7c8ab0ad5f9310c08f75094d4a07768726",
+              "from_return": "bac4a90aabb844147c9c4df6b148731b8b18aaef5a55f7e7b9e99c0983ccb395",
+              "unmet": [
+                [
+                  "6bcc7d4095cdf5212d1017457f2b3835c7894630b591c9d6883e072284be3681",
+                  {
+                    "rejected": {
+                      "reason": "the criterion went unmet"
+                    }
+                  }
+                ]
+              ],
+              "evidence": []
+            }
+          }
         }
       }
     },
@@ -152,7 +220,7 @@
       }
     },
     {
-      "id": "b08a9306504b74c545915460bd85a61870cba6f51928ee8ae08ece67320d848e",
+      "id": "dac94be0672c8f4ba0054bc045db9426ead9b073b6268c8ea4ec7baf3f70499e",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
@@ -165,7 +233,7 @@
         "kind": "forecast",
         "forecast": {
           "id": "da5c8bcf517aa20728ec2dc44c2c195be27f435ed95634689e476c7f9b1fc3fa",
-          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "event": "0702621b9638ec20966e059e8c693fb41e347bc607b487a7115d5735c6071aa6",
           "horizon": {
             "task_close_days": 7
           },
@@ -181,11 +249,11 @@
       }
     },
     {
-      "id": "48eeaa69eb5029635d5ba9ee3a87967de7f2447e37a5fb5fa0425d710a679fe7",
+      "id": "70ec58bf0f5588311db6b12ed8772ddd48cae8b2e5053eb9b85d2acfa22252f3",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "b08a9306504b74c545915460bd85a61870cba6f51928ee8ae08ece67320d848e"
+        "dac94be0672c8f4ba0054bc045db9426ead9b073b6268c8ea4ec7baf3f70499e"
       ],
       "recorded_at": "2024-01-01T00:00:05.004Z",
       "observed_at": null,
@@ -194,7 +262,7 @@
         "kind": "forecast",
         "forecast": {
           "id": "b0f91b6c81584d6050d75f5a3424e2dc683574aa1e9049ea83cf7e3b30282cba",
-          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "event": "0702621b9638ec20966e059e8c693fb41e347bc607b487a7115d5735c6071aa6",
           "horizon": {
             "task_close_days": 7
           },
@@ -210,11 +278,11 @@
       }
     },
     {
-      "id": "9f9907fa95a91693c3407b05146b4f8bee7f58016324edcc0777082712b98b0b",
+      "id": "a3e9d1f25d11fcd55160c0faada4a707045c3786193228d980f4865cb85a6e1f",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "48eeaa69eb5029635d5ba9ee3a87967de7f2447e37a5fb5fa0425d710a679fe7"
+        "70ec58bf0f5588311db6b12ed8772ddd48cae8b2e5053eb9b85d2acfa22252f3"
       ],
       "recorded_at": "2024-01-01T00:00:05.004Z",
       "observed_at": null,
@@ -223,7 +291,7 @@
         "kind": "forecast",
         "forecast": {
           "id": "94734b402c18b0cd7a47bbd71dabcc7825fdee028b78d64da4347548288d99cf",
-          "event": "cec1519c62a0b81bdde20b32eabcfc34185b4dfaa25a5354ac84bc479c1a1d89",
+          "event": "0702621b9638ec20966e059e8c693fb41e347bc607b487a7115d5735c6071aa6",
           "horizon": {
             "task_close_days": 7
           },
@@ -239,11 +307,11 @@
       }
     },
     {
-      "id": "189b2f8e05f0c7138207c19a27acf933c987f8e1e799a8edf82ab9aaaad29c7b",
+      "id": "4358ff56df51d4fe7a46a06a891e0ed56da6d5d486787ce44c1faf385172d3b0",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "9f9907fa95a91693c3407b05146b4f8bee7f58016324edcc0777082712b98b0b"
+        "a3e9d1f25d11fcd55160c0faada4a707045c3786193228d980f4865cb85a6e1f"
       ],
       "recorded_at": "2024-01-01T00:00:05.005Z",
       "observed_at": null,
@@ -269,11 +337,11 @@
       }
     },
     {
-      "id": "5430c74f075e5bcce56969de438d40b103daea0a30d87141a51ee0185da90f95",
+      "id": "1aba0a84d458ab1bade93da1fae746ba8436bbe70e6e30e0b82963edfc4b00d5",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "189b2f8e05f0c7138207c19a27acf933c987f8e1e799a8edf82ab9aaaad29c7b"
+        "4358ff56df51d4fe7a46a06a891e0ed56da6d5d486787ce44c1faf385172d3b0"
       ],
       "recorded_at": "2024-01-01T00:00:05.006Z",
       "observed_at": null,
@@ -285,11 +353,11 @@
       }
     },
     {
-      "id": "797de6de9c5e930e7adf8f30d8f05d902c26467559b1584a4c0212e2f9b806e0",
+      "id": "6819d28b1d9eef82bfce1362afaa17519f97a26147f3c3975c836a8473e81b6f",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "5430c74f075e5bcce56969de438d40b103daea0a30d87141a51ee0185da90f95"
+        "1aba0a84d458ab1bade93da1fae746ba8436bbe70e6e30e0b82963edfc4b00d5"
       ],
       "recorded_at": "2024-01-01T00:00:05.007Z",
       "observed_at": null,
@@ -303,11 +371,11 @@
       }
     },
     {
-      "id": "36ffd97c03c955f23c11f58ec4fb6f6f70a77030aa17545a571a3a95efea8c89",
+      "id": "476f75720a707d7405d393f57a6d5b263522c62a641162e7babfb5c75940c7f5",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "797de6de9c5e930e7adf8f30d8f05d902c26467559b1584a4c0212e2f9b806e0"
+        "6819d28b1d9eef82bfce1362afaa17519f97a26147f3c3975c836a8473e81b6f"
       ],
       "recorded_at": "2024-01-01T00:00:05.008Z",
       "observed_at": null,
@@ -336,11 +404,11 @@
       }
     },
     {
-      "id": "6c4a8fa6ace78817dbbc183413b77f3fef0c6874f2724c851e902e8d8e119182",
+      "id": "459610863b2f27f6c18f30916957aa5d0e40e9dd3ca5948723924fa8e111b492",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "36ffd97c03c955f23c11f58ec4fb6f6f70a77030aa17545a571a3a95efea8c89"
+        "476f75720a707d7405d393f57a6d5b263522c62a641162e7babfb5c75940c7f5"
       ],
       "recorded_at": "2024-01-01T00:00:05.009Z",
       "observed_at": null,
@@ -352,11 +420,11 @@
       }
     },
     {
-      "id": "6a57079d9ea0c1afb75227151c482b396a0466e3fdcc65f68cb0d4ae23710085",
+      "id": "da1dc6acfe8c8dd4c953df1f401ac0e4f060f27578ee5adf12f5c46aa56bbb40",
       "schema_version": 1,
       "task": "d6c79e6a94a7f2cc6146181cdbc3d28fde5aaa898bfb18e053b44db6dc67a8ff",
       "parents": [
-        "6c4a8fa6ace78817dbbc183413b77f3fef0c6874f2724c851e902e8d8e119182"
+        "459610863b2f27f6c18f30916957aa5d0e40e9dd3ca5948723924fa8e111b492"
       ],
       "recorded_at": "2024-01-01T00:00:05.010Z",
       "observed_at": "2024-01-01T00:00:05.010Z",
@@ -365,7 +433,7 @@
         "kind": "outcome_recorded",
         "record": {
           "outcome": "3ea8f654fd8404111b276ac583cb9e4dad20605965066c8dfe748fa8f9dbf6f2",
-          "subject": "797de6de9c5e930e7adf8f30d8f05d902c26467559b1584a4c0212e2f9b806e0",
+          "subject": "6819d28b1d9eef82bfce1362afaa17519f97a26147f3c3975c836a8473e81b6f",
           "status": "observed",
           "reviewer": "operator",
           "reason": null,
