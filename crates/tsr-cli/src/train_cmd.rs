@@ -30,9 +30,9 @@ pub enum TrainCmd {
         #[arg(long)]
         events: Option<PathBuf>,
         /// The task index: JSONL of `{ task, family, lineage, timestamp, clone_group?, tool_ms_ceiling? }`.
-        /// When omitted, the index is derived from the log's `TaskOpened` events.
+        /// Required: without it every task silently becomes its own lineage with family `unknown`.
         #[arg(long)]
-        tasks: Option<PathBuf>,
+        tasks: PathBuf,
         /// The labels input: JSONL of `{ task, criteria_met, diff_label, reviewer, recorded_at }`.
         /// When omitted, no task is labelled (every row is unresolved).
         #[arg(long)]
@@ -115,7 +115,7 @@ pub fn run(cmd: TrainCmd) -> std::process::ExitCode {
         } => run_dataset(
             store.as_deref(),
             events.as_deref(),
-            tasks.as_deref(),
+            &tasks,
             labels.as_deref(),
             &by,
             calibrate,
@@ -186,30 +186,6 @@ fn read_events_file(path: &Path) -> Result<Vec<(i64, Event)>, String> {
     Ok(events)
 }
 
-/// Derive the task index from the log alone: one row per task, in first-seen order, with the
-/// task's first `recorded_at` as its timestamp. The family and lineage are not in the log, so a
-/// task is its own lineage and its family is `unknown`; a caller that needs the real family and
-/// lineage passes `--tasks`.
-fn index_from_log(log: &[(i64, Event)]) -> Vec<TaskIndexRow> {
-    let mut seen: std::collections::BTreeSet<tsr_domain::TaskId> =
-        std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for (_, ev) in log {
-        if !seen.insert(ev.task) {
-            continue;
-        }
-        out.push(TaskIndexRow {
-            task: ev.task,
-            family: "unknown".to_string(),
-            lineage: ev.task.to_string(),
-            timestamp: ev.recorded_at.clone(),
-            clone_group: None,
-            tool_ms_ceiling: None,
-        });
-    }
-    out
-}
-
 /// The source root: the store's `head_root`, or the events file's digest.
 fn source_root(store: Option<&Path>, events: Option<&Path>) -> Result<Hash, String> {
     if let Some(path) = store {
@@ -259,7 +235,7 @@ fn write_log_into(
 fn run_dataset(
     store: Option<&Path>,
     events: Option<&Path>,
-    tasks: Option<&Path>,
+    tasks: &Path,
     labels: Option<&Path>,
     by: &str,
     calibrate: f64,
@@ -282,17 +258,14 @@ fn run_dataset(
             return std::process::ExitCode::from(1);
         }
     };
-    // The task index: an explicit file, or derived from the log's `TaskOpened` events. The store
-    // alone is enough for the two-session test, which has no index file.
-    let index = match tasks {
-        Some(path) => match read_task_index(path) {
-            Ok(i) => i,
-            Err(e) => {
-                eprintln!("tsr: cannot read task index: {e}");
-                return std::process::ExitCode::from(1);
-            }
-        },
-        None => index_from_log(&log),
+    // R6: `--tasks` is required. Without it every task silently becomes its own lineage with family
+    // `unknown`, so the index is read from the file the caller named.
+    let index = match read_task_index(tasks) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("tsr: cannot read task index: {e}");
+            return std::process::ExitCode::from(1);
+        }
     };
     let labels = match labels {
         Some(path) => match read_labels(path) {
@@ -358,6 +331,7 @@ fn run_dataset(
     println!("data_root={}", ds.data_root.to_hex());
     println!("training_root={}", ds.training_root.to_hex());
     println!("split_digest={}", ds.split.digest.to_hex());
+    println!("unindexed_tasks={}", ds.unindexed_tasks);
     std::process::ExitCode::SUCCESS
 }
 
@@ -369,6 +343,20 @@ fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::p
         if !path.exists() {
             eprintln!(
                 "tsr: fit refused: {} is missing from the dataset directory {}",
+                name,
+                dataset_dir.display()
+            );
+            return std::process::ExitCode::from(2);
+        }
+        // F9/B3: an empty `tasks.jsonl` silently turns probe (a) off (every row is skipped for
+        // want of an index row), and an empty `events.jsonl` panics the probe pass. Refuse both,
+        // naming the file, with exit 2.
+        let empty = std::fs::metadata(&path)
+            .map(|m| m.len() == 0)
+            .unwrap_or(false);
+        if empty {
+            eprintln!(
+                "tsr: fit refused: {} is empty in the dataset directory {}",
                 name,
                 dataset_dir.display()
             );

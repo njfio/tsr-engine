@@ -282,18 +282,91 @@ pub fn probe_boundary(ds: &Dataset, index: &[TaskIndexRow]) -> ProbeReport {
             Side::Calibrate => 1,
             Side::HeldOut => 2,
         };
-        // One entry per task: its timestamp and its side.
-        let mut ordered: Vec<(String, Side)> = Vec::new();
-        let mut seen: BTreeSet<TaskId> = BTreeSet::new();
+        // F8/R5: the unit is the task merged with its clone group and its equal-timestamp peers,
+        // ordered by the unit's earliest timestamp (dataset.rs make_split). A clone group whose
+        // members have different timestamps goes to the side of its earliest member, so the probe
+        // must order by the unit's earliest timestamp, not by each task's own timestamp.
+        let mut parent: BTreeMap<String, String> = BTreeMap::new();
         for r in &ds.rows {
-            if !seen.insert(r.task) {
-                continue;
+            let key = format!("task:{}", r.task);
+            parent.entry(key.clone()).or_insert(key);
+        }
+        fn find(parent: &mut BTreeMap<String, String>, x: &str) -> String {
+            let mut root = x.to_string();
+            while parent[&root] != root {
+                root = parent[&root].clone();
             }
+            let mut cur = x.to_string();
+            while parent[&cur] != cur {
+                let next = parent[&cur].clone();
+                parent.insert(cur.clone(), root.clone());
+                cur = next;
+            }
+            root
+        }
+        let merge = |parent: &mut BTreeMap<String, String>, members: &[String]| {
+            let mut it = members.iter();
+            if let Some(first) = it.next() {
+                let first_root = find(parent, first);
+                for other in it {
+                    let other_root = find(parent, other);
+                    if other_root != first_root {
+                        parent.insert(other_root, first_root.clone());
+                    }
+                }
+            }
+        };
+        // Merge a clone group's tasks.
+        let mut group_tasks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for r in &ds.rows {
+            if let Some(g) = index_of.get(&r.task).and_then(|i| i.clone_group.clone()) {
+                group_tasks
+                    .entry(g)
+                    .or_default()
+                    .push(format!("task:{}", r.task));
+            }
+        }
+        for members in group_tasks.values() {
+            merge(&mut parent, members);
+        }
+        // Merge tasks that share a timestamp.
+        let mut ts_tasks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for r in &ds.rows {
+            if let Some(i) = index_of.get(&r.task) {
+                ts_tasks
+                    .entry(i.timestamp.clone())
+                    .or_default()
+                    .push(format!("task:{}", r.task));
+            }
+        }
+        for members in ts_tasks.values() {
+            merge(&mut parent, members);
+        }
+        // One entry per unit: its earliest timestamp and its side.
+        let mut unit_key: BTreeMap<String, String> = BTreeMap::new();
+        let mut unit_side: BTreeMap<String, Side> = BTreeMap::new();
+        for r in &ds.rows {
             let Some(i) = index_of.get(&r.task) else {
                 continue;
             };
-            ordered.push((i.timestamp.clone(), r.side));
+            let unit = find(&mut parent, &format!("task:{}", r.task));
+            unit_key
+                .entry(unit.clone())
+                .and_modify(|k| {
+                    if i.timestamp < *k {
+                        *k = i.timestamp.clone();
+                    }
+                })
+                .or_insert_with(|| i.timestamp.clone());
+            unit_side.insert(unit, r.side);
         }
+        let mut ordered: Vec<(String, Side)> = unit_key
+            .into_iter()
+            .map(|(unit, ts)| {
+                let side = unit_side[&unit];
+                (ts, side)
+            })
+            .collect();
         ordered.sort_by(|a, b| a.0.cmp(&b.0));
         for w in ordered.windows(2) {
             let (ts_a, side_a) = &w[0];

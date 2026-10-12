@@ -97,6 +97,9 @@ pub struct Report {
     pub excluded: u32,
     /// The number of held_out rows excluded from the pair because they are uncalibrated.
     pub uncalibrated: u32,
+    /// A8: the number of distinct tasks whose decision rows had no index row (a truncated
+    /// `--tasks`), so the report names what the dataset dropped.
+    pub unindexed_tasks: u32,
     /// The controller's scores over all scored rows.
     pub controller: Scores,
     /// The generator's scores over all scored rows.
@@ -467,6 +470,7 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
         scored: rows.len() as u32,
         excluded,
         uncalibrated,
+        unindexed_tasks: dataset.unindexed_tasks as u32,
         controller,
         generator,
         operator,
@@ -562,6 +566,7 @@ pub fn render_report(r: &Report, json: bool) -> String {
     out.push_str(&format!("scored {}\n", r.scored));
     out.push_str(&format!("excluded {}\n", r.excluded));
     out.push_str(&format!("uncalibrated {}\n", r.uncalibrated));
+    out.push_str(&format!("unindexed_tasks {}\n", r.unindexed_tasks));
     out.push_str(&format!("log_loss_clip {}\n", LOG_LOSS_CLIP));
     out.push_str(&format!("support_floor {}\n", r.support_floor));
 

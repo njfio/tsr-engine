@@ -433,6 +433,34 @@ pub fn write_bundle(
         )));
     }
 
+    // F3/R2: an empty fit or calibrate slice must be refused, naming the slice. An empty fit slice
+    // fits a zero-weight head (raw p 0.5 for every row); an empty calibrate slice fits an empty
+    // isotonic, which acts as the identity, so `apply` labels raw output `Calibrated`. The single
+    // mature-count minimum above does not catch either.
+    let fit_labelled = ds
+        .rows
+        .iter()
+        .filter(|r| r.side == Side::Fit && r.label.is_some())
+        .count();
+    if fit_labelled == 0 {
+        return Err(LearnError::Invalid(
+            "the fit slice holds no row with a resolved label; refusing to fit an empty fit slice"
+                .into(),
+        ));
+    }
+    let cal_labelled = ds
+        .rows
+        .iter()
+        .filter(|r| r.side == Side::Calibrate && r.label.is_some())
+        .count();
+    if cal_labelled == 0 {
+        return Err(LearnError::Invalid(
+            "the calibrate slice holds no row with a resolved label; refusing to fit an empty \
+             calibrate slice"
+                .into(),
+        ));
+    }
+
     // Fit the head on the fit slice, then isotonic over the head's outputs on the calibrate slice.
     let fit_rows: Vec<Row> = ds
         .rows

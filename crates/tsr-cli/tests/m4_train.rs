@@ -746,3 +746,368 @@ fn f14_a_bad_row_is_named_by_an_id_in_rows_jsonl() {
         "F14: the bad row is named by its id {first_id}: {err}"
     );
 }
+
+/// F3/R2: `fit` must refuse an empty calibrate slice (exit 2, naming "calibrate") rather than
+/// writing an empty calibrator that acts as the identity and labelling raw output Calibrated.
+#[test]
+fn f3_fit_refuses_an_empty_calibrate_slice() {
+    let dir = temp_dir("f3-cal");
+    let (ev, tk, lb) = regenerate(&dir);
+    let ds = dir.join("ds");
+    let (code, _out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.0",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "dataset failed: {err}");
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F3/R2: fit refuses an empty calibrate slice:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("calibrate"),
+        "F3/R2: the refusal names the empty calibrate slice: {err}"
+    );
+}
+
+/// F3/R2: `fit` must refuse an empty fit slice (exit 2, naming "fit") rather than fitting a
+/// zero-weight head that prints every row "calibrated" at the same p.
+#[test]
+fn f3_fit_refuses_an_empty_fit_slice() {
+    let dir = temp_dir("f3-fit");
+    let (ev, tk, lb) = regenerate(&dir);
+    let ds = dir.join("ds");
+    let (code, _out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.8",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "dataset failed: {err}");
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F3/R2: fit refuses an empty fit slice:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("fit"),
+        "F3/R2: the refusal names the empty fit slice: {err}"
+    );
+}
+
+/// F9/B3: an empty `tasks.jsonl` in the dataset directory must make `fit` exit 2 naming the file,
+/// not silently turn probe (a) off and accept a leaking dataset.
+#[test]
+fn f9_fit_refuses_an_empty_tasks_index() {
+    let dir = temp_dir("f9-tasks");
+    let ds = build_dataset(&dir, "7");
+    std::fs::write(ds.join("tasks.jsonl"), "").unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses an empty tasks.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("tasks.jsonl"),
+        "F9/B3: the refusal names tasks.jsonl: {err}"
+    );
+}
+
+/// F9/B3: an empty `events.jsonl` must make `fit` exit 2 naming the file, not panic (exit 101).
+#[test]
+fn f9_fit_refuses_an_empty_events_log() {
+    let dir = temp_dir("f9-events");
+    let ds = build_dataset(&dir, "7");
+    std::fs::write(ds.join("events.jsonl"), "").unwrap();
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit refuses an empty events.jsonl:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("events.jsonl"),
+        "F9/B3: the refusal names events.jsonl: {err}"
+    );
+}
+
+/// R6: `--tasks` is required by the brief; `dataset` without it must exit 2, not silently make
+/// every task its own lineage with family `unknown`.
+#[test]
+fn r6_dataset_requires_tasks() {
+    let dir = temp_dir("r6-tasks");
+    let (ev, _tk, lb) = regenerate(&dir);
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 2, "R6: dataset requires --tasks:\n{out}\n{err}");
+    assert!(
+        err.contains("--tasks"),
+        "R6: the refusal names --tasks: {err}"
+    );
+}
+
+/// A8: a `--tasks` index truncated to the first 300 lines drops tasks with no index row; the count
+/// must appear in `dataset`'s stdout, in `data-manifest.json` and in the report.
+#[test]
+fn a8_unindexed_tasks_are_counted() {
+    let dir = temp_dir("a8-unindexed");
+    let (ev, tk, lb) = regenerate(&dir);
+    let short = dir.join("tasks-short.jsonl");
+    let text = std::fs::read_to_string(&tk).unwrap();
+    let kept: String = text.lines().take(300).collect::<Vec<_>>().join("\n") + "\n";
+    std::fs::write(&short, kept).unwrap();
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        short.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "dataset failed: {err}");
+    let n: usize = field(&out, "unindexed_tasks")
+        .parse()
+        .expect("unindexed_tasks is a number");
+    assert!(n > 0, "A8: dataset counts the dropped tasks: {out}");
+    let manifest = std::fs::read_to_string(ds.join("data-manifest.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(
+        v["unindexed_tasks"].as_u64(),
+        Some(n as u64),
+        "A8: data-manifest.json carries the count: {manifest}"
+    );
+
+    // A8: the report carries the count too.
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 0,
+        "A8: fit accepts the truncated dataset: {out}\n{err}"
+    );
+    let (code, out, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 0, "A8: report runs: {out}\n{err}");
+    let line = out
+        .lines()
+        .find(|l| l.starts_with("unindexed_tasks "))
+        .unwrap_or_else(|| panic!("A8: the report carries the count: {out}"));
+    assert_eq!(
+        line.split_whitespace().nth(1),
+        Some(n.to_string().as_str()),
+        "A8: the report carries the count: {out}"
+    );
+}
+
+/// F8: `dataset` must not assign a side to an index task that has no gated commitment (no rows);
+/// it counts such tasks and continues, so `fit` accepts the tool's own output. Before the fix,
+/// `dataset` exits 0 but `fit` refuses with `probe caught a leak: boundary`.
+#[test]
+fn f8_fit_accepts_a_dataset_whose_index_names_a_task_with_no_commitment() {
+    let dir = temp_dir("f8-nogate");
+    let (ev, tk, lb) = regenerate(&dir);
+    // Append an index row for a task that appears in no event: no gated commitment, no rows.
+    let mut text = std::fs::read_to_string(&tk).unwrap();
+    let extra = serde_json::json!({
+        "task": "00000000000000000000000000000000000000000000000000000000000000ff",
+        "family": "calibrated",
+        "lineage": "lineage-99",
+        "timestamp": "2026-01-01T00:00:00Z",
+    });
+    text.push_str(&serde_json::to_string(&extra).unwrap());
+    text.push('\n');
+    let tk2 = dir.join("tasks-extra.jsonl");
+    std::fs::write(&tk2, text).unwrap();
+
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk2.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 0,
+        "F8: dataset accepts an index task with no commitment:\n{out}\n{err}"
+    );
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 0,
+        "F8: fit accepts dataset's own output when the index names a task with no gated commitment:\n{out}\n{err}"
+    );
+}
+
+/// F8/R5: under `--by time` a clone group goes to the side of its earliest member, and probe (c)
+/// accepts exactly that. Before the fix, `dataset` refuses its own split when a clone group's
+/// members have different timestamps.
+#[test]
+fn f8_dataset_accepts_a_clone_group_spanning_time() {
+    let dir = temp_dir("f8-clone-time");
+    let (ev, tk, lb) = regenerate(&dir);
+    // Give the first two tasks one clone group; they have different timestamps.
+    let text = std::fs::read_to_string(&tk).unwrap();
+    let mut lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(lines.len() >= 2, "the corpus has at least two tasks");
+    // The earliest and the latest task in one clone group: the unit's earliest timestamp is the
+    // corpus's earliest, so the whole unit goes to the fit side, and the latest member's own
+    // timestamp is far past the fit/calibrate boundary.
+    let last = lines.len() - 1;
+    lines[0]["clone_group"] = serde_json::Value::String("cg-span".to_string());
+    lines[last]["clone_group"] = serde_json::Value::String("cg-span".to_string());
+    let mut out = String::new();
+    for v in &lines {
+        out.push_str(&serde_json::to_string(v).unwrap());
+        out.push('\n');
+    }
+    let tk2 = dir.join("tasks-clone.jsonl");
+    std::fs::write(&tk2, out).unwrap();
+
+    let ds = dir.join("ds");
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk2.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 0,
+        "F8/R5: dataset accepts its own split when a clone group spans time:\n{out}\n{err}"
+    );
+}

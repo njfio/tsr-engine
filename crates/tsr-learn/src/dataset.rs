@@ -444,7 +444,16 @@ pub fn build_dataset(
 
     // The fit slice's families, in name order, define the one-hot. The split is made first, so the
     // families are those of the fit side.
-    let split = make_split(index, by, fractions, seed);
+    // F8: a task with no gated commitment produces no row, so it must not be assigned a side --
+    // otherwise `fit` refuses the tool's own output ("split.json assigns task X, which has no
+    // rows"). Count such tasks and continue.
+    let committed: BTreeSet<TaskId> = decision_rows(events).into_iter().map(|r| r.task).collect();
+    let split_index: Vec<TaskIndexRow> = index
+        .iter()
+        .filter(|r| committed.contains(&r.task))
+        .cloned()
+        .collect();
+    let split = make_split(&split_index, by, fractions, seed);
     let mut fit_families: BTreeSet<String> = BTreeSet::new();
     for row in index {
         if split.assignments.get(&row.task.to_string()) == Some(&Side::Fit) {
@@ -594,6 +603,7 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
         "calibrate": ds.rows.iter().filter(|r| r.side == Side::Calibrate).count(),
         "held_out": ds.rows.iter().filter(|r| r.side == Side::HeldOut).count(),
         "resolved": ds.rows.iter().filter(|r| r.label.is_some()).count(),
+        "unindexed_tasks": ds.unindexed_tasks,
     });
     std::fs::write(
         dir.join("data-manifest.json"),
