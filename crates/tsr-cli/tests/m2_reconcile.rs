@@ -764,6 +764,61 @@ fn d5_matrix_rows_drive_reconcile_from_the_log() {
     }
 }
 
+/// D5 regression guard: the Acknowledgement crash point must NOT settle the dispatch as
+/// `Executed` from the fake executor's private keys. The old matrix fed `ex.tool_check(...)`,
+/// whose `seen_keys` already held the idempotency key (the effect was sent before the ack
+/// crashed), so the row settled `Executed` — the same as the `None` row. The CLI builds its
+/// check with `ToolCheck::from_log` over the store, which holds no `Executed` for this dispatch
+/// and no digest in the CAS, so the row is `Unresolved` (idempotent, retryable). This test fails
+/// if the matrix ever goes back to the fake's keys.
+#[test]
+fn d5_acknowledgement_row_is_not_settled_from_the_fakes_keys() {
+    let cand = candidate("matrix-ack-not-fake");
+    let (s, _) = dispatched(&cand);
+    let digest = Hash::of(&[b"log-Acknowledgement"]);
+    let mut ex = FakeExecutor::new(
+        FakeTool {
+            idempotent: true,
+            log_digest: digest,
+        },
+        CrashPoint::Acknowledgement,
+    );
+    let intent = tsr_domain::DispatchIntent {
+        candidate: cand.id,
+        idempotency_key: intent_key(&cand.id),
+        expected_state_version: 3,
+    };
+    let _ = ex.dispatch(&intent);
+    let _ = ex.dispatch(&intent);
+    // The fake's own keys would answer `Executed` here — that is the defect. The fake has seen
+    // the idempotency key (the effect was sent before the ack crashed), so a check built from
+    // its private state claims the effect happened.
+    assert!(
+        ex.has_seen(&intent_key(&cand.id)),
+        "the fake's private keys claim the effect happened"
+    );
+    // The CLI's check, built from the log and the CAS, cannot say: no `Executed` in the log and
+    // no digest in the CAS.
+    let cas = std::env::temp_dir().join(format!("tsr-d5-ack-{}", std::process::id()));
+    std::fs::create_dir_all(&cas).unwrap();
+    let events = s.by_task(&task()).unwrap();
+    let check = ToolCheck::from_log(&cas, &events);
+    let pending = pending_dispatches(&events);
+    let res = reconcile_one(&s, &task(), &pending[0], &check, "t3").unwrap();
+    assert_eq!(
+        res,
+        Resolution::UnresolvedIdempotent,
+        "the log's evidence decides, not the fake's keys"
+    );
+    let ks = kinds(&s);
+    assert_eq!(
+        ks.iter().filter(|k| *k == "executed").count(),
+        0,
+        "no Executed is invented: {ks:?}"
+    );
+    std::fs::remove_dir_all(&cas).ok();
+}
+
 #[test]
 fn reconcile_task_settles_every_pending_dispatch_once() {
     let a = candidate("multi-a");
