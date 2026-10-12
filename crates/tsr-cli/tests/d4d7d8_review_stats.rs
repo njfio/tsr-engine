@@ -191,6 +191,87 @@ fn d8_unknown_return_is_refused() {
     assert_eq!(err.exit_code(), 2);
 }
 
+/// D4: the CLI itself accepts `tsr review --family <f> --stats` with no `<TASK>` positional.
+///
+/// Before the fix `main.rs` declared `task: String` (required), so clap exited 2 with
+/// "required arguments were not provided: <TASK>". The library already handles an empty task for
+/// `--stats`; the CLI must make the positional optional and pass an empty string.
+#[test]
+fn d4_cli_stats_without_task_exits_0() {
+    let dir = std::env::temp_dir().join(format!("tsr-review-cli-stats-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("tsr.db");
+    let _ = std::fs::remove_file(&db);
+    {
+        let store = Store::open(&db).unwrap();
+        let t = task(20);
+        let green = append_return(&store, &t, 20, 0);
+        let ledger = tsr_ledger::Ledger::new(&store);
+        let contrast = tsr_domain::Contrast {
+            id: tsr_domain::ContrastId(Hash::of(&[b"c", &[20u8]])),
+            from_return: green,
+            unmet: vec![(
+                tsr_domain::CriterionId(Hash::of(&[b"crit", &[20u8]])),
+                tsr_domain::UnmetKind::Rejected {
+                    reason: "x".to_string(),
+                },
+            )],
+            evidence: Vec::new(),
+        };
+        ledger
+            .record_contrast(&t, Vec::new(), contrast.clone(), "unix:1")
+            .unwrap();
+        ledger
+            .expand(
+                &t,
+                Vec::new(),
+                contrast.id,
+                "prefer small diffs",
+                tsr_domain::Scope::Family("alpha".to_string()),
+                Vec::new(),
+                Vec::new(),
+                Source::Operator,
+                "unix:1",
+            )
+            .unwrap();
+        record_label(
+            &store,
+            &t,
+            green,
+            Label::Rejected,
+            Some("no".to_string()),
+            None,
+            None,
+            "unix:2",
+        )
+        .unwrap();
+    }
+    let bin = env!("CARGO_BIN_EXE_tsr");
+    let out = std::process::Command::new(bin)
+        .args([
+            "review",
+            "--family",
+            "alpha",
+            "--stats",
+            "--store",
+            db.to_str().unwrap(),
+        ])
+        .output()
+        .expect("the tsr binary runs");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "`tsr review --family alpha --stats` with no task must exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("family=alpha"),
+        "the family's stats are printed; stdout: {stdout}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// D4: `--stats` without a task computes over every task of the family.
 #[test]
 fn d4_stats_without_task_over_family() {

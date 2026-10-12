@@ -133,7 +133,8 @@ tsr review <task> rejected --reason "the diff touched the schema" --store tsr.db
 # Sample greens for review at a rate, with the inverse-probability weight recorded on the record.
 tsr review <task> --sample 0.25 --seed 7 --store tsr.db
 # The false-accept rate (green but rejected), weighted and unweighted, per family.
-tsr review <task> --family alpha --stats --store tsr.db
+# --stats needs no task: it computes over every task of the family.
+tsr review --family alpha --stats --store tsr.db
 
 # One closed episode on one screen: Desire, Imagination, Belief, Return, and the residual
 # (Surprise per forecaster and Contrast per criterion, side by side, never added).

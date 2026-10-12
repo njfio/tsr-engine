@@ -89,7 +89,8 @@ enum Cmd {
     },
     /// Label outcomes after close (M2, B5, B7).
     Review {
-        task: String,
+        /// The task whose returns are labelled; omit with --stats to compute over the family.
+        task: Option<String>,
         /// accepted | rejected | disputed; omit to list the returns awaiting a label.
         label: Option<String>,
         /// The reason for a rejection; stored apart from tool results.
@@ -246,7 +247,7 @@ fn main() -> ExitCode {
             stats,
             store,
         } => review_cmd::run(&review_cmd::ReviewArgs {
-            task,
+            task: task.unwrap_or_default(),
             label,
             reason,
             return_id,
