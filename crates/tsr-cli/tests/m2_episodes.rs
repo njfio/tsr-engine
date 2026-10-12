@@ -437,11 +437,12 @@ fn generate_episode(store: &Store, seed: u64, family: Family, index: usize) -> E
 
     // 8. The return: Surprise per forecaster (forecast minus observed) and a Contrast against the
     //    criterion. Only a Contrast with an unmet criterion may expand; a Surprise never does.
+    //    D11: the residual is `raw p - observed`, the same sign the Filter and the scorer use.
     let surprises: Vec<Surprise> = forecasts
         .iter()
         .map(|f| Surprise {
             forecast: f.id,
-            residual: truth - f.raw.get(),
+            residual: f.raw.get() - truth,
         })
         .collect();
     let contrast = if outcome == EpisodeOutcome::Accepted {
@@ -756,6 +757,64 @@ fn fixtures_are_committed_and_match_the_generator() {
         .collect();
     committed.sort();
     assert_eq!(committed.len(), 30, "thirty committed episode files");
+}
+
+/// D11: every Surprise residual in the committed fixtures is forecast minus observed.
+///
+/// The generator used to write `truth - f.raw.get()` under a comment saying "forecast minus
+/// observed", so all 90 Surprise records in `fixtures/m2/episodes/*.json` were observed minus
+/// forecast and the Mirror printed the negated residual. This test reads the committed JSON (not
+/// the generator) and checks the sign against the library's rule: `residual == raw - observed`,
+/// where `observed` is 1 for an accepted episode and 0 otherwise.
+#[test]
+fn d11_fixture_surprise_residual_is_forecast_minus_observed() {
+    let dir = fixtures_dir();
+    let mut checked = 0usize;
+    for family in ["alpha", "beta", "gamma"] {
+        for index in 0..PER_FAMILY {
+            let path = dir.join(format!("{family}-{index:02}.json"));
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("committed fixture {} is missing: {e}", path.display()));
+            let file: EpisodeFile = serde_json::from_str(&text).expect("parse episode");
+            let observed = if file.outcome == "accepted" { 1.0 } else { 0.0 };
+
+            // The raw probability of every forecast in this episode, by id.
+            let mut raw: BTreeMap<ForecastId, f64> = BTreeMap::new();
+            for ev in &file.events {
+                if let EventKind::Forecast { forecast, .. } = &ev.kind {
+                    raw.insert(forecast.id, forecast.raw.get());
+                }
+            }
+
+            for ev in &file.events {
+                if let EventKind::Observed {
+                    observation: Observation::Return { surprise, .. },
+                } = &ev.kind
+                {
+                    for s in surprise {
+                        let p = raw.get(&s.forecast).copied().unwrap_or_else(|| {
+                            panic!(
+                                "{}: Surprise names forecast {} with no Forecast event",
+                                path.display(),
+                                s.forecast
+                            )
+                        });
+                        let expected = p - observed;
+                        assert!(
+                            (s.residual - expected).abs() < 1e-12,
+                            "D11: {} forecast {} residual {} is not forecast minus observed \
+                             (raw {p} - observed {observed} = {expected})",
+                            path.display(),
+                            s.forecast,
+                            s.residual
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 90, "ninety Surprise records across the corpus");
 }
 
 #[test]

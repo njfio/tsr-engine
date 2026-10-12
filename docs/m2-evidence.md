@@ -168,9 +168,9 @@ Return
 
 Residual
   Surprise (forecast residual per forecaster)
-    forecast 35cd358cf453 by generator residual -0.4670
-    forecast fcf47932deec by controller residual -0.4034
-    forecast 8a1b7e0d5beb by operator residual -0.3715
+    forecast 35cd358cf453 by generator residual 0.4670
+    forecast fcf47932deec by controller residual 0.4034
+    forecast 8a1b7e0d5beb by operator residual 0.3715
   Contrast (desired minus actual, per criterion)
     criterion b3bfa8e8731d unmet rejected the criterion went unmet evidence 
     criterion 14a407adf352 unmet rejected the criterion went unmet evidence 
@@ -179,7 +179,7 @@ Residual
 
 The Surprise rows carry the forecaster (`by generator`, `by controller`, `by operator`) and the
 residual is **forecast minus observed** everywhere: the generator forecast 0.4670 and the outcome was
-0, so its residual is −0.4670.
+0, so its residual is +0.4670.
 
 ## The Mirror as JSON — `tsr reflect <task> --json`
 
@@ -289,17 +289,17 @@ $ tsr reflect 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b -
       {
         "forecaster": "generator",
         "forecast": "35cd358cf453",
-        "residual": -0.4670024597241542
+        "residual": 0.4670024597241542
       },
       {
         "forecaster": "controller",
         "forecast": "fcf47932deec",
-        "residual": -0.4034315957489555
+        "residual": 0.4034315957489555
       },
       {
         "forecaster": "operator",
         "forecast": "8a1b7e0d5beb",
-        "residual": -0.37154197651788534
+        "residual": 0.37154197651788534
       }
     ],
     "contrast": [
@@ -356,6 +356,16 @@ noted f2cf9a367ec97a96c3af673e220f85859fcabf32445e0b117a0a33262db1fcaf (observat
 $ tsr task reconcile 1a26474df3ed1dc847b171c26c9e882d69e891215480fd8ba1bd0bef2345b58b --store .ev-d6/scratch.db
 no pending dispatches
 ```
+
+**Limitation (D1, N3 — operator decision).** For M2, reconcile settles a dispatch only from an
+`Executed` that follows it; otherwise the dispatch stays `Unresolved` — retryable when the tool is
+idempotent, blocked otherwise. The CAS is **not** consulted: main's `exec` hashes the tool log
+(`exec.rs:374`) but never writes it to `cas/`, so no artifact on disk can be linked to a dispatch
+without an `Executed`, and "the CAS decides" cannot be met inside this lane. The lane-01 change that
+would lift the limitation: `tsr exec` writes the tool log to `cas/<digest>` **before** appending the
+`Executed`, and reconcile then checks `cas/<digest>` for the dispatch's own digest. Until then the
+dead CAS path (`PendingDispatch.evidence_digest`, `ToolCheck::from_log`'s keys and digests) is
+removed rather than left to look as if it decided anything.
 
 ## The family curves — `tsr reflect --family`
 

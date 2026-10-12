@@ -371,7 +371,7 @@
       }
     },
     {
-      "id": "ecbee3c9fc019c6021b39903c78caea43ee7e78188ec3f84c372f6af7f5ea29f",
+      "id": "27729f5e0ed03e2a94e4684bf35c7d2f14d8d38cea940085c1a720aa5af1519d",
       "schema_version": 1,
       "task": "b6a8cbc36587627bb276585999d468809d14496d18734438c827797bae71065e",
       "parents": [
@@ -387,15 +387,15 @@
             "surprise": [
               {
                 "forecast": "b9e60f1dce943d50d9791445dbd1ed396b3211320d6dc3f9c1d7cf14618365b7",
-                "residual": 0.4501092129485045
+                "residual": -0.4501092129485045
               },
               {
                 "forecast": "41dcbcfaac671ecfb52d17bf83fd0ef338736936a09f4f9c57b9909f1ad25b0b",
-                "residual": 0.3056201750035269
+                "residual": -0.3056201750035269
               },
               {
                 "forecast": "5833df593059ec284911e8f0d1624b1015826f70a9ea7dd282f95777767f6500",
-                "residual": 0.26462605584053644
+                "residual": -0.26462605584053644
               }
             ],
             "contrast": null
@@ -404,11 +404,11 @@
       }
     },
     {
-      "id": "62a35ee2dc6580c9be10e5966444757a69bb8a79ce72e2ae9ee3de7fb4922ace",
+      "id": "f9254072727033178da05f0b0d71518656625a9312c8a75dab30c8124bc4f3c1",
       "schema_version": 1,
       "task": "b6a8cbc36587627bb276585999d468809d14496d18734438c827797bae71065e",
       "parents": [
-        "ecbee3c9fc019c6021b39903c78caea43ee7e78188ec3f84c372f6af7f5ea29f"
+        "27729f5e0ed03e2a94e4684bf35c7d2f14d8d38cea940085c1a720aa5af1519d"
       ],
       "recorded_at": "2024-01-01T00:00:02.009Z",
       "observed_at": null,
@@ -420,11 +420,11 @@
       }
     },
     {
-      "id": "f1b06b782b48d60d68dd20835473569ec86e65b46519946e1c7003b8ba319563",
+      "id": "84e893719e9a525e5b44d8677d4a8d665e9cf6fef849b5f32c0fcf333dcd6dfa",
       "schema_version": 1,
       "task": "b6a8cbc36587627bb276585999d468809d14496d18734438c827797bae71065e",
       "parents": [
-        "62a35ee2dc6580c9be10e5966444757a69bb8a79ce72e2ae9ee3de7fb4922ace"
+        "f9254072727033178da05f0b0d71518656625a9312c8a75dab30c8124bc4f3c1"
       ],
       "recorded_at": "2024-01-01T00:00:02.010Z",
       "observed_at": "2024-01-01T00:00:02.010Z",
