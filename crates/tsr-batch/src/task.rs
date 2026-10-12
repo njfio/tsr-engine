@@ -60,6 +60,12 @@ pub struct CorpusTask {
     /// The mutated snapshot digest (mutant tasks only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mutated_snapshot: Option<String>,
+    /// The base snapshot a mutant's copy is materialised from: the tree id of the repository HEAD
+    /// the mutant was generated against (mutant tasks only, D4). `mutated_snapshot` is only a
+    /// descriptor digest and names nothing materialisable, so the copy is this base tree with the
+    /// mutant's own diff applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_snapshot: Option<String>,
     /// The tests that flipped red→green (mined tasks only).
     #[serde(default)]
     pub flipped_tests: Vec<String>,
@@ -72,6 +78,10 @@ pub struct CorpusTask {
     /// The CAS digest of the known reversal diff (mutant tasks only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reversal_diff: Option<String>,
+    /// The CAS digest of the mutation diff (mutant tasks only, D4): the diff cargo-mutants applied
+    /// to the base tree. The disposable copy is the base snapshot with this applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation_diff: Option<String>,
     /// The family: the crate name, or `(operator, crate)` for a mutant.
     pub family: String,
     /// The lineage: the repository.
@@ -84,9 +94,14 @@ pub struct CorpusTask {
 
 impl CorpusTask {
     /// The snapshot the disposable copy is provisioned at.
+    ///
+    /// A mined task provisions at its parent tree id. A mutant task provisions at its base tree id
+    /// (D4): `mutated_snapshot` is a descriptor digest that names nothing materialisable, so the
+    /// copy is the base tree with the mutant's diff applied afterwards.
     pub fn snapshot(&self) -> &str {
         self.parent_snapshot
             .as_deref()
+            .or(self.base_snapshot.as_deref())
             .or(self.mutated_snapshot.as_deref())
             .unwrap_or("")
     }

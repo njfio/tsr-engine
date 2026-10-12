@@ -367,20 +367,58 @@ pub(crate) fn write_cas(cas: &Path, digest_hex: &str, bytes: &[u8]) -> Result<()
     fs::write(path, bytes).map_err(MineError::Io)
 }
 
+/// Read a CAS object by its digest. The digest is validated as hex before it is joined, so a
+/// planted `..` or absolute digest cannot escape the CAS directory (D1).
+pub fn read_cas(cas: &Path, digest_hex: &str) -> Result<Vec<u8>, MineError> {
+    if !(4..=64).contains(&digest_hex.len()) || !digest_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(MineError::Git(format!(
+            "unsafe CAS digest {digest_hex:?}: a digest must be a hex object id"
+        )));
+    }
+    fs::read(cas.join(digest_hex)).map_err(MineError::Io)
+}
+
 /// Materialise `sha` as a checkout at `dest` and return `dest`.
 ///
-/// The checkout is a `git worktree` of the repository, detached at `sha`, so the suite run against
-/// it sees exactly the tree that revision names (D4). `git` reads history and writes the working
+/// `sha` is a git revision — a commit, a tag, a ref, **or a tree id** (D4). A task's
+/// `parent_snapshot` records the parent commit's *tree* id (`git rev-parse <sha>^{tree}`), which
+/// `git worktree add` refuses ("is a tree, not a commit"). `git archive <tree-ish>` accepts a tree
+/// id, so the copy is written by extracting the archive into a fresh directory: the suite run
+/// against it sees exactly the tree that revision names. `git` reads history and writes the working
 /// tree; it executes nothing from the repository. An existing checkout at `dest` is reused.
 pub fn materialize(repo: &Path, sha: &str, dest: &Path) -> Result<PathBuf, MineError> {
     if dest.exists() {
         return Ok(dest.to_path_buf());
     }
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(MineError::Io)?;
+    fs::create_dir_all(dest).map_err(MineError::Io)?;
+    // `git archive <tree-ish>` accepts a tree id as well as a commit; `git worktree add` does not.
+    // The archive is piped into `tar -x` in `dest`, so the copy is a plain directory with no
+    // worktree registration in the operator's repository (R5).
+    let mut archive = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["archive", "--format=tar", sha])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| MineError::Git(format!("could not run git archive: {e}")))?;
+    let mut tar = Command::new("tar")
+        .arg("-x")
+        .arg("-C")
+        .arg(dest)
+        .stdin(archive.stdout.take().expect("piped stdout"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| MineError::Git(format!("could not run tar: {e}")))?;
+    let tar_status = tar.wait().map_err(MineError::Io)?;
+    let archive_status = archive.wait().map_err(MineError::Io)?;
+    if !tar_status.success() || !archive_status.success() {
+        return Err(MineError::Git(format!(
+            "materialising {sha} into {} failed (git archive {archive_status}, tar {tar_status})",
+            dest.display()
+        )));
     }
-    let dest_str = dest.display().to_string();
-    git(repo, &["worktree", "add", "--detach", &dest_str, sha])?;
     Ok(dest.to_path_buf())
 }
 

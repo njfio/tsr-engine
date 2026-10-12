@@ -43,11 +43,19 @@ pub enum RunError {
     /// The disposable copy was never materialised: the provisioning run exited non-zero (D4).
     #[error("provisioning failed: `{argv}` exited {exit}")]
     ProvisioningFailed { argv: String, exit: i32 },
+    /// The task's snapshot is not a hex object id (R1): a snapshot from `tasks.jsonl` is untrusted
+    /// and must never become a path the batch runs from.
+    #[error("task {task}: unsafe snapshot {snapshot:?}: a snapshot must be a hex object id")]
+    UnsafeSnapshot { task: String, snapshot: String },
     /// The task id is not a safe path component (R2, D1): `run_one` joins it into
     /// `out/state/<id>` and `out/copies/<id>`, so an id that could name a path outside `--out` is
     /// refused here as well as where `tasks.jsonl` is parsed.
     #[error("unsafe task id {id:?}: must match [A-Za-z0-9._-]{{1,128}} and not be `.` or `..`")]
     InvalidTaskId { id: String },
+    /// A mutant's mutation diff could not be read or applied (D4): the copy is not the mutated
+    /// tree, so it must not be driven.
+    #[error("mutation diff {digest}: {reason}")]
+    MutationDiff { digest: String, reason: String },
 }
 
 /// The configuration of a batch run.
@@ -106,16 +114,87 @@ pub fn task_id(task: &CorpusTask) -> TaskId {
 ///
 /// The batch runner does not clone or check out anything itself: it asks the sealed sibling sandbox
 /// to materialize the snapshot. In production this is `tsr exec -- tsr corpus materialize …`.
-pub fn provision_argv(snapshot: &str, dest: &Path) -> Vec<String> {
+///
+/// `repo` is the repository the snapshot lives in. It is passed explicitly (D4): without `--repo`
+/// `materialize` defaults to `.`, which is the batch's own working directory and not the
+/// repository the task was mined from.
+pub fn provision_argv(repo: &Path, snapshot: &str, dest: &Path) -> Vec<String> {
     vec![
         "tsr".to_string(),
         "corpus".to_string(),
         "materialize".to_string(),
+        "--repo".to_string(),
+        repo.display().to_string(),
         "--snapshot".to_string(),
         snapshot.to_string(),
         "--out".to_string(),
         dest.display().to_string(),
     ]
+}
+
+/// Whether `snapshot` is a hex object id — the only shape a snapshot value may take (R1).
+///
+/// A snapshot from `tasks.jsonl` is untrusted: it becomes the working directory of the
+/// provisioning run, so a value like `/etc` would make `/etc` the sandbox's writable mount
+/// (PRD §B10: the disposable copy is the only writable mount). A git object id is 4–64 lowercase
+/// hex characters; anything else — an absolute path, a `..` component, a ref name — is refused.
+pub fn is_hex_object_id(snapshot: &str) -> bool {
+    (4..=64).contains(&snapshot.len()) && snapshot.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Apply a unified diff to the copy at `dest` with `git apply`.
+///
+/// The diff is the mutant's own mutation diff (D4). `git apply` is run with `-C dest` so it applies
+/// against the copy, and it executes nothing from the repository. A diff that does not apply is an
+/// error: a copy that is not the mutated tree must not be driven.
+fn apply_diff(dest: &Path, diff: &[u8]) -> Result<(), RunError> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dest)
+        .args(["apply", "--whitespace=nowarn", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| RunError::MutationDiff {
+            digest: String::new(),
+            reason: format!("could not run git apply: {e}"),
+        })?;
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(diff)
+        .map_err(|e| RunError::MutationDiff {
+            digest: String::new(),
+            reason: format!("writing the diff: {e}"),
+        })?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| RunError::MutationDiff {
+            digest: String::new(),
+            reason: format!("waiting for git apply: {e}"),
+        })?;
+    if !out.status.success() {
+        return Err(RunError::MutationDiff {
+            digest: String::new(),
+            reason: format!(
+                "git apply failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// The batch-owned root the disposable copies are provisioned under.
+///
+/// Provisioning never runs from a path taken from `tasks.jsonl` (R1): the working directory is a
+/// directory this batch owns, under `--out`, and the snapshot is only ever a value passed as an
+/// argument to `materialize`.
+pub fn copies_root(out: &Path) -> PathBuf {
+    out.join("copies")
 }
 
 /// The argv that runs the flipped tests, run through the Runner.
@@ -194,10 +273,24 @@ pub fn run_one(
     ctx.open_task()?;
 
     // (3) Provision the disposable copy at the parent snapshot, through the Runner.
-    let dest = config.out.join("copies").join(&task.id).join(mode.system());
+    //
+    // R1: the snapshot value from `tasks.jsonl` is untrusted. It is accepted only as a hex object
+    // id, and the provisioning run's working directory is a batch-owned root under `--out`, never
+    // the snapshot value itself. A value like `/etc` would otherwise make `/etc` the sandbox's
+    // writable mount (PRD §B10: the disposable copy is the only writable mount).
+    let snapshot = task.snapshot();
+    if !is_hex_object_id(snapshot) {
+        return Err(RunError::UnsafeSnapshot {
+            task: task.id.clone(),
+            snapshot: snapshot.to_string(),
+        });
+    }
+    let copies_root = copies_root(&config.out);
+    std::fs::create_dir_all(&copies_root)?;
+    let dest = copies_root.join(&task.id).join(mode.system());
     let provision = runner.run(
-        Path::new(&task.snapshot()),
-        &provision_argv(task.snapshot(), &dest),
+        &copies_root,
+        &provision_argv(Path::new(&task.repo), snapshot, &dest),
         &config.limits,
     );
     ctx.observe(tsr_domain::Observation::Evidence {
@@ -208,9 +301,23 @@ pub fn run_one(
     // the session and the oracle against a directory that does not hold the snapshot, so refuse.
     if provision.exit != 0 {
         return Err(RunError::ProvisioningFailed {
-            argv: provision_argv(task.snapshot(), &dest).join(" "),
+            argv: provision_argv(Path::new(&task.repo), snapshot, &dest).join(" "),
             exit: provision.exit,
         });
+    }
+
+    // (3b) A mutant's copy is its base snapshot materialised with the mutant's own diff applied
+    // (D4). The base tree is unmutated, so the mutation diff is applied to `dest` before the
+    // session sees it. The diff is read from the CAS by digest; a missing or unsafe digest is an
+    // error, never a silently unmutated copy.
+    if let Some(diff_digest) = task.mutation_diff.as_deref() {
+        let cas = tsr_corpus::mine::cas_dir(&config.out);
+        let diff =
+            tsr_corpus::mine::read_cas(&cas, diff_digest).map_err(|e| RunError::MutationDiff {
+                digest: diff_digest.to_string(),
+                reason: e.to_string(),
+            })?;
+        apply_diff(&dest, &diff)?;
     }
 
     // (4) Drive the session.

@@ -171,9 +171,40 @@ fn record_mode_gates_nothing() {
 fn batch_run_records_results_for_the_five_fixture_tasks() {
     let dir = tempfile::tempdir().unwrap();
     let config = BatchConfig::new(dir.path(), profile());
-    let runner = ok_runner();
+    // A runner that materialises the base tree into the copy directory on a materialize call
+    // (the way `tsr corpus materialize` does), so the mutant tasks' mutation diff has a real
+    // tree to apply against.
+    struct CopyingRunner;
+    impl tsr_corpus::Runner for CopyingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if let Some(i) = argv.iter().position(|a| a == "--out") {
+                let out = PathBuf::from(&argv[i + 1]);
+                let _ = std::fs::create_dir_all(&out);
+                let _ = std::fs::write(
+                    out.join("lib.rs"),
+                    "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+                );
+            }
+            RunResult::exit_only(0)
+        }
+    }
+    let runner = CopyingRunner;
     let all = tasks();
     assert_eq!(all.len(), 5, "five fixture tasks");
+
+    // The mutant tasks' copies are their base snapshot with the mutation diff applied (D4); the
+    // diff is read from the CAS by its hex digest, so seed the objects the fixture names.
+    let cas = tsr_corpus::mine::cas_dir(dir.path());
+    std::fs::create_dir_all(&cas).unwrap();
+    for task in &all {
+        if let Some(digest) = task.mutation_diff.as_deref() {
+            std::fs::write(
+                cas.join(digest),
+                "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-pub fn add(a: i32, b: i32) -> i32 { a + b }\n+pub fn add(a: i32, b: i32) -> i32 { a - b }\n",
+            )
+            .unwrap();
+        }
+    }
 
     let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
     let results = run_all(
@@ -428,9 +459,9 @@ fn d4_provisioning_failure_is_refused() {
     // The provisioning run exits non-zero: the copy was never materialised.
     let mut runner = ScriptedRunner::ok();
     let dest = dir.path().join("copies").join(&task.id).join("rules");
-    let provision = tsr_batch::run::provision_argv(task.snapshot(), &dest);
+    let provision = tsr_batch::run::provision_argv(Path::new(&task.repo), task.snapshot(), &dest);
     runner.script(
-        Path::new(task.snapshot()),
+        tsr_batch::run::copies_root(dir.path()),
         &provision,
         RunResult::exit_only(1),
     );
@@ -570,4 +601,197 @@ fn r2_run_one_rechecks_the_task_id() {
     // Nothing was created outside `--out`: the escape paths do not exist.
     assert!(!Path::new("/etc/tsr-escape").exists());
     assert!(!dir.path().parent().unwrap().join("escape").exists());
+}
+
+/// D4: provisioning runs from a batch-owned root, never from the snapshot value, and passes
+/// `--repo` so `materialize` does not default to `.`.
+///
+/// The defect: `run_one` ran provisioning with the working directory set to `task.snapshot()` — a
+/// tree id, not a directory — so every task failed `provisioning failed … exited 127`, and
+/// `provision_argv` passed no `--repo`, so `materialize` defaulted to `.`.
+#[test]
+fn d4_provisioning_runs_from_a_batch_owned_root_with_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let runner = RecordingRunner::new();
+    let _ = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let provision_calls: Vec<(PathBuf, Vec<String>)> = runner
+        .calls()
+        .into_iter()
+        .filter(|(_, argv)| argv.iter().any(|a| a == "materialize"))
+        .collect();
+    assert_eq!(provision_calls.len(), 1, "exactly one provisioning run");
+    let (cwd, argv) = &provision_calls[0];
+
+    // The working directory is the batch-owned copies root, not the snapshot value.
+    assert_eq!(
+        cwd.as_path(),
+        tsr_batch::run::copies_root(dir.path()).as_path(),
+        "D4: provisioning must run from the batch-owned copies root, not the snapshot"
+    );
+    assert_ne!(
+        cwd.as_os_str(),
+        std::ffi::OsStr::new(task.snapshot()),
+        "D4: the snapshot value must never be the provisioning working directory"
+    );
+    // `--repo` is passed, so `materialize` does not default to `.`.
+    let repo_idx = argv
+        .iter()
+        .position(|a| a == "--repo")
+        .expect("D4: provision_argv must pass --repo");
+    assert_eq!(
+        argv[repo_idx + 1],
+        task.repo,
+        "D4: --repo must name the task's repository"
+    );
+    // The snapshot is passed as an argument, never as a path the batch runs from.
+    let snap_idx = argv.iter().position(|a| a == "--snapshot").unwrap();
+    assert_eq!(argv[snap_idx + 1], task.snapshot());
+}
+
+/// R1: a snapshot value that is not a hex object id is refused before anything is mounted.
+///
+/// The defect: the snapshot value from `tasks.jsonl` became `ExecRunner`'s working directory, so
+/// `"parent_snapshot":"/etc"` made `/etc` the sandbox's writable mount (PRD §B10: the disposable
+/// copy is the only writable mount). A snapshot is accepted only as a hex object id.
+#[test]
+fn r1_snapshot_must_be_a_hex_object_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = Some("/etc".to_string());
+
+    let runner = RecordingRunner::new();
+    let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+        .expect_err("R1: a snapshot that is not a hex object id must be refused");
+    assert!(
+        matches!(err, tsr_batch::run::RunError::UnsafeSnapshot { .. }),
+        "R1: expected UnsafeSnapshot, got {err:?}"
+    );
+    // Nothing was mounted: no provisioning run happened at all.
+    assert!(
+        runner.calls().is_empty(),
+        "R1: nothing may be mounted for an unsafe snapshot, got {:?}",
+        runner.calls()
+    );
+}
+
+/// R1: a `..` snapshot is refused too — a relative path is not a hex object id.
+#[test]
+fn r1_dotdot_snapshot_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = Some("../../etc".to_string());
+
+    let runner = RecordingRunner::new();
+    let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+        .expect_err("R1: a `..` snapshot must be refused");
+    assert!(matches!(
+        err,
+        tsr_batch::run::RunError::UnsafeSnapshot { .. }
+    ));
+    assert!(runner.calls().is_empty());
+}
+
+/// D4: a mutant's copy is its base snapshot materialised with the mutant's own diff applied.
+///
+/// The defect: a mutant's snapshot was a descriptor hash (`mutated_snapshot`) that named nothing
+/// materialisable. The copy is now the base tree with the mutation diff applied, so the copy's
+/// file holds the mutated source.
+#[test]
+fn d4_mutant_copy_applies_the_mutation_diff() {
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(
+        repo.join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base_tree = git(&["rev-parse", "HEAD^{tree}"]);
+
+    // The mutation diff: replace `a + b` with `a - b`.
+    let mutation = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-pub fn add(a: i32, b: i32) -> i32 { a + b }\n+pub fn add(a: i32, b: i32) -> i32 { a - b }\n";
+    let cas = tsr_corpus::mine::cas_dir(dir.path());
+    std::fs::create_dir_all(&cas).unwrap();
+    let digest = tsr_domain::Hash::of(&[mutation.as_bytes()]).to_hex();
+    std::fs::write(cas.join(&digest), mutation).unwrap();
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = None;
+    task.base_snapshot = Some(base_tree.clone());
+    task.mutated_snapshot = Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string());
+    task.mutation_diff = Some(digest);
+    task.repo = repo.display().to_string();
+
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // A runner that actually materialises the base tree into `dest` (the way `tsr corpus
+    // materialize` does), so the mutation diff has a real tree to apply against.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if argv.iter().any(|a| a == "materialize") {
+                let repo = argv[argv.iter().position(|a| a == "--repo").unwrap() + 1].clone();
+                let snap = argv[argv.iter().position(|a| a == "--snapshot").unwrap() + 1].clone();
+                let out = argv[argv.iter().position(|a| a == "--out").unwrap() + 1].clone();
+                let _ = snapshot;
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(format!(
+                        "mkdir -p {out} && git -C {repo} archive --format=tar {snap} | tar -x -C {out}"
+                    ))
+                    .status()
+                    .unwrap();
+                return RunResult::exit_only(status.code().unwrap_or(1));
+            }
+            RunResult::exit_only(0)
+        }
+    }
+
+    let result = run_one(&task, Mode::Rules, &driver, &MaterializingRunner, &config).unwrap();
+    let dest = tsr_batch::run::copies_root(dir.path())
+        .join(&task.id)
+        .join("rules");
+    let copied = std::fs::read_to_string(dest.join("lib.rs")).unwrap();
+    assert!(
+        copied.contains("a - b"),
+        "D4: the mutant's copy must hold the mutated source, got: {copied:?}"
+    );
+    assert_eq!(result.outcome, Outcome::Accepted);
 }
