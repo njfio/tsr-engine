@@ -162,6 +162,7 @@ pub fn ratio_cluster_bootstrap(
             lo: point,
             hi: point,
             resamples,
+            resamples_used: 0,
             clusters: clusters.len(),
             tasks: all.len(),
         });
@@ -170,6 +171,7 @@ pub fn ratio_cluster_bootstrap(
 
     let mut rng = SplitMix64::new(seed);
     let mut stats = Vec::with_capacity(resamples);
+    let mut used = 0usize;
     for _ in 0..resamples {
         let mut pooled: Vec<RatioTask> = Vec::new();
         for _ in 0..clusters.len() {
@@ -180,6 +182,7 @@ pub fn ratio_cluster_bootstrap(
         let u = ratio_of_sums(&pooled, |t| t.rules_num, |t| t.rules_den);
         if let (Some(r), Some(u)) = (r, u) {
             stats.push(u - r);
+            used += 1;
         }
     }
 
@@ -189,6 +192,7 @@ pub fn ratio_cluster_bootstrap(
             lo: point,
             hi: point,
             resamples,
+            resamples_used: used,
             clusters: clusters.len(),
             tasks: all.len(),
         });
@@ -202,6 +206,7 @@ pub fn ratio_cluster_bootstrap(
         lo,
         hi,
         resamples,
+        resamples_used: used,
         clusters: clusters.len(),
         tasks: all.len(),
     });
@@ -217,8 +222,11 @@ pub struct Interval {
     pub lo: f64,
     /// The upper bound of the interval (95th percentile).
     pub hi: f64,
-    /// The number of bootstrap resamples.
+    /// The number of bootstrap resamples requested.
     pub resamples: usize,
+    /// The number of resamples actually used (R4): a resample in which a
+    /// system's ratio is undefined is dropped, and the report must count it.
+    pub resamples_used: usize,
     /// The number of lineages resampled.
     pub clusters: usize,
     /// The number of paired tasks behind the point estimate.
@@ -232,16 +240,39 @@ impl Interval {
         self.lo <= 0.0 && self.hi >= 0.0
     }
 
-    /// Whether the interval is defined at all (D5).
+    /// The number of resamples dropped because a system's ratio was undefined
+    /// there (R4).
+    pub fn dropped(&self) -> usize {
+        self.resamples.saturating_sub(self.resamples_used)
+    }
+
+    /// The fraction of requested resamples that were dropped (R4).
+    pub fn dropped_fraction(&self) -> f64 {
+        if self.resamples == 0 {
+            0.0
+        } else {
+            self.dropped() as f64 / self.resamples as f64
+        }
+    }
+
+    /// Whether more than 5% of the requested resamples were dropped (R4): the
+    /// bootstrap distribution is then too thin to read, so the interval is n/a
+    /// and the verdict INCONCLUSIVE.
+    pub fn too_many_dropped(&self) -> bool {
+        self.dropped_fraction() > 0.05
+    }
+
+    /// Whether the interval is defined at all (D5, R4).
     ///
     /// The cluster bootstrap resamples *lineages*. With fewer than two
     /// lineages every resample draws the same single lineage, so the bootstrap
     /// distribution is one point and the interval has zero width — a
     /// degenerate interval that must not be read as "clear". An interval is
     /// defined only when there are at least two lineages to resample, at least
-    /// one resample, and at least one paired task behind the point estimate.
+    /// one resample, at least one paired task behind the point estimate, and no
+    /// more than 5% of the resamples were dropped (R4).
     pub fn is_defined(&self) -> bool {
-        self.clusters >= 2 && self.resamples > 0 && self.tasks > 0
+        self.clusters >= 2 && self.resamples > 0 && self.tasks > 0 && !self.too_many_dropped()
     }
 }
 
@@ -292,6 +323,7 @@ pub fn cluster_bootstrap(clusters: &[Cluster], seed: u64, resamples: usize) -> I
             lo: point,
             hi: point,
             resamples,
+            resamples_used: 0,
             clusters: clusters.len(),
             tasks: all.len(),
         };
@@ -315,6 +347,7 @@ pub fn cluster_bootstrap(clusters: &[Cluster], seed: u64, resamples: usize) -> I
         lo,
         hi,
         resamples,
+        resamples_used: resamples,
         clusters: clusters.len(),
         tasks: all.len(),
     }

@@ -92,8 +92,11 @@ pub struct Report {
     pub pair_by: PairBy,
     /// The seed used for the bootstrap.
     pub seed: u64,
-    /// The number of bootstrap resamples.
+    /// The number of bootstrap resamples requested.
     pub resamples: usize,
+    /// The number of bootstrap resamples actually used (R4): resamples in which
+    /// a system's ratio was undefined are dropped, and the report counts them.
+    pub resamples_used: usize,
     /// The number of tasks paired between the two systems.
     pub paired_tasks: usize,
     /// The number of lineages (repositories) the paired tasks span.
@@ -125,7 +128,10 @@ impl Report {
         s.push_str(&format!("results-dir: {}\n", self.dir));
         s.push_str(&format!("pair-by: {}\n", self.pair_by.as_str()));
         s.push_str(&format!("seed: {}\n", self.seed));
-        s.push_str(&format!("resamples: {}\n", self.resamples));
+        s.push_str(&format!(
+            "resamples: {} used of {} requested\n",
+            self.resamples_used, self.resamples
+        ));
         s.push_str(&format!("paired tasks: {}\n", self.paired_tasks));
         s.push_str(&format!("lineages: {}\n", self.lineages));
         if !self.unpaired.is_empty() {
@@ -163,6 +169,16 @@ impl Report {
                             metrics::proxy_for(&m.spec, d.lo),
                             metrics::proxy_for(&m.spec, d.hi)
                         ));
+                    } else if d.too_many_dropped() {
+                        // R4: more than 5% of the resamples were dropped because
+                        // a system had no accepted task there; the bootstrap
+                        // distribution is too thin to read.
+                        s.push_str(&format!(
+                            "  90% interval n/a — {} of {} resamples dropped ({}% > 5%)\n",
+                            d.dropped(),
+                            d.resamples,
+                            (d.dropped_fraction() * 100.0).round() as u64
+                        ));
                     } else {
                         // D5: fewer than two lineages — every resample is the
                         // same lineage, so the interval is degenerate and must
@@ -174,6 +190,12 @@ impl Report {
                             s.push_str(
                                 "  INCONCLUSIVE: the 90% interval spans zero; the incumbent stays.\n",
                             );
+                        } else if d.too_many_dropped() {
+                            s.push_str(&format!(
+                                "  INCONCLUSIVE: {} of {} resamples dropped (more than 5%); the incumbent stays.\n",
+                                d.dropped(),
+                                d.resamples
+                            ));
                         } else {
                             s.push_str(
                                 "  INCONCLUSIVE: the interval is undefined (fewer than two lineages); the incumbent stays.\n",
@@ -410,11 +432,22 @@ fn report_from(rd: &ResultsDir, pair_by: PairBy, seed: u64, resamples: usize) ->
         });
     }
 
+    // R4: the report counts the resamples actually used. Different metrics may
+    // drop different numbers (a ratio metric drops a resample in which a system
+    // has no accepted task), so the headline is the fewest used by any metric —
+    // the most conservative count.
+    let resamples_used = metrics_out
+        .iter()
+        .filter_map(|m| m.diff.as_ref().map(|d| d.resamples_used))
+        .min()
+        .unwrap_or(resamples);
+
     Report {
         dir: rd.dir.display().to_string(),
         pair_by,
         seed,
         resamples,
+        resamples_used,
         paired_tasks: paired.len(),
         lineages: rd
             .record

@@ -26,13 +26,15 @@ use tsr_corpus::{Limits, RunResult, Runner};
 
 /// A [`Runner`] that executes `git` for real against the snapshot it is handed.
 ///
-/// It records `(snapshot, argv, resolved_rev)` for every call, where `resolved_rev` is what
-/// `git -C <snapshot> rev-parse HEAD` says the snapshot actually is. It then writes the suite
-/// report the run would have written into the snapshot and returns the scripted exit code.
+/// It records `(snapshot, argv, resolved_tree)` for every call, where `resolved_tree` is the tree
+/// id of the snapshot's *content* (the snapshot is a plain directory from `git archive`, with no
+/// `.git`, so `git rev-parse HEAD` inside it would walk up to the enclosing repository and lie —
+/// N1). It then writes the suite report the run would have written into the snapshot and returns
+/// the scripted exit code.
 struct GitRunner {
     /// The exit code and report to answer with, in call order.
     answers: RefCell<Vec<(i32, SuiteReport)>>,
-    /// Every call: the snapshot, the argv, and the revision the snapshot resolves to.
+    /// Every call: the snapshot, the argv, and the tree id the snapshot's content hashes to.
     calls: RefCell<Vec<(PathBuf, Vec<String>, String)>>,
 }
 
@@ -47,15 +49,11 @@ impl GitRunner {
 
 impl Runner for GitRunner {
     fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
-        // Ask git what this snapshot actually is. A snapshot that is not a checkout of the
-        // revision `mine` claims is the defect this test names.
-        let resolved = Command::new("git")
-            .arg("-C")
-            .arg(snapshot)
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_else(|e| format!("<git failed: {e}>"));
+        // Ask git what tree this snapshot's content is. A snapshot that is not a checkout of the
+        // revision `mine` claims is the defect this test names. The snapshot has no `.git` (it is
+        // extracted from `git archive`), so we hash its content with a throwaway index rather than
+        // `git rev-parse HEAD`, which would resolve against the enclosing repository (N1).
+        let resolved = tree_of(snapshot);
         self.calls
             .borrow_mut()
             .push((snapshot.to_path_buf(), argv.to_vec(), resolved));
@@ -65,6 +63,34 @@ impl Runner for GitRunner {
         fs::write(snapshot.join(REPORT_FILE), &body).expect("write report");
         RunResult::from_output(exit, &body, b"", 1)
     }
+}
+
+/// The tree id of a plain directory's content (no `.git` required): initialise a throwaway
+/// repository in it, stage everything, and write the tree. The tree id is content-addressed, so it
+/// equals the source commit's tree id when the content is identical.
+fn tree_of(dir: &Path) -> String {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["init", "-q"])
+        .status()
+        .expect("git init");
+    assert!(status.success(), "git init in snapshot failed");
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["add", "-A"])
+        .status()
+        .expect("git add");
+    assert!(status.success(), "git add in snapshot failed");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["write-tree"])
+        .output()
+        .expect("git write-tree");
+    assert!(out.status.success(), "git write-tree in snapshot failed");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 fn report(passed: &[&str], failed: &[&str]) -> SuiteReport {
@@ -195,12 +221,14 @@ fn d4_mine_materialises_parent_and_commit_separately() {
         commit_snap.display()
     );
     assert_eq!(
-        parent_rev, &root,
-        "the parent run must be handed a checkout of the parent commit"
+        parent_rev,
+        &rev(&repo, &format!("{root}^{{tree}}")),
+        "the parent run must be handed a checkout of the parent commit's tree"
     );
     assert_eq!(
-        commit_rev, &flip,
-        "the commit run must be handed a checkout of the commit"
+        commit_rev,
+        &rev(&repo, &format!("{flip}^{{tree}}")),
+        "the commit run must be handed a checkout of the commit's tree"
     );
 
     // parent_snapshot is the parent commit's tree id, not the digest of the suite's stdout.

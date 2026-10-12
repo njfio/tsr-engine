@@ -311,6 +311,59 @@ fn a_missing_report_is_an_error_not_an_empty_flip_set() {
     assert!(matches!(err, tsr_corpus::mine::MineError::MissingReport(_)));
 }
 
+/// R5: a mine leaves no worktree registered in the operator's repository.
+///
+/// `materialize` extracts each snapshot with `git archive | tar` into a plain directory, so it
+/// never runs `git worktree add` and never writes a worktree registration into the repository it
+/// reads. This test pins that: `git worktree list` in the fixture repository is byte-identical
+/// before and after a mine.
+#[test]
+fn r5_mine_leaves_no_worktree_in_the_repository() {
+    let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).expect("tempdir");
+    let (repo, _root, _flip, _refactor, _regression) = fixture_repo(tmp.path());
+    let out = tmp.path().join("out");
+
+    let before = worktree_list(&repo);
+    let runner = SequenceRunner::new(vec![
+        (1, report(&[], &["adds"])), // parent = root
+        (0, report(&["adds"], &[])), // commit = flip
+        (0, report(&["adds"], &[])), // parent = flip
+        (0, report(&["adds"], &[])), // commit = refactor
+        (0, report(&["adds"], &[])), // parent = refactor
+        (1, report(&[], &["adds"])), // commit = regression
+    ]);
+    let opts = MineOptions {
+        suite: vec!["cargo".into(), "test".into()],
+        since: None,
+        family_rules: Vec::new(),
+        limits: Limits::default(),
+    };
+    mine(&repo, &out, &opts, &runner).expect("mine");
+
+    let after = worktree_list(&repo);
+    assert_eq!(
+        before, after,
+        "R5: a mine must not register a worktree in the operator's repository"
+    );
+    assert_eq!(
+        after.lines().filter(|l| l.starts_with("worktree ")).count(),
+        1,
+        "R5: the repository must still have exactly its one main worktree:\n{after}"
+    );
+}
+
+/// `git worktree list --porcelain` in `repo`, as a string.
+fn worktree_list(repo: &Path) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .expect("git worktree list");
+    assert!(out.status.success(), "git worktree list failed");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// Dump the fixture repo's `tasks.jsonl` for the evidence record. Run with `--nocapture`.
 #[test]
 fn dump_fixture_tasks_jsonl() {
