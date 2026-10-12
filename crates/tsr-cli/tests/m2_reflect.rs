@@ -16,7 +16,7 @@ use tsr_cli::reflect_cmd::{
     build_family_curves, build_mirror, render_family_curves, render_mirror, ReflectArgs,
 };
 use tsr_domain::{
-    ActionKind, Candidate, CandidateId, Contrast, ContrastId, CriterionId, Decision, Event,
+    ActionKind, Candidate, CandidateId, CriterionId, Decision, Event,
     EventKind, Forecast, ForecastId, Forecaster, Hash, Horizon, LabelStatus, Observation,
     OutcomeRecord, Probability, Source, Support, Surprise, TaskId, UnmetKind, Utility,
 };
