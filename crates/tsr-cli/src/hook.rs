@@ -29,6 +29,231 @@ use tsr_store::Store;
 /// command starts with this is a `RunApprovedTest`; anything else is `Generate` (the model's turn).
 pub const ALLOWLISTED_TEST_PREFIX: &str = "cargo test";
 
+/// Split a shell command string into words, respecting single quotes, double quotes and backslash
+/// escapes. Quotes are removed; a backslash escapes the next character outside single quotes. This
+/// is the same word-splitting the shell applies to the command string, so the hook and `tsr exec`
+/// (which is handed the argv after the shell split it) can agree on one encoding.
+pub fn shell_words(cmd: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut has_word = false;
+    let mut chars = cmd.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+    while let Some(c) = chars.next() {
+        if in_single {
+            if c == '\'' {
+                in_single = false;
+            } else {
+                cur.push(c);
+            }
+            continue;
+        }
+        if in_double {
+            match c {
+                '"' => in_double = false,
+                '\\' => {
+                    // Inside double quotes a backslash escapes only `"`, `\`, `$` and backtick; for
+                    // our purposes (re-quoting the same words) escaping the next char is faithful.
+                    if let Some(&n) = chars.peek() {
+                        if matches!(n, '"' | '\\' | '$' | '`') {
+                            cur.push(n);
+                            chars.next();
+                        } else {
+                            cur.push('\\');
+                        }
+                    } else {
+                        cur.push('\\');
+                    }
+                }
+                _ => cur.push(c),
+            }
+            continue;
+        }
+        match c {
+            '\'' => {
+                in_single = true;
+                has_word = true;
+            }
+            '"' => {
+                in_double = true;
+                has_word = true;
+            }
+            '\\' => {
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                    has_word = true;
+                }
+            }
+            c if c.is_whitespace() => {
+                if has_word {
+                    words.push(std::mem::take(&mut cur));
+                    has_word = false;
+                }
+            }
+            _ => {
+                cur.push(c);
+                has_word = true;
+            }
+        }
+    }
+    if has_word {
+        words.push(cur);
+    }
+    words
+}
+
+/// POSIX-quote a word: a word that is non-empty and contains only shell-safe characters is emitted
+/// bare; otherwise it is wrapped in single quotes with any embedded `'` replaced by `'\''`.
+fn quote_word(word: &str) -> String {
+    let safe = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
+    if safe {
+        word.to_string()
+    } else {
+        let mut out = String::with_capacity(word.len() + 2);
+        out.push('\'');
+        for c in word.chars() {
+            if c == '\'' {
+                out.push_str("'\\''");
+            } else {
+                out.push(c);
+            }
+        }
+        out.push('\'');
+        out
+    }
+}
+
+/// The one canonical encoding of an argv: each word POSIX-quoted and joined by single spaces. Both
+/// the hook (which parses the command string with [`shell_words`]) and `tsr exec` (which is handed
+/// the argv) call this, so `sh -c 'a; b'`, `sh -c "a; b"` and `sh -c a\;\ b` all produce one digest.
+pub fn canonical_args(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| quote_word(w))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Split a command string into top-level segments on `&&`, `;`, `|` and `||`, outside quotes. A
+/// command chain is a test run if any segment is one.
+fn command_segments(cmd: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut chars = cmd.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+    while let Some(c) = chars.next() {
+        if in_single {
+            cur.push(c);
+            if c == '\'' {
+                in_single = false;
+            }
+            continue;
+        }
+        if in_double {
+            cur.push(c);
+            match c {
+                '"' => in_double = false,
+                '\\' => {
+                    if let Some(n) = chars.next() {
+                        cur.push(n);
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '\'' => {
+                in_single = true;
+                cur.push(c);
+            }
+            '"' => {
+                in_double = true;
+                cur.push(c);
+            }
+            '\\' => {
+                cur.push(c);
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            '&' | '|' => {
+                // Consume the doubled operator (`&&`, `||`) so it is one separator.
+                if chars.peek() == Some(&c) {
+                    chars.next();
+                }
+                segments.push(std::mem::take(&mut cur));
+            }
+            ';' => {
+                segments.push(std::mem::take(&mut cur));
+            }
+            _ => cur.push(c),
+        }
+    }
+    segments.push(cur);
+    segments
+}
+
+/// Whether a word is a leading `VAR=value` assignment (`^[A-Za-z_][A-Za-z0-9_]*=`).
+fn is_assignment(word: &str) -> bool {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    for c in chars {
+        if c == '=' {
+            return true;
+        }
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return false;
+        }
+    }
+    false
+}
+
+/// Whether a single command segment (no top-level operators) is a test run: after skipping leading
+/// `VAR=value` assignments and an `env` prefix (and any assignments after it), the command begins
+/// with `cargo test` or `cargo nextest run`.
+fn segment_is_test_run(segment: &str) -> bool {
+    let words = shell_words(segment);
+    let mut i = 0;
+    // Skip leading `VAR=value` assignments.
+    while i < words.len() && is_assignment(&words[i]) {
+        i += 1;
+    }
+    // Skip a leading `env` (and any assignments after it).
+    if i < words.len() && words[i] == "env" {
+        i += 1;
+        while i < words.len() && is_assignment(&words[i]) {
+            i += 1;
+        }
+    }
+    let rest = &words[i..];
+    match rest {
+        [cargo, test, ..] if cargo == "cargo" && test == "test" => true,
+        [cargo, nextest, run, ..] if cargo == "cargo" && nextest == "nextest" && run == "run" => {
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Whether a `Bash` command is a test run: any top-level segment, after skipping leading
+/// `VAR=value` assignments and an `env` prefix, begins with `cargo test` or `cargo nextest run`.
+/// A chain (`cd crate && cargo test`, `a; cargo test`, `x | cargo test`) is a test run if any
+/// segment is one.
+pub fn is_test_run_command(cmd: &str) -> bool {
+    command_segments(cmd)
+        .iter()
+        .any(|seg| segment_is_test_run(seg))
+}
+
 /// The common decision event (B7): every candidate forecasts `task_accepted_in_budget@v1`.
 pub const DECISION_EVENT: &str = "task_accepted_in_budget@v1";
 
@@ -100,10 +325,7 @@ pub fn action_for(tool_name: Option<&str>, bash_command: Option<&str>) -> Action
         Some("Read") | Some("Grep") | Some("Glob") | Some("rts") => ActionKind::Inspect,
         Some("Edit") | Some("Write") => ActionKind::ProposePatch,
         Some("Bash") => match bash_command {
-            Some(cmd)
-                if cmd.trim_start().starts_with(ALLOWLISTED_TEST_PREFIX)
-                    || is_tsr_exec_command(cmd) =>
-            {
+            Some(cmd) if is_test_run_command(cmd) || is_tsr_exec_command(cmd) => {
                 ActionKind::RunApprovedTest
             }
             _ => ActionKind::Generate,
@@ -184,32 +406,52 @@ pub fn mint_candidate(kind: ActionKind, args: &str) -> anyhow::Result<Candidate>
     )?)
 }
 
-/// Whether a `Bash` command is a `tsr exec -- …` invocation: the first token's basename is `tsr`
-/// (optionally with a path prefix, e.g. `./target/debug/tsr`) and the second token is `exec`. Such a
-/// command records its own dispatch inside `tsr exec`, so the hook records nothing further for it.
+/// Whether a `Bash` command is a `tsr exec -- …` invocation: after skipping leading `VAR=value`
+/// assignments and an `env` prefix (and any assignments after it), the first token's basename is
+/// `tsr` (optionally with a path prefix, e.g. `./target/debug/tsr`) and the second token is `exec`.
+/// Such a command records its own dispatch inside `tsr exec`, so the hook records nothing further
+/// for it. A chain (`cd crate && tsr exec -- …`) is a `tsr exec` invocation if any segment is one.
 pub fn is_tsr_exec_command(cmd: &str) -> bool {
-    let mut tokens = cmd.split_whitespace();
-    let first = match tokens.next() {
-        Some(t) => t,
-        None => return false,
-    };
-    let base = first.rsplit('/').next().unwrap_or(first);
-    base == "tsr" && tokens.next() == Some("exec")
+    command_segments(cmd)
+        .iter()
+        .any(|seg| segment_is_tsr_subcommand(seg, "exec"))
 }
 
-/// Whether a `Bash` command is a `tsr forecast …` invocation (the first token's basename is `tsr`,
-/// the second is `forecast`). `tsr forecast` records its own `Proposed` and `Forecast`, so the hook
-/// records nothing for the call — before or after it. Recording the call as a `Generate` turn put a
-/// PostToolUse `Unresolved` *between* the forecast and the commitment it names, so the forecast's
-/// state version never matched (found by the first real Claude Code session, 2026-10-11).
+/// Whether a `Bash` command is a `tsr forecast …` invocation (after the same prefix-skipping, the
+/// first token's basename is `tsr` and the second is `forecast`). `tsr forecast` records its own
+/// `Proposed` and `Forecast`, so the hook records nothing for the call — before or after it.
+/// Recording the call as a `Generate` turn put a PostToolUse `Unresolved` *between* the forecast and
+/// the commitment it names, so the forecast's state version never matched (found by the first real
+/// Claude Code session, 2026-10-11).
 pub fn is_tsr_forecast_command(cmd: &str) -> bool {
-    let mut tokens = cmd.split_whitespace();
-    let first = match tokens.next() {
-        Some(t) => t,
-        None => return false,
-    };
-    let base = first.rsplit('/').next().unwrap_or(first);
-    base == "tsr" && tokens.next() == Some("forecast")
+    command_segments(cmd)
+        .iter()
+        .any(|seg| segment_is_tsr_subcommand(seg, "forecast"))
+}
+
+/// Whether a single command segment (no top-level operators) is a `tsr <sub>` invocation: after
+/// skipping leading `VAR=value` assignments and an `env` prefix, the first word's basename is `tsr`
+/// and the second word is `sub`.
+fn segment_is_tsr_subcommand(segment: &str, sub: &str) -> bool {
+    let words = shell_words(segment);
+    let mut i = 0;
+    while i < words.len() && is_assignment(&words[i]) {
+        i += 1;
+    }
+    if i < words.len() && words[i] == "env" {
+        i += 1;
+        while i < words.len() && is_assignment(&words[i]) {
+            i += 1;
+        }
+    }
+    let rest = &words[i..];
+    match rest {
+        [tsr, s, ..] => {
+            let base = tsr.rsplit('/').next().unwrap_or(tsr);
+            base == "tsr" && s == sub
+        }
+        _ => false,
+    }
 }
 
 /// The inner command of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
@@ -218,21 +460,32 @@ pub fn is_tsr_forecast_command(cmd: &str) -> bool {
 /// `exec::mint_candidate` digests — so the hook's candidate for the wrapper call equals the one the
 /// forecast names and the one `tsr exec` dispatches.
 pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
-    if !is_tsr_exec_command(cmd) {
-        return None;
+    for seg in command_segments(cmd) {
+        if !segment_is_tsr_subcommand(&seg, "exec") {
+            continue;
+        }
+        let words = shell_words(&seg);
+        let mut i = 0;
+        while i < words.len() && is_assignment(&words[i]) {
+            i += 1;
+        }
+        if i < words.len() && words[i] == "env" {
+            i += 1;
+            while i < words.len() && is_assignment(&words[i]) {
+                i += 1;
+            }
+        }
+        // words[i] is the `tsr` token, words[i+1] is `exec`.
+        let mut rest = &words[i + 2..];
+        if rest.first().map(String::as_str) == Some("--") {
+            rest = &rest[1..];
+        }
+        if rest.is_empty() {
+            return None;
+        }
+        return Some(canonical_args(rest));
     }
-    let mut tokens = cmd.split_whitespace();
-    tokens.next()?; // the `tsr` token
-    tokens.next()?; // `exec`
-    let rest: Vec<&str> = tokens.collect();
-    let rest = match rest.first() {
-        Some(&"--") => &rest[1..],
-        _ => &rest[..],
-    };
-    if rest.is_empty() {
-        return None;
-    }
-    Some(rest.join(" "))
+    None
 }
 
 thread_local! {
@@ -385,15 +638,13 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
 
     // 1. The candidate is proposed, unless it is already pending (the agent forecast first). The
     //    model's own turn is typed `Generate` (B4 line 218); every other action is a `Proposed`
-    //    candidate.
-    let already_proposed = kind != ActionKind::Generate && pending_proposal(store, &task, cid)?;
-    let proposed_id = if kind == ActionKind::Generate {
-        push(
-            EventKind::Generate { candidate: cid },
-            source,
-            parents.clone(),
-        )
-    } else if already_proposed {
+    //    candidate. A `Generate` turn is recorded in the same `Proposed` → `Committed` shape as
+    //    every other action: a bare `Generate` event followed by a `Committed` with no prior
+    //    `Proposed` is rejected by `reconstruct` (lib.rs:97-101), so an ordinary session (a Bash
+    //    `ls`, a `TodoWrite`) would never yield a passing record. `Generate` is not gated (B5), so
+    //    no forecast is required and the invariant still holds.
+    let already_proposed = pending_proposal(store, &task, cid)?;
+    let proposed_id = if already_proposed {
         // The proposal is already on record; the commitment chains to the last event.
         parents
             .last()
@@ -1281,6 +1532,98 @@ mod tests {
                 "executed"
             ],
             "each run proposes and commits once, and each PostToolUse reconciles its own commitment"
+        );
+    }
+
+    /// `tsr exec` is recognised after leading `VAR=value` assignments, an `env` prefix, and inside a
+    /// command chain (review item 8a, repair): a prefix must not defeat `is_tsr_exec_command`.
+    #[test]
+    fn tsr_exec_is_recognised_after_prefixes_and_chains() {
+        for cmd in [
+            "tsr exec -- cargo test",
+            "RUST_BACKTRACE=1 tsr exec -- cargo test",
+            "env X=1 tsr exec -- cargo test",
+            "env RUST_BACKTRACE=1 tsr exec -- cargo test",
+            "cd crate && tsr exec -- cargo test",
+            "./target/debug/tsr exec -- cargo test",
+        ] {
+            assert!(is_tsr_exec_command(cmd), "{cmd:?} is a tsr exec");
+            assert_eq!(
+                tsr_exec_inner(cmd).as_deref(),
+                Some("cargo test"),
+                "{cmd:?} extracts the inner command"
+            );
+        }
+        for cmd in [
+            "tsr forecast --kind run_approved_test",
+            "RUST_BACKTRACE=1 tsr forecast --kind run_approved_test",
+            "cargo test",
+            "ls",
+        ] {
+            assert!(!is_tsr_exec_command(cmd), "{cmd:?} is not a tsr exec");
+        }
+    }
+
+    /// A test run is recognised after leading `VAR=value` assignments, an `env` prefix, and inside a
+    /// command chain (review item 8a).
+    #[test]
+    fn test_run_classification_skips_prefixes_and_chains() {
+        for cmd in [
+            "cargo test",
+            "cargo test --offline -p parser",
+            "RUST_BACKTRACE=1 cargo test",
+            "env X=1 cargo test",
+            "env RUST_BACKTRACE=1 cargo test",
+            "cd crate && cargo test",
+            "cargo nextest run",
+            "RUST_BACKTRACE=1 cargo nextest run",
+            "echo hi; cargo test",
+            "true | cargo test",
+        ] {
+            assert!(is_test_run_command(cmd), "{cmd:?} is a test run");
+        }
+        for cmd in [
+            "ls",
+            "cargo build",
+            "cargo testx",
+            "echo cargo test",
+            "cd crate",
+            "RUST_BACKTRACE=1 ls",
+        ] {
+            assert!(!is_test_run_command(cmd), "{cmd:?} is not a test run");
+        }
+    }
+
+    /// The three spellings of `sh -c 'a; b'` produce one canonical digest (review item 8b).
+    #[test]
+    fn one_canonical_encoding_for_three_spellings() {
+        let a = tsr_exec_inner("tsr exec -- sh -c 'a; b'").expect("single-quoted");
+        let b = tsr_exec_inner("tsr exec -- sh -c \"a; b\"").expect("double-quoted");
+        let c = tsr_exec_inner("tsr exec -- sh -c a\\;\\ b").expect("escaped");
+        assert_eq!(a, "sh -c 'a; b'");
+        assert_eq!(a, b, "single- and double-quoted spellings agree");
+        assert_eq!(a, c, "escaped spelling agrees");
+    }
+
+    /// A `Generate` turn (a Bash `ls`, a `TodoWrite`) is recorded `Proposed` → `Committed`, so
+    /// `reconstruct` accepts it (review item 8c).
+    #[test]
+    fn a_generate_turn_is_proposed_then_committed() {
+        let (store, _dir) = fresh_store("generate-shape");
+        let session = "generate-shape";
+        let task = store_path::task_for_session(session);
+        record_tool(&store, &bash_payload(session, "PreToolUse", "ls", None)).expect("pre");
+        record_post_tool(&store, &bash_payload(session, "PostToolUse", "ls", Some(0)))
+            .expect("post");
+        let t = tags(&store, &task);
+        assert_eq!(
+            &t[..2],
+            &["proposed", "committed"],
+            "a Generate turn is Proposed then Committed, never a bare Generate"
+        );
+        assert!(
+            !t.iter().any(|k| k == "generate"),
+            "no bare Generate event is recorded: {t:?}"
         );
     }
 }

@@ -46,35 +46,11 @@ pub fn resolve_workspace(ws: &Path) -> PathBuf {
     resolve_lexical_and_canonical(ws)
 }
 
-/// Normalise `.`/`..` lexically, then canonicalise the longest existing ancestor and re-append the
-/// remainder. See [`resolve_store_path`] for the rule.
+/// Resolve `.`/`..` and symlinks component by component: walk the path, and for each component
+/// canonicalise the accumulated prefix when it exists, so a symlink is followed **before** a
+/// following `..` is applied. A `..` after a symlink must pop the symlink's *target*, not the link
+/// name: `link/../x` with `link → deep/sub` resolves to `deep/x`, not to the link's parent.
 fn resolve_lexical_and_canonical(p: &Path) -> PathBuf {
-    let normalised = normalise(p);
-    let mut existing: &Path = &normalised;
-    let mut remainder: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
-        match existing.file_name() {
-            Some(name) => {
-                remainder.push(name.to_os_string());
-                match existing.parent() {
-                    Some(parent) if !parent.as_os_str().is_empty() => existing = parent,
-                    _ => break,
-                }
-            }
-            None => break,
-        }
-    }
-    let base = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
-    let mut out = base;
-    for part in remainder.iter().rev() {
-        out.push(part);
-    }
-    out
-}
-
-/// Normalise `.` and `..` in `p` lexically, without touching the filesystem. A `..` at the root is
-/// dropped (the root has no parent).
-fn normalise(p: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for comp in p.components() {
@@ -82,9 +58,19 @@ fn normalise(p: &Path) -> PathBuf {
             Component::Prefix(_) | Component::RootDir => out.push(comp.as_os_str()),
             Component::CurDir => {}
             Component::ParentDir => {
+                // Resolve the accumulated prefix first, so a `..` pops the symlink's target.
+                if let Ok(real) = std::fs::canonicalize(&out) {
+                    out = real;
+                }
                 out.pop();
             }
-            Component::Normal(c) => out.push(c),
+            Component::Normal(c) => {
+                out.push(c);
+                // Follow a symlink as soon as the component exists, so a later `..` sees the target.
+                if let Ok(real) = std::fs::canonicalize(&out) {
+                    out = real;
+                }
+            }
         }
     }
     out
@@ -325,5 +311,22 @@ mod tests {
             resolve_workspace(&link),
             std::fs::canonicalize(&real).expect("canonicalize real")
         );
+    }
+
+    /// A `..` after a symlink pops the symlink's **target**, not the link name (review item 8):
+    /// `link → <W>/deep/sub`, so `link/../x/tsr.db` resolves to `<W>/deep/x/tsr.db`.
+    #[cfg(unix)]
+    #[test]
+    fn dotdot_after_a_symlink_pops_the_target() {
+        let root = scratch("symlink-dotdot");
+        let deep_sub = root.join("deep/sub");
+        std::fs::create_dir_all(&deep_sub).expect("deep/sub dir");
+        let link = root.join("link");
+        symlink(&deep_sub, &link);
+        let got = resolve_store_path(&link.join("../x/tsr.db"), &root);
+        let want = std::fs::canonicalize(&root)
+            .expect("canonicalize root")
+            .join("deep/x/tsr.db");
+        assert_eq!(got, want);
     }
 }

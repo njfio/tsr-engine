@@ -476,6 +476,14 @@ fn run_hook(
 }
 
 fn run_exec(argv: &[String]) -> ExitCode {
+    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // Refuse a store whose directory *is* the workspace **before** the store is opened: opening it
+    // would create an empty `tsr.db` in the workspace, which the refusal must not leave behind
+    // (review item 9). `exec::run` keeps the same check for callers that open the store themselves.
+    if exec::store_dir_is_workspace(&workspace) {
+        eprintln!("tsr: TSR_DB must not be the workspace itself");
+        return ExitCode::from(2);
+    }
     let store = match store_path::open_store() {
         Ok(s) => s,
         Err(e) => {
@@ -483,7 +491,6 @@ fn run_exec(argv: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     // The same session-resolution rule the hook used to commit the candidate: `TSR_SESSION` (set by
     // the caller) or the `.tsr/session` file the hook wrote, so the committed-candidate reuse fires.
     let task = match store_path::resolve_session_task(None) {

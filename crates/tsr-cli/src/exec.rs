@@ -433,7 +433,10 @@ pub fn run_with(
         store,
         task,
         ActionKind::RunApprovedTest,
-        crate::hook::args_digest(ActionKind::RunApprovedTest, &argv.join(" ")),
+        crate::hook::args_digest(
+            ActionKind::RunApprovedTest,
+            &crate::hook::canonical_args(argv),
+        ),
     ) {
         // The hook committed this candidate for the same argv: dispatch it, do not mint a second.
         Some(cid) => cid,
@@ -554,8 +557,11 @@ pub fn candidate_for(argv: &[String]) -> CandidateId {
 /// identity for the same command. The args string is the argv joined by spaces — the command string
 /// the hook digests for a `Bash` call.
 fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
-    crate::hook::mint_candidate(ActionKind::RunApprovedTest, &argv.join(" "))
-        .map_err(|_| ExecRefusal::NoRuntime)
+    crate::hook::mint_candidate(
+        ActionKind::RunApprovedTest,
+        &crate::hook::canonical_args(argv),
+    )
+    .map_err(|_| ExecRefusal::NoRuntime)
 }
 
 /// The candidate of the most recent `Committed` for `(kind, args_digest)` that has no `Dispatched`
