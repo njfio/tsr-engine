@@ -148,3 +148,99 @@ fn r5_task_reconcile_does_not_create_cwd_store() {
         "reconcile must not create ./tsr.db in the cwd"
     );
 }
+
+/// Run `tsr <args>` with `cwd` as the working directory and `TSR_DB` **unset**, so the store
+/// resolves to the default `.tsr/tsr.db` under the cwd. Returns (exit code, stdout, stderr).
+fn run_tsr_no_db(cwd: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(tsr_bin())
+        .args(args)
+        .current_dir(cwd)
+        .env_remove("TSR_DB")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn tsr");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// R5: `tsr task reconcile` with `TSR_DB` unset must NOT create `.tsr/tsr.db`; it only reads, so a
+/// missing store is refused with exit 2 naming the path.
+#[test]
+fn r5_task_reconcile_without_tsr_db_refuses_missing_store() {
+    let dir = scratch("reconcile-no-db");
+    let cwd = dir.join("cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let t = task(4);
+
+    let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "reconcile", &t.to_string()]);
+    assert_eq!(
+        code, 2,
+        "a missing store is refused with exit 2; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains(".tsr/tsr.db") || stderr.contains(".tsr\\tsr.db"),
+        "the error names the default store path; stderr={stderr}"
+    );
+    assert!(
+        !cwd.join(".tsr").join("tsr.db").exists(),
+        "task reconcile must not create .tsr/tsr.db it only reads"
+    );
+}
+
+/// R5: `tsr task status` with `TSR_DB` unset must NOT create `.tsr/tsr.db`.
+#[test]
+fn r5_task_status_without_tsr_db_refuses_missing_store() {
+    let dir = scratch("status-no-db");
+    let cwd = dir.join("cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let t = task(5);
+
+    let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "status", &t.to_string()]);
+    assert_eq!(
+        code, 2,
+        "a missing store is refused with exit 2; stderr={stderr}"
+    );
+    assert!(
+        !cwd.join(".tsr").join("tsr.db").exists(),
+        "task status must not create .tsr/tsr.db it only reads"
+    );
+}
+
+/// R5: `tsr task export` with `TSR_DB` unset must NOT create `.tsr/tsr.db`.
+#[test]
+fn r5_task_export_without_tsr_db_refuses_missing_store() {
+    let dir = scratch("export-no-db");
+    let cwd = dir.join("cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let t = task(6);
+
+    let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "export", &t.to_string()]);
+    assert_eq!(
+        code, 2,
+        "a missing store is refused with exit 2; stderr={stderr}"
+    );
+    assert!(
+        !cwd.join(".tsr").join("tsr.db").exists(),
+        "task export must not create .tsr/tsr.db it only reads"
+    );
+}
+
+/// R5: `tsr task open` is the writing arm — it DOES create the store (exit 0, file appears).
+#[test]
+fn r5_task_open_creates_the_store() {
+    let dir = scratch("open-no-db");
+    let cwd = dir.join("cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let (code, _stdout, stderr) = run_tsr_no_db(&cwd, &["task", "open", "--name", "r5-open"]);
+    assert_eq!(code, 0, "task open exits 0; stderr={stderr}");
+    assert!(
+        cwd.join(".tsr").join("tsr.db").exists(),
+        "task open must create the store it writes"
+    );
+}
