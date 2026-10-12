@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedSession};
+use tsr_batch::driver::{read_session, Mode, ScriptedDriver, ScriptedRepo, ScriptedSession};
 use tsr_batch::run::{run_all, BatchConfig};
 use tsr_batch::task::read_tasks;
 use tsr_batch::ClaudeCodeDriver;
@@ -93,7 +93,17 @@ fn run_inner(
                         .get(&task.id)
                         .cloned()
                         .unwrap_or_else(|| sessions.values().next().cloned().expect("a session"));
-                    Box::new(ScriptedDriver::new(mode, session))
+                    let driver = ScriptedDriver::new(mode, session);
+                    // D6: in the shipped rules mode the Tier 0 controller is attached, so the
+                    // read-before-test rule and the tool-minute budget are enforced on the session
+                    // the CLI replays — not only in tests. In record mode the controller is
+                    // ignored (system 1 gates nothing), so it is not attached.
+                    if mode == Mode::Rules {
+                        let repo = scripted_repo_for(task, &config.profile);
+                        Box::new(driver.with_tier0(repo, config.profile.budgets.tool_minutes))
+                    } else {
+                        Box::new(driver)
+                    }
                 },
                 runner.as_ref(),
                 &config,
@@ -171,6 +181,34 @@ fn resolve_profile(profile_arg: Option<&Path>) -> Result<PathBuf, String> {
     ))
 }
 
+/// The scripted repository the Tier 0 controller checks a task's session against (D6).
+///
+/// The controller enforces read-before-test: before the allowlisted test that runs the failing
+/// test may run, the session must have inspected the failing assertion and its call site. The
+/// CLI derives those two paths from the task's flipped test — a test `parser::tests::x` lives in
+/// the `parser` module, so its assertion is `src/parser.rs` and its call site `tests/parser.rs` —
+/// and takes the failing test id from the profile's first allowlisted test command (the one whose
+/// argv runs the crate's tests). A task with no flipped test (a mutant) uses the profile's first
+/// test id and the crate's own source path.
+fn scripted_repo_for(task: &tsr_batch::CorpusTask, profile: &Profile) -> ScriptedRepo {
+    let failing_test_id = profile
+        .tests
+        .first()
+        .map(|t| t.id.clone())
+        .unwrap_or_default();
+    let module = task
+        .failing_tests()
+        .first()
+        .and_then(|t| t.split("::").next())
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| task.family.clone());
+    ScriptedRepo::new(
+        format!("src/{module}.rs"),
+        format!("tests/{module}.rs"),
+        failing_test_id,
+    )
+}
 
 /// Load one session per task, in the order the manifest names them.
 fn load_sessions(
