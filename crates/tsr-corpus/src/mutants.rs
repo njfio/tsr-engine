@@ -67,10 +67,14 @@ use crate::{digest, Limits, Runner};
 /// only digests, so the argv redirects that stdout into [`LIST_FILE`] inside the snapshot — the
 /// file [`read_list`] reads. This is the one place the doc and the code agree on where the list
 /// lives (D9c).
+///
+/// `mutants.out/` does not exist on a fresh checkout, so the redirect must create it first: a bare
+/// `> mutants.out/mutants.json` fails with `Directory nonexistent` (exit 2) before cargo-mutants is
+/// reached (D9e).
 pub const LIST_ARGV: &[&str] = &[
     "sh",
     "-c",
-    "cargo mutants --list --json > mutants.out/mutants.json",
+    "mkdir -p mutants.out && cargo mutants --list --json > mutants.out/mutants.json",
 ];
 
 /// The argv that runs the kill run.
@@ -484,6 +488,100 @@ pub fn reversal_diff(repo: &Path, mutant: &MutantDescriptor) -> String {
         mutated = mutated.trim_end(),
         original = original.trim_end(),
     )
+}
+
+/// Reverse a unified diff: swap the `-`/`+` file headers and, in every hunk, swap the `-` and `+`
+/// lines. Returns `None` if `diff` is not a unified diff this can reverse (no `@@` hunk, or a hunk
+/// with no `-`/`+` pair), so the caller falls back to the span reconstruction.
+///
+/// cargo-mutants writes its mutation diff with `--- <file>` / `+++ <description>` headers and
+/// `@@ -a,b +c,d @@` hunks; reversing it produces `--- a/<file>` / `+++ b/<file>` and the inverse
+/// hunk, which `git apply` accepts against the mutated file (D9f).
+fn reverse_unified_diff(diff: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut saw_hunk = false;
+    let mut old_header: Option<String> = None;
+    // The lines of the hunk being reversed, in order. A unified diff lists a run of `-` lines
+    // followed by a run of `+` lines at each change; reversing swaps the two runs in place, so the
+    // context lines keep their position.
+    let mut hunk: Vec<(char, String)> = Vec::new();
+    let flush = |out: &mut String, hunk: &mut Vec<(char, String)>| {
+        let mut i = 0;
+        while i < hunk.len() {
+            match hunk[i].0 {
+                '-' => {
+                    // A run of removed lines: collect it, then the run of added lines that follows.
+                    let mut removed: Vec<String> = Vec::new();
+                    while i < hunk.len() && hunk[i].0 == '-' {
+                        removed.push(hunk[i].1.clone());
+                        i += 1;
+                    }
+                    let mut added: Vec<String> = Vec::new();
+                    while i < hunk.len() && hunk[i].0 == '+' {
+                        added.push(hunk[i].1.clone());
+                        i += 1;
+                    }
+                    // Reversed: the added lines become removed, the removed lines become added.
+                    for line in &added {
+                        out.push('-');
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                    for line in &removed {
+                        out.push('+');
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+                '+' => {
+                    // A `+` run with no preceding `-` run: it becomes a `-` run.
+                    out.push('-');
+                    out.push_str(&hunk[i].1);
+                    out.push('\n');
+                    i += 1;
+                }
+                _ => {
+                    out.push(' ');
+                    out.push_str(&hunk[i].1);
+                    out.push('\n');
+                    i += 1;
+                }
+            }
+        }
+        hunk.clear();
+    };
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("--- ") {
+            flush(&mut out, &mut hunk);
+            // The original file header names the file the mutation was applied to; it becomes the
+            // reversed `--- a/<file>` header (git wants `---` before `+++`).
+            old_header = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("+++ ") {
+            flush(&mut out, &mut hunk);
+            // The mutation's description header becomes the reversed `+++ b/<file>` header.
+            let file = old_header
+                .clone()
+                .unwrap_or_else(|| rest.trim().to_string());
+            out.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
+        } else if line.starts_with("@@") {
+            flush(&mut out, &mut hunk);
+            out.push_str(line);
+            out.push('\n');
+            saw_hunk = true;
+        } else if let Some(rest) = line.strip_prefix('-') {
+            hunk.push(('-', rest.to_string()));
+        } else if let Some(rest) = line.strip_prefix('+') {
+            hunk.push(('+', rest.to_string()));
+        } else if let Some(rest) = line.strip_prefix(' ') {
+            hunk.push((' ', rest.to_string()));
+        }
+    }
+    flush(&mut out, &mut hunk);
+    if saw_hunk {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Read the 1-based `line` of `file` under `repo`, if it exists.

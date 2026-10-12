@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use tsr_corpus::mine::{SuiteReport, TestVerdict};
 use tsr_corpus::mutants::{
-    family_of, mutants, parse_list, parse_outcomes, read_list, read_outcomes, MutantsError,
-    MutantsOptions, LIST_FILE, MUTANTS_OUT_DIR, OUTCOMES_FILE,
+    family_of, mutants, parse_list, parse_outcomes, read_list, read_outcomes, reversal_diff,
+    MutantsError, MutantsOptions, LIST_FILE, MUTANTS_OUT_DIR, OUTCOMES_FILE,
 };
 use tsr_corpus::{Limits, RunResult, Runner};
 
@@ -955,5 +955,147 @@ fn d9_reversal_is_a_real_unified_diff() {
     assert!(
         saw_hunk,
         "at least one reversal diff was written to the CAS"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// D9: the list argv actually runs, and the reversal actually applies
+// ---------------------------------------------------------------------------------------------
+
+/// D9(e): the list argv runs on a fresh checkout.
+///
+/// Pre-fix, `LIST_ARGV` was `sh -c "cargo mutants --list --json > mutants.out/mutants.json"`.
+/// `mutants.out/` does not exist on a fresh checkout, so the shell's redirect fails before
+/// cargo-mutants is even reached: `sh: 1: cannot create mutants.out/mutants.json: Directory
+/// nonexistent`, exit 2. The fix creates the directory first (`mkdir -p mutants.out && …`), so the
+/// redirect succeeds and the file `read_list` reads is written.
+///
+/// This test **runs the argv** in a temp dir (it does not grep the string): it puts a fake `cargo`
+/// on `PATH` that prints the sample array, runs the real `LIST_ARGV`, and asserts the exit is 0 and
+/// `mutants.out/mutants.json` holds the sample. Pre-fix the exit is 2 and the file is absent.
+#[test]
+fn d9_list_argv_runs_on_a_fresh_checkout() {
+    let dir = tmpdir("d9-list-argv");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).expect("mkdir bin");
+    let fake_cargo = bin.join("cargo");
+    fs::write(&fake_cargo, "#!/bin/sh\ncat \"$TSR_FAKE_LIST\"\n").expect("write fake cargo");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&fake_cargo).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&fake_cargo, perms).expect("chmod");
+    }
+    let list_file = dir.join("sample.json");
+    fs::write(&list_file, LIST_SAMPLE).expect("write sample");
+
+    let argv = MutantsOptions::default().list_argv;
+    let out = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(&dir)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("TSR_FAKE_LIST", &list_file)
+        .output()
+        .expect("run list argv");
+    assert!(
+        out.status.success(),
+        "the list argv must run on a fresh checkout (no mutants.out/ yet); exit {:?}, stderr: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let written = dir.join(LIST_FILE);
+    assert!(
+        written.is_file(),
+        "the list argv must write {LIST_FILE} inside the snapshot; it did not"
+    );
+    let bytes = fs::read(&written).expect("read written list");
+    assert_eq!(
+        parse_list(&bytes).expect("parse written list").len(),
+        10,
+        "the file the list argv wrote is the sample array read_list reads"
+    );
+}
+
+/// D9(f): the reversal is built from the descriptor's own `diff` and applies to the mutated file.
+///
+/// Pre-fix, `reversal_diff` reconstructed the reversal from the descriptor's `replacement` and the
+/// source line at the span, which for a `BinaryOperator` mutant (`replacement = "-"`) produced
+/// `-`/`-`/`+    a + b` — a diff `git apply --check` refuses against the mutated file. The fix
+/// reverses the descriptor's own `diff` field (the mutation cargo-mutants actually applied), so the
+/// reversal applies cleanly.
+///
+/// This test materialises the fixture's mutated `src/lib.rs` in a real git repo, writes the
+/// reversal `reversal_diff` returns, and runs `git apply --check` on it.
+#[test]
+fn d9_reversal_applies_to_the_mutated_file() {
+    let listed = parse_list(LIST_SAMPLE.as_bytes()).expect("parse list");
+    // The `replace + with - in add` mutant: its `replacement` is `-`, which the old reconstruction
+    // turned into a diff that cannot apply.
+    let mutant = listed
+        .iter()
+        .find(|m| m.name.contains("replace + with - in add"))
+        .expect("the BinaryOperator mutant is in the sample");
+    assert_eq!(mutant.replacement, "-");
+
+    let repo = tmpdir("d9-reversal-apply");
+    fs::create_dir_all(repo.join("src")).expect("mkdir src");
+    // The mutated file, exactly as the descriptor's own diff leaves it.
+    fs::write(
+        repo.join("src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a - /* ~ changed by cargo-mutants ~ */ b\n}\n\npub fn is_positive(n: i32) -> bool {\n    n > 0\n}\n\n#[cfg(test)]\nmod tests {\n",
+    )
+    .expect("write mutated source");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-A"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "mutated",
+        ],
+    );
+
+    let reversal = reversal_diff(&repo, mutant);
+    let patch = repo.join("reversal.patch");
+    fs::write(&patch, &reversal).expect("write patch");
+    let check = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["apply", "--check"])
+        .arg(&patch)
+        .output()
+        .expect("git apply --check");
+    assert!(
+        check.status.success(),
+        "the reversal must apply to the mutated file; git apply --check said: {}\npatch:\n{reversal}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+/// Run `git` in `repo`, panicking on failure.
+fn git(repo: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
