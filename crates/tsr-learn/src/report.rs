@@ -773,6 +773,7 @@ mod tests {
             data_root: Hash::of(&[b"data"]),
             training_root: Hash::of(&[b"train"]),
             source_root: Hash::of(&[b"source"]),
+            unindexed_tasks: 0,
         }
     }
 

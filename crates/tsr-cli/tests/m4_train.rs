@@ -652,3 +652,97 @@ fn apply_refuses_a_foreign_dataset() {
         "R4: the refusal names the split digest or feature spec: {err}"
     );
 }
+
+/// F14: `report` and `apply` exit 2 (not 1) on a tampered bundle, and a bad row is named by an id
+/// that appears in rows.jsonl.
+#[test]
+fn f14_report_and_apply_exit_2_on_tampered_inputs() {
+    let dir = temp_dir("f14-exit");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+
+    // A forged calibrator in manifest.toml: report and apply must both refuse with exit 2.
+    let manifest = b.join("manifest.toml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    let forged: String = text
+        .lines()
+        .map(|l| {
+            if l.trim_start().starts_with("calibrator =") {
+                "calibrator = \"000000000000 features@v9\"".to_string()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&manifest, forged).unwrap();
+
+    let (code, _, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 2, "F14: report exits 2 on a forged calibrator: {err}");
+    assert!(
+        err.contains("manifest.toml"),
+        "F14: report names manifest.toml: {err}"
+    );
+
+    let (code, _, err) = run(&[
+        "train",
+        "apply",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--side",
+        "held_out",
+    ]);
+    assert_eq!(code, 2, "F14: apply exits 2 on a forged calibrator: {err}");
+    assert!(
+        err.contains("manifest.toml"),
+        "F14: apply names manifest.toml: {err}"
+    );
+}
+
+/// F7/F14: editing a row's `family` in rows.jsonl makes `report` exit 2, naming the row by an id
+/// that appears in rows.jsonl.
+#[test]
+fn f14_a_bad_row_is_named_by_an_id_in_rows_jsonl() {
+    let dir = temp_dir("f14-row");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+
+    let rows = ds.join("rows.jsonl");
+    let text = std::fs::read_to_string(&rows).unwrap();
+    let mut out = String::new();
+    let mut first_id = String::new();
+    for line in text.lines() {
+        let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+        if first_id.is_empty() {
+            first_id = v["id"].as_str().unwrap().to_string();
+            v["family"] = serde_json::Value::String("forged-family".to_string());
+        }
+        out.push_str(&serde_json::to_string(&v).unwrap());
+        out.push('\n');
+    }
+    std::fs::write(&rows, out).unwrap();
+
+    let (code, _, err) = run(&[
+        "train",
+        "report",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 2, "F14: report exits 2 on a tampered row: {err}");
+    assert!(
+        err.contains(&first_id),
+        "F14: the bad row is named by its id {first_id}: {err}"
+    );
+}

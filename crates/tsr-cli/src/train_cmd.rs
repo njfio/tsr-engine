@@ -418,18 +418,19 @@ fn report_path(bundle: &Path, ext: &str) -> std::path::PathBuf {
 /// `--side held_out` (the default) reads only held_out rows and logs each read to
 /// `holdout-access.jsonl`; `fit`, `calibrate` and `all` read the other sides.
 fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCode {
+    // F14: a tampered bundle or dataset is a refused input, exit 2, not a generic failure.
     let b = match tsr_learn::bundle::load_bundle(bundle) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("tsr: cannot load bundle: {e}");
-            return std::process::ExitCode::from(1);
+            return std::process::ExitCode::from(2);
         }
     };
     let ds = match tsr_learn::bundle::load_dataset(dataset) {
         Ok(ds) => ds,
         Err(e) => {
             eprintln!("tsr: cannot load dataset: {e}");
-            return std::process::ExitCode::from(1);
+            return std::process::ExitCode::from(2);
         }
     };
     // R4: refuse a dataset that does not belong to the bundle, exactly as report does.
@@ -493,18 +494,19 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
 }
 
 fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::process::ExitCode {
+    // F14: a tampered bundle or dataset is a refused input, exit 2, not a generic failure.
     let b = match tsr_learn::bundle::load_bundle(bundle) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("tsr: cannot load bundle: {e}");
-            return std::process::ExitCode::from(1);
+            return std::process::ExitCode::from(2);
         }
     };
     let ds = match tsr_learn::bundle::load_dataset(dataset) {
         Ok(ds) => ds,
         Err(e) => {
             eprintln!("tsr: cannot load dataset: {e}");
-            return std::process::ExitCode::from(1);
+            return std::process::ExitCode::from(2);
         }
     };
     let r = match tsr_learn::report::report_logged(&b, &ds, seed, dataset) {

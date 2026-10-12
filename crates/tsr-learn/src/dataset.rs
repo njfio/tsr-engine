@@ -104,6 +104,11 @@ pub struct Dataset {
     pub training_root: Hash,
     /// The source root: the store's head_root or the events file's digest.
     pub source_root: Hash,
+    /// A8: the number of distinct tasks that produced a decision row but have no row in the task
+    /// index, so their rows were dropped. Counted in `dataset`'s stdout, `data-manifest.json` and
+    /// the report, so a truncated `--tasks` is visible rather than silent.
+    #[serde(default)]
+    pub unindexed_tasks: usize,
 }
 
 /// The split fractions: the calibrate and held-out shares; the fit side takes the remainder.
@@ -345,28 +350,53 @@ pub fn split_digest(by: SplitBy, seed: u64, assignments: &BTreeMap<String, Side>
     Hash::of(&refs)
 }
 
-/// The row id: `Hash::of(commitment event id, feature vector, resolved label + evidence ids)`.
-pub fn row_id(
-    commitment: &EventId,
-    features: &FeatureVector,
-    label: Option<bool>,
-    evidence: &[EventId],
-) -> Hash {
-    let mut parts: Vec<Vec<u8>> = Vec::new();
-    parts.push(commitment.0 .0.to_vec());
-    for v in &features.values {
+/// The row id: `Hash::of` over **every field a row carries** except the id itself.
+///
+/// F7: the id used to cover only the commitment, the features, the label and the evidence, so
+/// `family`, `lineage`, `side`, `generator_raw`, `operator_raw` and `controller_logged` were
+/// trusted verbatim — editing a row's `family` changed the population and editing a held-out
+/// `generator_raw` flipped the report's verdict, with no id mismatch. The id now covers them all,
+/// so `load_dataset` recomputes it and refuses any edit, naming the row.
+pub fn row_id(r: &Row) -> Hash {
+    let mut parts: Vec<Vec<u8>> = vec![
+        r.task.0 .0.to_vec(),
+        r.commitment.0 .0.to_vec(),
+        r.index.to_le_bytes().to_vec(),
+        serde_json::to_string(&r.action)
+            .unwrap_or_default()
+            .into_bytes(),
+        r.family.as_bytes().to_vec(),
+        r.lineage.as_bytes().to_vec(),
+        match r.side {
+            Side::Fit => b"fit".to_vec(),
+            Side::Calibrate => b"calibrate".to_vec(),
+            Side::HeldOut => b"held_out".to_vec(),
+        },
+    ];
+    for v in &r.features.values {
         parts.push(v.to_le_bytes().to_vec());
     }
-    parts.push(match label {
+    parts.push(match r.label {
         Some(true) => b"true".to_vec(),
         Some(false) => b"false".to_vec(),
         None => b"none".to_vec(),
     });
-    for e in evidence {
+    for e in &r.evidence {
         parts.push(e.0 .0.to_vec());
+    }
+    for v in [r.generator_raw, r.operator_raw, r.controller_logged] {
+        parts.push(match v {
+            Some(x) => x.to_le_bytes().to_vec(),
+            None => b"none".to_vec(),
+        });
     }
     let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
     Hash::of(&refs)
+}
+
+/// F7: recompute a row's id from the row itself.
+pub fn row_id_of(r: &Row) -> Hash {
+    row_id(r)
 }
 
 /// The data root: every row id, in canonical (sorted) order.
@@ -432,9 +462,13 @@ pub fn build_dataset(
 
     let rows = decision_rows(events);
     let mut out: Vec<Row> = Vec::new();
+    // A8: count the distinct tasks whose decision rows have no index row, so a truncated `--tasks`
+    // is reported rather than silently dropped.
+    let mut unindexed: BTreeSet<TaskId> = BTreeSet::new();
     for dr in rows {
         let Some(index_row) = index_of.get(&dr.task) else {
-            continue; // no index row: excluded (item 2)
+            unindexed.insert(dr.task);
+            continue; // no index row: excluded, and counted (A8)
         };
         let side = split
             .assignments
@@ -468,9 +502,8 @@ pub fn build_dataset(
             },
             None => (None, Vec::new()),
         };
-        let id = row_id(&dr.commitment, &fv, label, &evidence);
-        out.push(Row {
-            id,
+        let row = Row {
+            id: Hash::of(&[b"placeholder"]),
             task: dr.task,
             commitment: dr.commitment,
             index: dr.index,
@@ -484,7 +517,9 @@ pub fn build_dataset(
             generator_raw,
             operator_raw,
             controller_logged,
-        });
+        };
+        let id = row_id_of(&row);
+        out.push(Row { id, ..row });
     }
 
     // Canonical order: by row id.
@@ -499,6 +534,7 @@ pub fn build_dataset(
         data_root,
         training_root,
         source_root,
+        unindexed_tasks: unindexed.len(),
     })
 }
 
@@ -949,6 +985,7 @@ mod tests {
                 data_root: Hash::of(&[b"d"]),
                 training_root: Hash::of(&[b"t"]),
                 source_root: Hash::of(&[b"s"]),
+                unindexed_tasks: 0,
             };
             let report = crate::probes::probe_boundary(&ds, &index);
             assert!(

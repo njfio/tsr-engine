@@ -234,11 +234,13 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     // otherwise copied verbatim, so flipping a label in `rows.jsonl` would fit happily with the
     // old training root.
     for r in &rows {
-        let recomputed = crate::dataset::row_id(&r.commitment, &r.features, r.label, &r.evidence);
+        let recomputed = crate::dataset::row_id_of(r);
         if recomputed != r.id {
+            // F14: name the row by the id that appears in rows.jsonl, not by a hash of its
+            // commitment (which appears in no file).
             return Err(LearnError::Invalid(format!(
                 "rows.jsonl: row {} has id {}, recomputed {}",
-                Hash::of(&[&r.commitment.0 .0]).to_hex(),
+                r.id.to_hex(),
                 r.id.to_hex(),
                 recomputed.to_hex()
             )));
@@ -299,6 +301,9 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
         data_root,
         training_root,
         source_root,
+        // A8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
+        // rows, not the index, so it carries the stored count when present.
+        unindexed_tasks: manifest["unindexed_tasks"].as_u64().unwrap_or(0) as usize,
     })
 }
 
@@ -545,15 +550,19 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
         }
     }
 
-    let head: Head = serde_json::from_str(&std::fs::read_to_string(dir.join("head.json"))?)?;
-    let isotonic: Isotonic =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("isotonic.json"))?)?;
-    let spec: FeatureSpec =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("features.json"))?)?;
-    let split: SplitManifest =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("split.json"))?)?;
-    let support_file: SupportFile =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("support.json"))?)?;
+    // F6/B8: name the file that is missing, rather than an io error with no file name.
+    let read = |name: &str| -> Result<String, LearnError> {
+        std::fs::read_to_string(dir.join(name)).map_err(|e| {
+            LearnError::Invalid(format!(
+                "bundle file {name:?} is missing or unreadable: {e}"
+            ))
+        })
+    };
+    let head: Head = serde_json::from_str(&read("head.json")?)?;
+    let isotonic: Isotonic = serde_json::from_str(&read("isotonic.json")?)?;
+    let spec: FeatureSpec = serde_json::from_str(&read("features.json")?)?;
+    let split: SplitManifest = serde_json::from_str(&read("split.json")?)?;
+    let support_file: SupportFile = serde_json::from_str(&read("support.json")?)?;
 
     // Recompute the id from the content files and the manifest's content fields, and refuse a
     // mismatch against the stored id.
@@ -580,6 +589,34 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
             manifest.id,
             id.to_hex()
         )));
+    }
+
+    // F6/B8: the calibrator is derived (the recomputed id's first 12 hex and the feature-schema
+    // version) and the state is `draft`. `load_bundle` is used by verify, report and apply alike,
+    // so a forged calibrator must be refused here too, not only in `verify_bundle`.
+    let expected_calibrator = format!("{} {}", &id.to_hex()[..12], manifest.feature_schema);
+    if manifest.calibrator != expected_calibrator {
+        return Err(LearnError::Invalid(format!(
+            "manifest.toml: calibrator {:?} disagrees with the derived {:?}",
+            manifest.calibrator, expected_calibrator
+        )));
+    }
+    if manifest.state != "draft" {
+        return Err(LearnError::Invalid(format!(
+            "manifest.toml: state {:?} is not \"draft\"",
+            manifest.state
+        )));
+    }
+
+    // F6/B8: the manifest must be the canonical rendering of its own fields. Any byte edit —
+    // whitespace, a comment, a reordered key — is refused, naming manifest.toml, so a manifest
+    // that merely parses is never trusted.
+    let canonical = toml::to_string_pretty(&manifest)
+        .map_err(|e| LearnError::Invalid(format!("manifest.toml: {e}")))?;
+    if canonical != manifest_text {
+        return Err(LearnError::Invalid(
+            "manifest.toml: not the canonical rendering of its fields".to_string(),
+        ));
     }
 
     Ok(Bundle {
@@ -705,10 +742,8 @@ mod tests {
         let commitment = EventId(Hash::of(&[format!("c{i}").as_bytes()]));
         let features = FeatureVector { values };
         let evidence: Vec<EventId> = Vec::new();
-        // B2: the id is the real `row_id`, so `load_dataset`'s recompute agrees on a clean dataset.
-        let id = crate::dataset::row_id(&commitment, &features, label, &evidence);
-        Row {
-            id,
+        let mut r = Row {
+            id: Hash::of(&[b"placeholder"]),
             task: TaskId(Hash::of(&[format!("t{i}").as_bytes()])),
             commitment,
             index: i,
@@ -722,7 +757,10 @@ mod tests {
             generator_raw: None,
             operator_raw: None,
             controller_logged: None,
-        }
+        };
+        // B2/F7: the id is the real `row_id`, so `load_dataset`'s recompute agrees on a clean row.
+        r.id = crate::dataset::row_id_of(&r);
+        r
     }
 
     fn dataset() -> Dataset {
@@ -740,6 +778,8 @@ mod tests {
             // Keep each lineage on one side, so the boundary probe does not fire on this clean
             // fixture (a lineage on two sides is a real leak).
             r.lineage = if side == Side::Fit { "l0" } else { "l1" }.to_string();
+            // F7: the id covers the lineage, so recompute it after the edit.
+            r.id = crate::dataset::row_id_of(&r);
             rows.push(r);
         }
         // Every task's side must appear in split.json, or the split-manifest probe fires.
@@ -762,6 +802,7 @@ mod tests {
             data_root,
             training_root,
             source_root: Hash::of(&[b"source"]),
+            unindexed_tasks: 0,
         }
     }
 
@@ -1142,6 +1183,172 @@ mod tests {
         assert!(
             err.contains("manifest.toml"),
             "B8: a forged state must be refused naming manifest.toml, got: {err}"
+        );
+    }
+
+    /// F6/B8: `load_bundle` (used by report and apply alike) must refuse a forged calibrator,
+    /// naming manifest.toml. Before the fix only `verify_bundle` checked it, so `apply` printed the
+    /// forged version on every p.
+    #[test]
+    fn f6_load_bundle_refuses_a_forged_calibrator() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-cal-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("f6-cal-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged: String = text
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("calibrator =") {
+                    "calibrator = \"000000000000 features@v9\"".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, forged).unwrap();
+        let err = match load_bundle(&out) {
+            Ok(_) => panic!("F6: load_bundle must refuse a forged calibrator"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml") && err.contains("calibrator"),
+            "F6: load_bundle must refuse a forged calibrator naming manifest.toml, got: {err}"
+        );
+    }
+
+    /// F6/B8: `load_bundle` must refuse a state other than `draft`.
+    #[test]
+    fn f6_load_bundle_refuses_a_forged_state() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-state-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("f6-state-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged: String = text
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("state =") {
+                    "state = \"released\"".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, forged).unwrap();
+        let err = match load_bundle(&out) {
+            Ok(_) => panic!("F6: load_bundle must refuse a forged state"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml") && err.contains("state"),
+            "F6: load_bundle must refuse a forged state naming manifest.toml, got: {err}"
+        );
+    }
+
+    /// F6/B8: any byte edit to manifest.toml — a comment, whitespace, a reordered key — must be
+    /// refused, because the manifest must be the canonical rendering of its own fields.
+    #[test]
+    fn f6_a_comment_in_the_manifest_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-comment-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("f6-comment-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        let path = out.join("manifest.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("# a comment\n{text}")).unwrap();
+        let err = match load_bundle(&out) {
+            Ok(_) => panic!("F6: a comment in manifest.toml must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("manifest.toml") && err.contains("canonical"),
+            "F6: a comment must be refused as non-canonical, got: {err}"
+        );
+    }
+
+    /// F6/B8: a deleted content file must be named, not reported as a bare io error.
+    #[test]
+    fn f6_a_missing_file_is_named() {
+        let ds = dataset();
+        let ddir = tmpdir("f6-missing-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let out = tmpdir("f6-missing-out");
+        write_bundle(&ddir, &out, 30).unwrap();
+        std::fs::remove_file(out.join("head.json")).unwrap();
+        let err = match load_bundle(&out) {
+            Ok(_) => panic!("F6: a deleted head.json must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("head.json"),
+            "F6: a missing file must be named, got: {err}"
+        );
+    }
+
+    /// F7: editing a row's `family` in rows.jsonl must be refused, naming the row by its id.
+    #[test]
+    fn f7_a_family_edit_is_refused_naming_the_row() {
+        let ds = dataset();
+        let ddir = tmpdir("f7-family-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let text = std::fs::read_to_string(ddir.join("rows.jsonl")).unwrap();
+        let mut out = String::new();
+        let mut first_id = String::new();
+        for line in text.lines() {
+            let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if first_id.is_empty() {
+                first_id = v["id"].as_str().unwrap().to_string();
+                v["family"] = serde_json::Value::String("forged-family".to_string());
+                // The id is left as it was: the edit is exactly what the id must catch.
+            }
+            out.push_str(&serde_json::to_string(&v).unwrap());
+            out.push('\n');
+        }
+        std::fs::write(ddir.join("rows.jsonl"), out).unwrap();
+        let err = match load_dataset(&ddir) {
+            Ok(_) => panic!("F7: a family edit must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("rows.jsonl") && err.contains(&first_id),
+            "F7: a family edit must be refused naming the row id {first_id}, got: {err}"
+        );
+    }
+
+    /// F7: editing a held-out row's `generator_raw` must be refused — before the fix it flipped the
+    /// report's verdict with no id mismatch.
+    #[test]
+    fn f7_a_generator_raw_edit_is_refused() {
+        let ds = dataset();
+        let ddir = tmpdir("f7-gen-ds");
+        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        let text = std::fs::read_to_string(ddir.join("rows.jsonl")).unwrap();
+        let mut out = String::new();
+        for line in text.lines() {
+            let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v["generator_raw"].is_null() {
+                v["generator_raw"] = serde_json::json!(0.99);
+                // The id is left as it was: the edit is exactly what the id must catch.
+            }
+            out.push_str(&serde_json::to_string(&v).unwrap());
+            out.push('\n');
+        }
+        std::fs::write(ddir.join("rows.jsonl"), out).unwrap();
+        let err = match load_dataset(&ddir) {
+            Ok(_) => panic!("F7: a generator_raw edit must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("rows.jsonl"),
+            "F7: a generator_raw edit must be refused naming rows.jsonl, got: {err}"
         );
     }
 
