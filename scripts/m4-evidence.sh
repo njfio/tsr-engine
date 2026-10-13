@@ -24,7 +24,13 @@ export CARGO_HOME=$PWD/.cargo-home
 
 ROOT=$PWD
 WORK="$ROOT/target/m4-evidence-work"
-BIN="$ROOT/target/debug/tsr"
+# Every cargo command runs in this private target directory, removed first, so a
+# concurrent cargo on the shared default target/ cannot poison the run (the
+# transient surfaces as "can't find crate" or "found possibly newer version of
+# crate"). The binary is built here and used from here.
+FRESH="$ROOT/target/m4-evidence-fresh"
+rm -rf "$FRESH"
+BIN="$FRESH/debug/tsr"
 
 # The base for any diff we print.
 if [ -n "${TSR_MAIN:-}" ]; then
@@ -70,31 +76,17 @@ run_show() {
     run "$@"
 }
 
-# run_cargo <label> <cargo args...> — run cargo, and if it fails with the
-# sandbox's transient "can't find crate" state (a concurrent cargo racing on the
-# default target/), retry once in a private target directory that is removed
-# first, so the retry starts from a clean state and its output is reproducible.
-# The retry's output is what is printed.
+# run_cargo <label> <cargo args...> — run cargo in the private target directory
+# $FRESH (removed once at start), so the shared default target/ cannot poison
+# the run. The command printed is the one that ran, with CARGO_TARGET_DIR set.
 run_cargo() {
     local label="$1"; shift
     printf '$'
-    printf ' %q' cargo "$@"
+    printf ' %q' env "CARGO_TARGET_DIR=$FRESH" cargo "$@"
     printf '\n'
     local out rc
-    out=$(cargo "$@" 2>&1)
+    out=$(CARGO_TARGET_DIR="$FRESH" cargo "$@" 2>&1)
     rc=$?
-    if printf '%s' "$out" | grep -q "can't find crate"; then
-        printf '%s\n' "$out"
-        printf 'exit %d\n' "$rc"
-        local fresh="$ROOT/target/m4-evidence-fresh"
-        rm -rf "$fresh"
-        printf '# retrying in CARGO_TARGET_DIR=%s (removed first)\n' "$fresh"
-        printf '$'
-        printf ' %q' env "CARGO_TARGET_DIR=$fresh" cargo "$@"
-        printf '\n'
-        out=$(CARGO_TARGET_DIR="$fresh" cargo "$@" 2>&1)
-        rc=$?
-    fi
     printf '%s\n' "$out"
     printf 'exit %d\n' "$rc"
     printf '\n'
@@ -275,18 +267,10 @@ run "fit, unindexed_tasks and counts_digest edited together" "$BIN" train fit "$
 # --- the whole workspace test suite ----------------------------------------
 section "The whole workspace test suite"
 
-printf '$ cargo test --workspace --no-fail-fast\n'
+printf '$ CARGO_TARGET_DIR=%s cargo test --workspace --no-fail-fast\n' "$FRESH"
 TEST_LOG="$WORK/workspace-test.log"
-cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
+CARGO_TARGET_DIR="$FRESH" cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
 TEST_RC=$?
-if grep -q "can't find crate" "$TEST_LOG"; then
-    TEST_FRESH="$ROOT/target/m4-evidence-fresh"
-    rm -rf "$TEST_FRESH"
-    printf '# retrying in CARGO_TARGET_DIR=%s (removed first)\n' "$TEST_FRESH"
-    printf '$ CARGO_TARGET_DIR=%s cargo test --workspace --no-fail-fast\n' "$TEST_FRESH"
-    CARGO_TARGET_DIR="$TEST_FRESH" cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
-    TEST_RC=$?
-fi
 # `cargo test` runs the test binaries in parallel and their stdout interleaves,
 # so a `test result:` line can share a physical line with a test name. Extract
 # the result substring wherever it appears.
