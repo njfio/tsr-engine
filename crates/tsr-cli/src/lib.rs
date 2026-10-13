@@ -12,6 +12,7 @@ pub mod note_cmd;
 pub mod reconcile_cmd;
 pub mod reflect_cmd;
 pub mod review_cmd;
+pub mod shell;
 pub mod store_path;
 pub mod task;
 
