@@ -72,8 +72,9 @@ run_show() {
 
 # run_cargo <label> <cargo args...> — run cargo, and if it fails with the
 # sandbox's transient "can't find crate" state (a concurrent cargo racing on the
-# default target/), retry once in a private target directory. The retry's output
-# is what is printed, so the block is reproducible.
+# default target/), retry once in a private target directory that is removed
+# first, so the retry starts from a clean state and its output is reproducible.
+# The retry's output is what is printed.
 run_cargo() {
     local label="$1"; shift
     printf '$'
@@ -85,11 +86,13 @@ run_cargo() {
     if printf '%s' "$out" | grep -q "can't find crate"; then
         printf '%s\n' "$out"
         printf 'exit %d\n' "$rc"
-        printf '# retrying in CARGO_TARGET_DIR=%s/target-fresh\n' "$ROOT"
+        local fresh="$ROOT/target/m4-evidence-fresh"
+        rm -rf "$fresh"
+        printf '# retrying in CARGO_TARGET_DIR=%s (removed first)\n' "$fresh"
         printf '$'
-        printf ' %q' env "CARGO_TARGET_DIR=$ROOT/target-fresh" cargo "$@"
+        printf ' %q' env "CARGO_TARGET_DIR=$fresh" cargo "$@"
         printf '\n'
-        out=$(CARGO_TARGET_DIR="$ROOT/target-fresh" cargo "$@" 2>&1)
+        out=$(CARGO_TARGET_DIR="$fresh" cargo "$@" 2>&1)
         rc=$?
     fi
     printf '%s\n' "$out"
@@ -277,9 +280,11 @@ TEST_LOG="$WORK/workspace-test.log"
 cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
 TEST_RC=$?
 if grep -q "can't find crate" "$TEST_LOG"; then
-    printf '# retrying in CARGO_TARGET_DIR=%s/target-fresh\n' "$ROOT"
-    printf '$ CARGO_TARGET_DIR=%s/target-fresh cargo test --workspace --no-fail-fast\n' "$ROOT"
-    CARGO_TARGET_DIR="$ROOT/target-fresh" cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
+    TEST_FRESH="$ROOT/target/m4-evidence-fresh"
+    rm -rf "$TEST_FRESH"
+    printf '# retrying in CARGO_TARGET_DIR=%s (removed first)\n' "$TEST_FRESH"
+    printf '$ CARGO_TARGET_DIR=%s cargo test --workspace --no-fail-fast\n' "$TEST_FRESH"
+    CARGO_TARGET_DIR="$TEST_FRESH" cargo test --workspace --no-fail-fast >"$TEST_LOG" 2>&1
     TEST_RC=$?
 fi
 # `cargo test` runs the test binaries in parallel and their stdout interleaves,
