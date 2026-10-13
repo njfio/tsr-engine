@@ -20,16 +20,25 @@ set -u
 
 # --- environment -----------------------------------------------------------
 export PATH=/usr/local/cargo/bin:$PATH
-export CARGO_HOME=$PWD/.cargo-home
 
 ROOT=$PWD
 WORK="$ROOT/target/m4-evidence-work"
-# Every cargo command runs in this private target directory, removed first, so a
-# concurrent cargo on the shared default target/ cannot poison the run (the
-# transient surfaces as "can't find crate" or "found possibly newer version of
-# crate"). The binary is built here and used from here.
+# Every cargo command runs in a private target directory AND a private CARGO_HOME,
+# both under target/ and removed first. A concurrent cargo from another agent
+# shares the default target/ and the shared .cargo-home package cache, and that
+# race surfaces as "can't find crate" or "found possibly newer version of crate"
+# (E0460), which would make the blocks non-reproducible. A private target and a
+# private package cache remove that class of failure entirely. The binary is
+# built here and used from here.
 FRESH="$ROOT/target/m4-evidence-fresh"
-rm -rf "$FRESH"
+CHOME="$ROOT/target/m4-evidence-cargo-home"
+rm -rf "$FRESH" "$CHOME"
+mkdir -p "$CHOME"
+# Seed the private package cache from the shared one so the run needs no network.
+if [ -d "$ROOT/.cargo-home/registry" ]; then
+    cp -R "$ROOT/.cargo-home/registry" "$CHOME/registry"
+fi
+export CARGO_HOME="$CHOME"
 BIN="$FRESH/debug/tsr"
 
 # The base for any diff we print.
