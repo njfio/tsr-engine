@@ -380,9 +380,8 @@ fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::p
     // a synthetic dataset with an empty side to exercise id stability and tamper detection.
     match tsr_learn::bundle::load_dataset(dataset_dir) {
         Ok(ds) => {
-            let count = |side: tsr_learn::dataset::Side| {
-                ds.rows.iter().filter(|r| r.side == side).count()
-            };
+            let count =
+                |side: tsr_learn::dataset::Side| ds.rows.iter().filter(|r| r.side == side).count();
             for (side, name) in [
                 (tsr_learn::dataset::Side::Fit, "fit"),
                 (tsr_learn::dataset::Side::Calibrate, "calibrate"),

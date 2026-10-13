@@ -20,6 +20,7 @@ pub const FEATURE_SCHEMA_VERSION: &str = "features@v1";
 
 /// A §B8 feature the log cannot supply, with the reason it is absent. Listed, never imputed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AbsentFeature {
     /// The §B8 name.
     pub name: String,
@@ -30,6 +31,7 @@ pub struct AbsentFeature {
 /// The features@v1 spec: the ordered feature names, the numeric window widths used by support
 /// (§B8 "within feature range"), and the absent features.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeatureSpec {
     pub version: String,
     /// Feature names, in the order of [`FeatureVector::values`].

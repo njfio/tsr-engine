@@ -83,6 +83,7 @@ pub struct Row {
 
 /// The split manifest: the assignment of every task to a side, plus the rule and seed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SplitManifest {
     pub by: SplitBy,
     pub seed: u64,

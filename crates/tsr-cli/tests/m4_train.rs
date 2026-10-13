@@ -2832,6 +2832,13 @@ fn f9_fit_refuses_every_malformed_structural_file_naming_it() {
             "wrong-typed",
             "{\"version\":5,\"names\":[],\"numeric_widths\":[],\"absent\":[]}",
         ),
+        // F9/B3: an unknown field is bad input too -- `FeatureSpec` denies unknown fields, so
+        // `"seed":"x"` (a field features.json does not have) is refused rather than ignored.
+        (
+            "features.json",
+            "unknown-field",
+            "{\"version\":\"features@v1\",\"names\":[],\"numeric_widths\":[],\"absent\":[],\"seed\":\"x\"}",
+        ),
         ("split.json", "empty", ""),
         ("split.json", "truncated", "{\"a\":"),
         ("split.json", "null", "null"),
@@ -2842,11 +2849,23 @@ fn f9_fit_refuses_every_malformed_structural_file_naming_it() {
             "wrong-typed",
             "{\"by\":\"time\",\"seed\":\"x\",\"assignments\":{},\"digest\":\"00\"}",
         ),
+        // F9/B3: an unknown field in split.json is bad input too (`SplitManifest` denies them).
+        (
+            "split.json",
+            "unknown-field",
+            "{\"by\":\"time\",\"seed\":7,\"assignments\":{},\"digest\":\"00\",\"seed2\":\"x\"}",
+        ),
         ("data-manifest.json", "empty", ""),
         ("data-manifest.json", "truncated", "{\"a\":"),
         ("data-manifest.json", "null", "null"),
         ("data-manifest.json", "array", "[]"),
         ("data-manifest.json", "object", "{}"),
+        // F9/B3: an unknown field in data-manifest.json is bad input too (read by name otherwise).
+        (
+            "data-manifest.json",
+            "unknown-field",
+            "{\"data_root\":\"00\",\"seed\":\"x\"}",
+        ),
     ];
     for (file, form, bytes) in cases {
         let bad = dir.join(format!("bad-{file}-{form}"));
@@ -2886,6 +2905,11 @@ fn f9_report_apply_verify_refuse_malformed_structural_files_naming_them() {
     let cases: &[(&str, &str, &str)] = &[
         ("features.json", "empty", ""),
         ("features.json", "null", "null"),
+        (
+            "features.json",
+            "unknown-field",
+            "{\"version\":\"features@v1\",\"names\":[],\"numeric_widths\":[],\"absent\":[],\"seed\":\"x\"}",
+        ),
         ("split.json", "truncated", "{\"a\":"),
         (
             "split.json",
@@ -2894,6 +2918,11 @@ fn f9_report_apply_verify_refuse_malformed_structural_files_naming_them() {
         ),
         ("data-manifest.json", "empty", ""),
         ("data-manifest.json", "object", "{}"),
+        (
+            "data-manifest.json",
+            "unknown-field",
+            "{\"data_root\":\"00\",\"seed\":\"x\"}",
+        ),
     ];
     for (file, form, bytes) in cases {
         let bad = dir.join(format!("bad2-{file}-{form}"));

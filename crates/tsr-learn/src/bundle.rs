@@ -243,6 +243,34 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     let split: SplitManifest = parse_structural(dir, "split.json")?;
     let spec: FeatureSpec = parse_structural(dir, "features.json")?;
     let manifest: serde_json::Value = parse_structural(dir, "data-manifest.json")?;
+    // F9/B3 (a): `data-manifest.json` is read by name, so an unknown field would be silently
+    // ignored. Refuse one, naming the file, so a wrong-typed or misspelled field is bad input.
+    {
+        const KNOWN: &[&str] = &[
+            "feature_schema",
+            "data_root",
+            "training_root",
+            "source_root",
+            "split_digest",
+            "rows",
+            "fit",
+            "calibrate",
+            "held_out",
+            "resolved",
+            "unindexed_tasks",
+            "uncommitted_tasks",
+        ];
+        let obj = manifest.as_object().ok_or_else(|| {
+            LearnError::Invalid("data-manifest.json: expected a JSON object".into())
+        })?;
+        for key in obj.keys() {
+            if !KNOWN.contains(&key.as_str()) {
+                return Err(LearnError::Invalid(format!(
+                    "data-manifest.json: unknown field `{key}`"
+                )));
+            }
+        }
+    }
 
     // B2: recompute every row id, both roots and the split digest from `rows.jsonl` and
     // `split.json`, and refuse when `data-manifest.json` disagrees. The manifest's roots are
