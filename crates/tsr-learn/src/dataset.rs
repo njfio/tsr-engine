@@ -405,6 +405,35 @@ pub fn row_id_of(r: &Row) -> Hash {
     row_id(r)
 }
 
+/// D3: the counts digest -- a hash over the seven count fields `data-manifest.json` carries, so an
+/// in-range edit of `unindexed_tasks` or `uncommitted_tasks` (which are not derivable from the
+/// bundle's files) is refused. It is stored in the manifest and recomputed by `load_dataset`; it is
+/// deliberately **not** part of `bundle_id`, so the acceptance corpus id is unchanged.
+pub fn counts_digest(
+    rows: u64,
+    fit: u64,
+    calibrate: u64,
+    held_out: u64,
+    resolved: u64,
+    unindexed_tasks: u64,
+    uncommitted_tasks: u64,
+) -> Hash {
+    let parts: Vec<Vec<u8>> = [
+        rows,
+        fit,
+        calibrate,
+        held_out,
+        resolved,
+        unindexed_tasks,
+        uncommitted_tasks,
+    ]
+    .iter()
+    .map(|n| n.to_string().into_bytes())
+    .collect();
+    let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+    Hash::of(&refs)
+}
+
 /// The data root: every row id, in canonical (sorted) order.
 pub fn data_root(rows: &[Row]) -> Hash {
     let mut ids: Vec<Hash> = rows.iter().map(|r| r.id).collect();
@@ -604,6 +633,23 @@ pub fn read_records<T>(path: &Path, what: &str) -> Result<Vec<T>, LearnError>
 where
     T: serde::de::DeserializeOwned,
 {
+    read_records_impl(path, what, false)
+}
+
+/// D7: like `read_records`, but a repeated `task` id is refused naming the file, the line and the id.
+/// `tasks.jsonl` and `labels.jsonl` hold one record per task, so a repeat is bad input; `rows.jsonl`
+/// legitimately repeats a task id across sides, so it uses the plain loader.
+pub fn read_records_unique<T>(path: &Path, what: &str) -> Result<Vec<T>, LearnError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    read_records_impl(path, what, true)
+}
+
+fn read_records_impl<T>(path: &Path, what: &str, unique_ids: bool) -> Result<Vec<T>, LearnError>
+where
+    T: serde::de::DeserializeOwned,
+{
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -623,6 +669,11 @@ where
         Err(e) => return Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),
     };
     let mut out = Vec::new();
+    // D7: a duplicate task id in `tasks.jsonl` (or a duplicate label record in `labels.jsonl`) is
+    // bad input -- refused naming the file, the line and the id, never silently deduplicated or
+    // double-counted. Both record types carry a `task` field, so the id is read from the parsed
+    // value before the typed parse.
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (i, raw) in text.lines().enumerate() {
         let line = raw.trim();
         if line.is_empty() {
@@ -630,6 +681,17 @@ where
         }
         let value: serde_json::Value = serde_json::from_str(line)
             .map_err(|e| LearnError::Invalid(format!("{name} line {}: {e}", i + 1)))?;
+        if unique_ids {
+            if let Some(id) = value.get("task").and_then(|v| v.as_str()) {
+                if let Some(first) = seen.get(id) {
+                    return Err(LearnError::Invalid(format!(
+                        "{name} line {}: duplicate {what} id {id:?} (first at line {first})",
+                        i + 1
+                    )));
+                }
+                seen.insert(id.to_string(), i + 1);
+            }
+        }
         let record: T = serde_json::from_value(value).map_err(|e| {
             LearnError::Invalid(format!("{name} line {}: not a {what} record: {e}", i + 1))
         })?;
@@ -713,12 +775,12 @@ pub fn read_events_records(path: &Path) -> Result<Vec<(i64, tsr_domain::Event)>,
 
 /// Read a task index from JSONL through the one loader.
 pub fn read_task_index(path: &Path) -> Result<Vec<TaskIndexRow>, LearnError> {
-    read_records(path, "task index")
+    read_records_unique(path, "task index")
 }
 
 /// Read a labels input from JSONL through the one loader.
 pub fn read_labels(path: &Path) -> Result<Vec<LabelRecord>, LearnError> {
-    read_records(path, "label")
+    read_records_unique(path, "label")
 }
 
 /// Write the dataset to `dir`: `rows.jsonl`, `split.json`, `data-manifest.json`.
@@ -747,6 +809,16 @@ pub fn write_dataset(ds: &Dataset, dir: &Path) -> Result<(), LearnError> {
         "resolved": ds.rows.iter().filter(|r| r.label.is_some()).count(),
         "unindexed_tasks": ds.unindexed_tasks,
         "uncommitted_tasks": ds.uncommitted_tasks,
+        "counts_digest": counts_digest(
+            ds.rows.len() as u64,
+            ds.rows.iter().filter(|r| r.side == Side::Fit).count() as u64,
+            ds.rows.iter().filter(|r| r.side == Side::Calibrate).count() as u64,
+            ds.rows.iter().filter(|r| r.side == Side::HeldOut).count() as u64,
+            ds.rows.iter().filter(|r| r.label.is_some()).count() as u64,
+            ds.unindexed_tasks as u64,
+            ds.uncommitted_tasks as u64,
+        )
+        .to_hex(),
     });
     std::fs::write(
         dir.join("data-manifest.json"),

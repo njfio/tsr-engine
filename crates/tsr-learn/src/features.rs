@@ -80,7 +80,31 @@ impl FeatureSpec {
                 self.learning_rate
             ));
         }
+        // D5: each per-feature vector must have exactly one entry per name, so a spec that
+        // disagrees with `names` is bad input naming the field, not a silent truncation or a
+        // later index panic.
+        let n = self.names.len();
+        if self.numeric_widths.len() != n {
+            return Err(format!(
+                "numeric_widths: expected {n} values (one per name), got {}",
+                self.numeric_widths.len()
+            ));
+        }
+        if !self.standardize_mean.is_empty() && self.standardize_mean.len() != n {
+            return Err(format!(
+                "standardize_mean: expected {n} values (one per name), got {}",
+                self.standardize_mean.len()
+            ));
+        }
+        if !self.standardize_std.is_empty() && self.standardize_std.len() != n {
+            return Err(format!(
+                "standardize_std: expected {n} values (one per name), got {}",
+                self.standardize_std.len()
+            ));
+        }
         for (i, w) in self.numeric_widths.iter().enumerate() {
+            // A binary or one-hot feature carries width 0.0 (it must match exactly); a numeric
+            // feature carries a positive width. So the value must be finite and non-negative.
             if !w.is_finite() || *w < 0.0 {
                 return Err(format!(
                     "numeric_widths[{i}]: expected a finite value >= 0, got {w}"

@@ -81,6 +81,10 @@ pub struct DataManifest {
     pub resolved: u64,
     pub unindexed_tasks: usize,
     pub uncommitted_tasks: usize,
+    /// D3: a digest over the seven count fields, so an in-range edit of `unindexed_tasks` or
+    /// `uncommitted_tasks` (not derivable from the bundle's files) is refused. Not part of the
+    /// bundle id.
+    pub counts_digest: String,
 }
 
 impl<'de> Deserialize<'de> for DataManifest {
@@ -103,6 +107,7 @@ impl<'de> Deserialize<'de> for DataManifest {
             "resolved",
             "unindexed_tasks",
             "uncommitted_tasks",
+            "counts_digest",
         ];
         for key in obj.keys() {
             if !KNOWN.contains(&key.as_str()) {
@@ -145,6 +150,7 @@ impl<'de> Deserialize<'de> for DataManifest {
             resolved: count("resolved")?,
             unindexed_tasks: tasks("unindexed_tasks")?,
             uncommitted_tasks: tasks("uncommitted_tasks")?,
+            counts_digest: string("counts_digest")?,
         })
     }
 }
@@ -341,12 +347,14 @@ fn refuse_duplicate_keys(name: &str, text: &str) -> Result<(), LearnError> {
                     f.write_str("a JSON document with no duplicate keys")
                 }
                 fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<NoDup, A::Error> {
-                    let mut seen: Vec<String> = Vec::new();
+                    // D4: a `HashSet` keeps the scan linear. `Vec::contains` made a 50k-key
+                    // `split.json` quadratic (29.7s on a debug build); this is under a second.
+                    let mut seen: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
                     while let Some(key) = map.next_key::<String>()? {
-                        if seen.contains(&key) {
+                        if !seen.insert(key.clone()) {
                             return Err(serde::de::Error::custom(format!("duplicate key `{key}`")));
                         }
-                        seen.push(key);
                         map.next_value::<NoDup>()?;
                     }
                     Ok(NoDup)
@@ -472,6 +480,50 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
             "data-manifest.json: split_digest {} disagrees with the recomputed {}",
             stored_split_digest.to_hex(),
             split_digest.to_hex()
+        )));
+    }
+
+    // D3: the manifest's counts are cross-checked against the dataset the files hold. A type-valid
+    // but wrong count (an in-range edit) is refused naming the field, its value and the recomputed
+    // value -- never silently carried. `unindexed_tasks` and `uncommitted_tasks` are not derivable
+    // from the bundle's files, so they are covered by the dataset's digest: `counts_digest` hashes
+    // all seven counts and is recomputed here, so an in-range edit of either is refused.
+    let recomputed_rows = rows.len() as u64;
+    let recomputed_fit = rows.iter().filter(|r| r.side == Side::Fit).count() as u64;
+    let recomputed_calibrate = rows.iter().filter(|r| r.side == Side::Calibrate).count() as u64;
+    let recomputed_held_out = rows.iter().filter(|r| r.side == Side::HeldOut).count() as u64;
+    let recomputed_resolved = rows.iter().filter(|r| r.label.is_some()).count() as u64;
+    for (field, stored, recomputed) in [
+        ("rows", manifest.rows, recomputed_rows),
+        ("fit", manifest.fit, recomputed_fit),
+        ("calibrate", manifest.calibrate, recomputed_calibrate),
+        ("held_out", manifest.held_out, recomputed_held_out),
+        ("resolved", manifest.resolved, recomputed_resolved),
+    ] {
+        if stored != recomputed {
+            return Err(LearnError::Invalid(format!(
+                "data-manifest.json: {field} is {stored}, recomputed {recomputed}"
+            )));
+        }
+    }
+    // D3: the counts digest covers `unindexed_tasks` and `uncommitted_tasks` too, so an in-range
+    // edit of either is refused naming the field.
+    let recomputed_counts = crate::dataset::counts_digest(
+        recomputed_rows,
+        recomputed_fit,
+        recomputed_calibrate,
+        recomputed_held_out,
+        recomputed_resolved,
+        manifest.unindexed_tasks as u64,
+        manifest.uncommitted_tasks as u64,
+    );
+    if manifest.counts_digest != recomputed_counts.to_hex() {
+        return Err(LearnError::Invalid(format!(
+            "data-manifest.json: counts_digest is {}, recomputed {} (unindexed_tasks={}, uncommitted_tasks={})",
+            manifest.counts_digest,
+            recomputed_counts.to_hex(),
+            manifest.unindexed_tasks,
+            manifest.uncommitted_tasks
         )));
     }
 
@@ -858,6 +910,11 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     let head: Head = parse_bundle_file(dir, "head.json")?;
     let isotonic: Isotonic = parse_bundle_file(dir, "isotonic.json")?;
     let spec: FeatureSpec = parse_bundle_file(dir, "features.json")?;
+    // D5: the feature spec's lengths and widths are checked here too, so `verify` (which does not
+    // load the dataset) refuses a `features.json` whose `numeric_widths` or `standardize_*` length
+    // does not equal `names`', naming the field.
+    spec.validate()
+        .map_err(|e| LearnError::Invalid(format!("features.json: {e}")))?;
     let split: SplitManifest = parse_bundle_file(dir, "split.json")?;
     let support_file: SupportFile = parse_bundle_file(dir, "support.json")?;
 

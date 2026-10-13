@@ -1655,11 +1655,14 @@ fn f9_fit_refuses_a_tasks_index_that_matches_no_row() {
     let dir = temp_dir("f9-fit-tasks-zeroed");
     let ds = build_dataset(&dir, "7");
     let text = std::fs::read_to_string(ds.join("tasks.jsonl")).unwrap();
+    // Distinct ids that match no row: a single repeated id would be refused by the D7 duplicate-id
+    // check first, so each line gets its own 64-hex id.
     let zeroed: String = text
         .lines()
-        .map(|l| {
+        .enumerate()
+        .map(|(i, l)| {
             let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
-            v["task"] = serde_json::Value::String("0".repeat(64));
+            v["task"] = serde_json::Value::String(format!("{:064x}", i + 1));
             serde_json::to_string(&v).unwrap()
         })
         .collect::<Vec<_>>()
@@ -3400,4 +3403,701 @@ fn copy_dir(from: &Path, to: &Path) {
             std::fs::copy(entry.path(), &dst).unwrap();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// r5b6 D1-D7: the last input lows. Each test below fails on cf904c5.
+// ---------------------------------------------------------------------------
+
+/// D1: a digest-valid but malformed bundle content file is named by `parse_bundle_file`.
+///
+/// The manifest digest and the derived calibrator are re-minted after the edit, so the digest check
+/// passes and the parse error is what surfaces. Without `parse_bundle_file`'s file naming the error
+/// is a bare `json: invalid type: null, expected f64` with no file.
+#[test]
+fn d1_a_digest_valid_malformed_bundle_file_is_named_by_the_parser() {
+    let dir = temp_dir("d1-malformed-bundle");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let head_path = b.join("head.json");
+    let mut head: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&head_path).unwrap()).unwrap();
+    head["weights"] = serde_json::json!(null);
+    std::fs::write(&head_path, serde_json::to_string_pretty(&head).unwrap()).unwrap();
+    remint_bundle(&b);
+    let (code, out, err) = run(&["train", "verify", b.to_str().unwrap()]);
+    assert_eq!(
+        code, 2,
+        "D1: verify a digest-valid malformed bundle:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("head.json"),
+        "D1: the parse error must name the bundle file:\n{err}"
+    );
+    assert!(
+        !err.contains("has digest"),
+        "D1: the digest check must not be what refuses this bundle:\n{err}"
+    );
+}
+
+/// Re-mint a bundle's content digests, id and calibrator after a content file was edited, so the
+/// digest and id checks pass and a later check (the parse) is what refuses it. Mirrors
+/// `bundle_id` (bundle.rs:260) exactly.
+fn remint_bundle(dir: &Path) {
+    let manifest_path = dir.join("manifest.toml");
+    let text = std::fs::read_to_string(&manifest_path).unwrap();
+    let mut manifest: toml::Value = toml::from_str(&text).unwrap();
+    let names = [
+        "head.json",
+        "isotonic.json",
+        "features.json",
+        "split.json",
+        "support.json",
+    ];
+    let mut digests: Vec<(String, String)> = Vec::new();
+    for name in names {
+        let bytes = std::fs::read(dir.join(name)).unwrap();
+        digests.push((name.to_string(), tsr_domain::Hash::of(&[&bytes]).to_hex()));
+    }
+    let table = manifest.as_table_mut().unwrap();
+    let mut cd = toml::value::Table::new();
+    for (k, v) in &digests {
+        cd.insert(k.clone(), toml::Value::String(v.clone()));
+    }
+    table.insert("content_digests".to_string(), toml::Value::Table(cd));
+    let get = |t: &toml::value::Table, k: &str| -> String {
+        t.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    for (name, digest) in &digests {
+        parts.push(name.as_bytes().to_vec());
+        parts.push(digest.as_bytes().to_vec());
+    }
+    for key in [
+        "data_manifest",
+        "training_root",
+        "feature_schema",
+        "seed",
+        "support_floor",
+        "split_digest",
+        "source_root",
+    ] {
+        let v = match table.get(key) {
+            Some(toml::Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => String::new(),
+        };
+        parts.push(v.into_bytes());
+    }
+    let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+    let id_hex = tsr_domain::Hash::of(&refs).to_hex();
+    let feature_schema = get(table, "feature_schema");
+    table.insert("id".to_string(), toml::Value::String(id_hex.clone()));
+    table.insert(
+        "calibrator".to_string(),
+        toml::Value::String(format!("{} {}", &id_hex[..12], feature_schema)),
+    );
+    std::fs::write(&manifest_path, toml::to_string_pretty(&manifest).unwrap()).unwrap();
+}
+
+/// D2: an `--out` whose ancestor is a dangling symlink, a symlink loop, a 300-character component or
+/// an unwritable pseudo-filesystem path is bad input -- exit 2 naming the path, never 1.
+#[test]
+fn d2_out_under_a_bad_ancestor_exits_2_naming_the_path() {
+    let dir = temp_dir("d2-out-ancestor");
+    let (ev, tk, lb) = regenerate(&dir);
+    let ds = build_dataset(&dir, "7");
+    let cases: Vec<PathBuf> = vec![
+        dir.join("dangle").join("sub"),
+        dir.join("loop1").join("sub"),
+        dir.join("a".repeat(300)).join("sub"),
+        PathBuf::from("/proc/x/y"),
+    ];
+    std::os::unix::fs::symlink(dir.join("nowhere"), dir.join("dangle")).unwrap();
+    std::os::unix::fs::symlink(dir.join("loop2"), dir.join("loop1")).unwrap();
+    std::os::unix::fs::symlink(dir.join("loop1"), dir.join("loop2")).unwrap();
+    for out in &cases {
+        let (code, _o, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            "7",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code,
+            2,
+            "D2: dataset --out {} must exit 2, not {code}:\n{err}",
+            out.display()
+        );
+        assert!(
+            err.contains(out.to_str().unwrap()),
+            "D2: dataset must name {}:\n{err}",
+            out.display()
+        );
+        let (code, _o, err) = run(&[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code,
+            2,
+            "D2: fit --out {} must exit 2, not {code}:\n{err}",
+            out.display()
+        );
+        assert!(
+            err.contains(out.to_str().unwrap()),
+            "D2: fit must name {}:\n{err}",
+            out.display()
+        );
+    }
+}
+
+/// D2: `dataset --store` naming a non-sqlite file or a directory is bad input -- exit 2 naming the
+/// store, never 1.
+#[test]
+fn d2_dataset_store_that_is_not_a_sqlite_file_exits_2_naming_the_store() {
+    let dir = temp_dir("d2-store");
+    let (_ev, tk, lb) = regenerate(&dir);
+    let not_sqlite = dir.join("not-sqlite.db");
+    std::fs::write(&not_sqlite, b"this is not a sqlite database\n").unwrap();
+    let a_dir = dir.join("a-directory");
+    std::fs::create_dir_all(&a_dir).unwrap();
+    for store in [&not_sqlite, &a_dir] {
+        let out = dir.join("ds");
+        let (code, _o, err) = run(&[
+            "train",
+            "dataset",
+            "--store",
+            store.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            "7",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code,
+            2,
+            "D2: dataset --store {} must exit 2, not {code}:\n{err}",
+            store.display()
+        );
+        assert!(
+            err.contains(store.to_str().unwrap()),
+            "D2: dataset must name the store {}:\n{err}",
+            store.display()
+        );
+    }
+}
+
+/// D2: a `holdout-access.jsonl` that is a directory or a dangling symlink is bad input -- exit 2
+/// naming the path on apply, report and `dataset --out`, never 1.
+#[test]
+fn d2_holdout_access_that_is_not_a_file_exits_2_naming_the_path() {
+    let dir = temp_dir("d2-holdout-access");
+    let (ev, tk, lb) = regenerate(&dir);
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    for kind in ["dir", "dangle"] {
+        let ds2 = dir.join(format!("ds-{kind}"));
+        copy_dir(&ds, &ds2);
+        let ha = ds2.join("holdout-access.jsonl");
+        let _ = std::fs::remove_file(&ha);
+        if kind == "dir" {
+            std::fs::create_dir_all(&ha).unwrap();
+        } else {
+            std::os::unix::fs::symlink(ds2.join("nowhere"), &ha).unwrap();
+        }
+        let (code, _o, err) = run(&[
+            "train",
+            "apply",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D2: apply with holdout-access.jsonl a {kind} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(ha.to_str().unwrap()),
+            "D2: apply must name {}:\n{err}",
+            ha.display()
+        );
+        let (code, _o, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D2: report with holdout-access.jsonl a {kind} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(ha.to_str().unwrap()),
+            "D2: report must name {}:\n{err}",
+            ha.display()
+        );
+        // `dataset --out` writes into `ds2`, which holds the bad holdout-access.jsonl.
+        let (code, _o, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            "7",
+            "--out",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D2: dataset --out with holdout-access.jsonl a {kind} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(ha.to_str().unwrap()),
+            "D2: dataset must name the path:\n{err}"
+        );
+    }
+}
+
+/// D3: a type-valid but wrong count in `data-manifest.json` is refused, naming the field, its value
+/// and the recomputed value, on fit, report, apply and verify.
+#[test]
+fn d3_a_wrong_manifest_count_is_refused_naming_the_field_and_both_values() {
+    let dir = temp_dir("d3-manifest-count");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let cases: [(&str, serde_json::Value); 5] = [
+        ("rows", serde_json::json!(5)),
+        ("fit", serde_json::json!(0)),
+        ("calibrate", serde_json::json!(0)),
+        ("held_out", serde_json::json!(0)),
+        ("resolved", serde_json::json!(99999999999999u64)),
+    ];
+    for (field_name, value) in cases {
+        let ds2 = dir.join(format!("ds-{field_name}"));
+        copy_dir(&ds, &ds2);
+        let mp = ds2.join("data-manifest.json");
+        let mut m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&mp).unwrap()).unwrap();
+        m[field_name] = value.clone();
+        std::fs::write(&mp, serde_json::to_string_pretty(&m).unwrap()).unwrap();
+        let (code, _o, err) = run(&[
+            "train",
+            "fit",
+            ds2.to_str().unwrap(),
+            "--out",
+            dir.join(format!("b-{field_name}")).to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D3: fit with {field_name}={value} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D3: fit must name the field {field_name}:\n{err}"
+        );
+        assert!(
+            err.contains(&value.to_string()),
+            "D3: fit must name the value {value}:\n{err}"
+        );
+        let (code, _o, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D3: report with {field_name}={value} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D3: report must name the field {field_name}:\n{err}"
+        );
+        let (code, _o, err) = run(&[
+            "train",
+            "apply",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D3: apply with {field_name}={value} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D3: apply must name the field {field_name}:\n{err}"
+        );
+        let (code, _o, err) = run(&[
+            "train",
+            "verify",
+            b.to_str().unwrap(),
+            "--rebuild",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D3: verify --rebuild with {field_name}={value} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D3: verify must name the field {field_name}:\n{err}"
+        );
+    }
+}
+
+/// D3: `unindexed_tasks` and `uncommitted_tasks` are covered by the dataset's digest, so an in-range
+/// edit is refused naming the field.
+#[test]
+fn d3_an_in_range_edit_of_unindexed_or_uncommitted_tasks_is_refused() {
+    let dir = temp_dir("d3-manifest-digest");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    for field_name in ["unindexed_tasks", "uncommitted_tasks"] {
+        let ds2 = dir.join(format!("ds-{field_name}"));
+        copy_dir(&ds, &ds2);
+        let mp = ds2.join("data-manifest.json");
+        let mut m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&mp).unwrap()).unwrap();
+        let old = m[field_name].as_u64().unwrap();
+        m[field_name] = serde_json::json!(old + 1);
+        std::fs::write(&mp, serde_json::to_string_pretty(&m).unwrap()).unwrap();
+        let (code, _o, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            ds2.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "D3: report with {field_name} edited must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D3: report must name the field {field_name}:\n{err}"
+        );
+    }
+}
+
+/// D4: the duplicate-key scan is linear -- a split.json with 50k assignments is checked in under a
+/// second on a debug build.
+#[test]
+fn d4_a_50k_key_split_json_is_checked_in_under_a_second() {
+    let dir = temp_dir("d4-dup-scan");
+    let ds = build_dataset(&dir, "7");
+    let ds2 = dir.join("ds-50k");
+    copy_dir(&ds, &ds2);
+    let sp = ds2.join("split.json");
+    let mut split: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&sp).unwrap()).unwrap();
+    let mut assignments = serde_json::Map::new();
+    for i in 0..50_000u64 {
+        assignments.insert(format!("task-{i:06}"), serde_json::json!("fit"));
+    }
+    split["assignments"] = serde_json::Value::Object(assignments);
+    std::fs::write(&sp, serde_json::to_string(&split).unwrap()).unwrap();
+    let start = std::time::Instant::now();
+    let (code, _o, err) = run(&[
+        "train",
+        "fit",
+        ds2.to_str().unwrap(),
+        "--out",
+        dir.join("b-50k").to_str().unwrap(),
+    ]);
+    let elapsed = start.elapsed();
+    assert_eq!(
+        code, 2,
+        "D4: a 50k-key split.json must be refused (digest mismatch), not {code}:\n{err}"
+    );
+    assert!(
+        elapsed.as_secs_f64() < 1.0,
+        "D4: the 50k-key scan took {elapsed:?}, over a second"
+    );
+}
+
+/// D5: `numeric_widths` and `standardize_*` lengths must equal `names`' length, widths finite and
+/// positive; a mismatch is bad input naming the field.
+#[test]
+fn d5_a_features_json_length_mismatch_is_refused_naming_the_field() {
+    let dir = temp_dir("d5-features-lengths");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let cases: [(&str, serde_json::Value); 4] = [
+        ("numeric_widths", serde_json::json!([1.0])),
+        ("standardize_mean", serde_json::json!([0.0])),
+        ("standardize_std", serde_json::json!([1.0])),
+        ("numeric_widths", serde_json::json!([0.0])),
+    ];
+    for (i, (field_name, value)) in cases.into_iter().enumerate() {
+        let b2 = dir.join(format!("b-{i}"));
+        copy_dir(&b, &b2);
+        let fp = b2.join("features.json");
+        let mut f: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&fp).unwrap()).unwrap();
+        f[field_name] = value.clone();
+        std::fs::write(&fp, serde_json::to_string_pretty(&f).unwrap()).unwrap();
+        remint_bundle(&b2);
+        let (code, _o, err) = run(&["train", "verify", b2.to_str().unwrap()]);
+        assert_eq!(
+            code, 2,
+            "D5: verify with {field_name}={value} must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D5: verify must name the field {field_name}:\n{err}"
+        );
+    }
+}
+
+/// D6: a missing, empty or non-directory bundle path exits 2 naming the path (and manifest.toml when
+/// it is the missing file) on verify, report and apply.
+#[test]
+fn d6_a_bad_bundle_path_exits_2_naming_the_path() {
+    let dir = temp_dir("d6-bundle-path");
+    let ds = build_dataset(&dir, "7");
+    let _b = fit_bundle(&dir, &ds);
+    let missing = dir.join("no-such-bundle");
+    let empty = dir.join("empty-bundle");
+    std::fs::create_dir_all(&empty).unwrap();
+    let a_file = dir.join("bundle-is-a-file");
+    std::fs::write(&a_file, b"not a directory\n").unwrap();
+    for bad in [&missing, &empty, &a_file] {
+        // `verify` takes only the bundle; `report` and `apply` also take `--dataset`.
+        let (code, _o, err) = run(&["train", "verify", bad.to_str().unwrap()]);
+        assert_eq!(
+            code,
+            2,
+            "D6: verify {bad:?} must exit 2, not {code}:\n{err}",
+            bad = bad.display()
+        );
+        assert!(
+            err.contains(bad.to_str().unwrap()),
+            "D6: verify must name {}:\n{err}",
+            bad.display()
+        );
+        for sub in ["report", "apply"] {
+            let (code, _o, err) = run(&[
+                "train",
+                sub,
+                bad.to_str().unwrap(),
+                "--dataset",
+                ds.to_str().unwrap(),
+            ]);
+            assert_eq!(
+                code,
+                2,
+                "D6: {sub} {bad:?} must exit 2, not {code}:\n{err}",
+                bad = bad.display()
+            );
+            assert!(
+                err.contains(bad.to_str().unwrap()),
+                "D6: {sub} must name {}:\n{err}",
+                bad.display()
+            );
+        }
+    }
+    // The empty bundle names the missing manifest.toml.
+    let (code, _o, err) = run(&["train", "verify", empty.to_str().unwrap()]);
+    assert_eq!(
+        code, 2,
+        "D6: verify an empty bundle must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains("manifest.toml"),
+        "D6: an empty bundle must name manifest.toml:\n{err}"
+    );
+}
+
+/// D6: `dataset --store <missing>` exits 2 naming the store and creates nothing.
+#[test]
+fn d6_dataset_store_missing_exits_2_naming_the_store_and_creates_nothing() {
+    let dir = temp_dir("d6-store-missing");
+    let (_ev, tk, lb) = regenerate(&dir);
+    let missing = dir.join("no-such-store.db");
+    let out = dir.join("ds");
+    let (code, _o, err) = run(&[
+        "train",
+        "dataset",
+        "--store",
+        missing.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "D6: dataset --store <missing> must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains(missing.to_str().unwrap()),
+        "D6: dataset must name the store:\n{err}"
+    );
+    assert!(
+        !out.exists(),
+        "D6: dataset --store <missing> must create nothing at {}",
+        out.display()
+    );
+}
+
+/// D7: duplicate task ids in tasks.jsonl and duplicate label records in labels.jsonl exit 2 naming
+/// the file, line and id.
+#[test]
+fn d7_duplicate_task_ids_and_label_records_exit_2_naming_file_line_and_id() {
+    let dir = temp_dir("d7-duplicates");
+    let (ev, tk, lb) = regenerate(&dir);
+    // Duplicate a task id in tasks.jsonl.
+    let tk2 = dir.join("tasks-dup.jsonl");
+    let mut lines: Vec<String> = std::fs::read_to_string(&tk)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let dup_line = lines[0].clone();
+    lines.push(dup_line.clone());
+    std::fs::write(&tk2, lines.join("\n") + "\n").unwrap();
+    let out = dir.join("ds-dup-task");
+    let (code, _o, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk2.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "D7: a duplicate task id must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains("tasks-dup.jsonl"),
+        "D7: the error must name the file:\n{err}"
+    );
+    let id: serde_json::Value = serde_json::from_str(&dup_line).unwrap();
+    let id = id["task"].as_str().unwrap().to_string();
+    assert!(
+        err.contains(&id),
+        "D7: the error must name the id {id}:\n{err}"
+    );
+    assert!(
+        err.contains(&(lines.len()).to_string()),
+        "D7: the error must name the line {}:\n{err}",
+        lines.len()
+    );
+    // Duplicate a label record in labels.jsonl.
+    let lb2 = dir.join("labels-dup.jsonl");
+    let mut llines: Vec<String> = std::fs::read_to_string(&lb)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let ldup = llines[0].clone();
+    llines.push(ldup.clone());
+    std::fs::write(&lb2, llines.join("\n") + "\n").unwrap();
+    let out = dir.join("ds-dup-label");
+    let (code, _o, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb2.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "D7: a duplicate label record must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains("labels-dup.jsonl"),
+        "D7: the error must name the file:\n{err}"
+    );
+    let lid_json: serde_json::Value = serde_json::from_str(&ldup).unwrap();
+    let lid = lid_json["task"].as_str().unwrap().to_string();
+    assert!(
+        err.contains(&lid),
+        "D7: the error must name the id {lid}:\n{err}"
+    );
+    assert!(
+        err.contains(&(llines.len()).to_string()),
+        "D7: the error must name the line {}:\n{err}",
+        llines.len()
+    );
 }

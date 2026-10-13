@@ -235,19 +235,122 @@ fn refuse_out_that_is_not_a_directory(out: &Path) -> Option<std::process::ExitCo
     if out.exists() && !out.is_dir() {
         return refuse("exists and is not a directory");
     }
+    // D2: a component longer than the filesystem allows (NAME_MAX, 255 on Linux) makes
+    // `create_dir_all` fail ENAMETOOLONG (exit 1). Refuse it here, naming the path.
+    for comp in out.components() {
+        if let std::path::Component::Normal(name) = comp {
+            if name.as_encoded_bytes().len() > 255 {
+                return refuse("has a component longer than 255 bytes");
+            }
+        }
+    }
     // A non-directory ancestor: walk up to the first existing component and require it to be a dir.
+    // D2: `exists()` follows symlinks, so a dangling ancestor (a link whose target is gone) reads as
+    // absent and the walk skips past it, letting `create_dir_all` fail with exit 1. `symlink_metadata`
+    // sees the link itself, so a dangling or looping ancestor is refused here, naming the path.
     let mut ancestor = out.parent();
     while let Some(dir) = ancestor {
         if dir.as_os_str().is_empty() {
             break;
         }
-        if dir.exists() {
-            if !dir.is_dir() {
-                return refuse("has a non-directory ancestor");
+        match std::fs::symlink_metadata(dir) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() && !dir.exists() {
+                    return refuse("has a dangling symlink ancestor");
+                }
+                if !dir.is_dir() {
+                    return refuse("has a non-directory ancestor");
+                }
+                // D2: the nearest existing ancestor must be writable, or `create_dir_all` fails
+                // EACCES/EROFS (exit 1). `/proc/x/y` is the case: `/proc` exists but cannot be
+                // written. Refuse it here, naming the path.
+                if std::fs::metadata(dir)
+                    .map(|m| m.permissions().readonly())
+                    .unwrap_or(false)
+                {
+                    return refuse("has a read-only ancestor");
+                }
+                break;
             }
-            break;
+            Err(_) => ancestor = dir.parent(),
         }
-        ancestor = dir.parent();
+    }
+    None
+}
+
+/// D2: a `holdout-access.jsonl` that is a directory or a dangling symlink is bad input -- exit 2
+/// naming the path, never a generic `io:` failure (exit 1) from the append.
+fn refuse_holdout_access_that_is_not_a_file(dir: &Path) -> Option<std::process::ExitCode> {
+    let path = dir.join("holdout-access.jsonl");
+    let refuse = |why: &str| {
+        eprintln!("tsr: {} {why}", path.display());
+        Some(std::process::ExitCode::from(2))
+    };
+    match std::fs::symlink_metadata(&path) {
+        Err(_) => None,
+        Ok(meta) => {
+            if meta.file_type().is_symlink() && !path.exists() {
+                return refuse("is a dangling symlink");
+            }
+            if meta.is_dir() {
+                return refuse("is a directory, not a file");
+            }
+            None
+        }
+    }
+}
+
+/// D6: a bundle path that is missing, empty or not a directory is bad input -- exit 2 naming the
+/// path (and `manifest.toml` when it is the missing file), never a generic `io:` failure (exit 1).
+fn refuse_bundle_that_is_not_a_directory(bundle: &Path) -> Option<std::process::ExitCode> {
+    let refuse = |why: &str| {
+        eprintln!("tsr: bundle {} {why}", bundle.display());
+        Some(std::process::ExitCode::from(2))
+    };
+    match std::fs::symlink_metadata(bundle) {
+        Err(_) => return refuse("is missing"),
+        Ok(meta) => {
+            if meta.file_type().is_symlink() && !bundle.exists() {
+                return refuse("is a dangling symlink");
+            }
+            if !meta.is_dir() {
+                return refuse("is not a directory");
+            }
+        }
+    }
+    if !bundle.join("manifest.toml").exists() {
+        eprintln!("tsr: bundle {} is missing manifest.toml", bundle.display());
+        return Some(std::process::ExitCode::from(2));
+    }
+    None
+}
+
+/// D2/D6: a `--store` that is not a readable sqlite file is bad input -- exit 2 naming the store,
+/// never a generic `io:` failure (exit 1). A missing store is refused by name and creates nothing.
+fn refuse_store_that_is_not_a_sqlite_file(store: &Path) -> Option<std::process::ExitCode> {
+    let refuse = |why: &str| {
+        eprintln!("tsr: --store {} {why}", store.display());
+        Some(std::process::ExitCode::from(2))
+    };
+    match std::fs::symlink_metadata(store) {
+        Err(_) => return refuse("is missing"),
+        Ok(meta) => {
+            if meta.file_type().is_symlink() && !store.exists() {
+                return refuse("is a dangling symlink");
+            }
+            if meta.is_dir() {
+                return refuse("is a directory, not a sqlite file");
+            }
+        }
+    }
+    // A sqlite file starts with the 16-byte magic `SQLite format 3\0`.
+    match std::fs::read(store) {
+        Ok(bytes) => {
+            if !bytes.starts_with(b"SQLite format 3\0") {
+                return refuse("is not a sqlite database");
+            }
+        }
+        Err(e) => return refuse(&format!("cannot be read: {e}")),
     }
     None
 }
@@ -274,6 +377,18 @@ fn run_dataset(
     };
     if let Some(code) = refuse_out_that_is_not_a_directory(out) {
         return code;
+    }
+    // D2: a `holdout-access.jsonl` in the output directory that is a directory or a dangling symlink
+    // is bad input -- exit 2 naming the path, before anything is written.
+    if let Some(code) = refuse_holdout_access_that_is_not_a_file(out) {
+        return code;
+    }
+    // D2/D6: a `--store` that is missing, a directory or not a sqlite file is bad input -- exit 2
+    // naming the store, before anything is created.
+    if let Some(store) = store {
+        if let Some(code) = refuse_store_that_is_not_a_sqlite_file(store) {
+            return code;
+        }
     }
     // F9/B3 (d): one parser. Each input is parsed once, by its record loader below
     // (`read_events_records` / `read_task_index`), which refuses a line that is not a record naming
@@ -452,6 +567,10 @@ fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::p
 }
 
 fn run_verify(bundle: &Path, rebuild: Option<&Path>) -> std::process::ExitCode {
+    // D6: a missing, empty or non-directory bundle path is bad input -- exit 2 naming the path.
+    if let Some(code) = refuse_bundle_that_is_not_a_directory(bundle) {
+        return code;
+    }
     match tsr_learn::bundle::verify_bundle(bundle, rebuild) {
         Ok(()) => {
             println!("bundle {} verified", bundle.display());
@@ -485,6 +604,15 @@ fn report_path(bundle: &Path, ext: &str) -> std::path::PathBuf {
 /// `--side held_out` (the default) reads only held_out rows and logs each read to
 /// `holdout-access.jsonl`; `fit`, `calibrate` and `all` read the other sides.
 fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCode {
+    // D6: a missing, empty or non-directory bundle path is bad input -- exit 2 naming the path.
+    if let Some(code) = refuse_bundle_that_is_not_a_directory(bundle) {
+        return code;
+    }
+    // D2: a `holdout-access.jsonl` that is a directory or a dangling symlink is bad input -- exit 2
+    // naming the path, before any row is read or logged.
+    if let Some(code) = refuse_holdout_access_that_is_not_a_file(dataset) {
+        return code;
+    }
     // F14: a tampered bundle or dataset is a refused input, exit 2, not a generic failure.
     let b = match tsr_learn::bundle::load_bundle(bundle) {
         Ok(b) => b,
@@ -561,6 +689,15 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
 }
 
 fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::process::ExitCode {
+    // D6: a missing, empty or non-directory bundle path is bad input -- exit 2 naming the path.
+    if let Some(code) = refuse_bundle_that_is_not_a_directory(bundle) {
+        return code;
+    }
+    // D2: a `holdout-access.jsonl` that is a directory or a dangling symlink is bad input -- exit 2
+    // naming the path, before any row is read or logged.
+    if let Some(code) = refuse_holdout_access_that_is_not_a_file(dataset) {
+        return code;
+    }
     // F14: a tampered bundle or dataset is a refused input, exit 2, not a generic failure.
     let b = match tsr_learn::bundle::load_bundle(bundle) {
         Ok(b) => b,
