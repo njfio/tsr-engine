@@ -62,6 +62,49 @@ fn default_learning_rate() -> f64 {
     crate::head::LEARNING_RATE
 }
 
+impl FeatureSpec {
+    /// F9/B3 (d): every numeric hyperparameter must be finite and within its documented range.
+    ///
+    /// `learning_rate` must be finite and strictly positive; the standardization statistics must be
+    /// finite; the per-feature window widths must be finite and non-negative. A violation names the
+    /// field, so `fit`, `report`, `apply` and `verify` exit 2 naming it rather than writing `null`
+    /// weights into `head.json` and failing later with no file named.
+    pub fn validate(&self) -> Result<(), String> {
+        // The documented range: a full-batch learning rate is a step size on a normalized update,
+        // so it must be finite and in (0, 1]. 1e308 overflows the weight update to +/-inf (which
+        // serializes as `null`), and 0 or a negative value never moves the weights.
+        if !self.learning_rate.is_finite() || self.learning_rate <= 0.0 || self.learning_rate > 1.0
+        {
+            return Err(format!(
+                "learning_rate: expected a finite value in (0, 1], got {}",
+                self.learning_rate
+            ));
+        }
+        for (i, w) in self.numeric_widths.iter().enumerate() {
+            if !w.is_finite() || *w < 0.0 {
+                return Err(format!(
+                    "numeric_widths[{i}]: expected a finite value >= 0, got {w}"
+                ));
+            }
+        }
+        for (i, m) in self.standardize_mean.iter().enumerate() {
+            if !m.is_finite() {
+                return Err(format!(
+                    "standardize_mean[{i}]: expected a finite value, got {m}"
+                ));
+            }
+        }
+        for (i, s) in self.standardize_std.iter().enumerate() {
+            if !s.is_finite() || *s < 0.0 {
+                return Err(format!(
+                    "standardize_std[{i}]: expected a finite value >= 0, got {s}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A feature vector: the values, in the order of [`FeatureSpec::names`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FeatureVector {

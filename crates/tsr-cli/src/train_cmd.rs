@@ -215,12 +215,39 @@ fn write_log_into(
     Ok(())
 }
 
-/// F9/B3 (c): an `--out` that exists and is not a directory is bad input -- exit 2 naming it,
-/// rather than a generic `io: Not a directory` (exit 1) from `create_dir_all`.
+/// F9/B3 (c): an `--out` that cannot be a directory is bad input -- exit 2 naming it, rather than a
+/// generic `io: Not a directory` / `io: File exists` (exit 1) from `create_dir_all`.
+///
+/// Three cases: the path exists and is not a directory; the path is a dangling symlink (a link whose
+/// target does not exist, so `create_dir_all` fails `File exists`); or the path has a non-directory
+/// ancestor (`<file>/sub`, so `create_dir_all` fails `Not a directory`).
 fn refuse_out_that_is_not_a_directory(out: &Path) -> Option<std::process::ExitCode> {
+    let refuse = |why: &str| {
+        eprintln!("tsr: --out {} {why}", out.display());
+        Some(std::process::ExitCode::from(2))
+    };
+    // A dangling symlink: `symlink_metadata` sees the link, `exists()` (which follows it) does not.
+    if let Ok(meta) = std::fs::symlink_metadata(out) {
+        if meta.file_type().is_symlink() && !out.exists() {
+            return refuse("is a dangling symlink");
+        }
+    }
     if out.exists() && !out.is_dir() {
-        eprintln!("tsr: --out {} exists and is not a directory", out.display());
-        return Some(std::process::ExitCode::from(2));
+        return refuse("exists and is not a directory");
+    }
+    // A non-directory ancestor: walk up to the first existing component and require it to be a dir.
+    let mut ancestor = out.parent();
+    while let Some(dir) = ancestor {
+        if dir.as_os_str().is_empty() {
+            break;
+        }
+        if dir.exists() {
+            if !dir.is_dir() {
+                return refuse("has a non-directory ancestor");
+            }
+            break;
+        }
+        ancestor = dir.parent();
     }
     None
 }

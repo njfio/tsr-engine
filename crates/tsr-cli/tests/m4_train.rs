@@ -2893,6 +2893,59 @@ fn f9_fit_refuses_every_malformed_structural_file_naming_it() {
             "F9/B3: {file}/{form} is bad input, not a generic failure:\n{err}"
         );
     }
+    // F9/B3 (a): a wrong-typed, negative or out-of-range field in an otherwise valid
+    // data-manifest.json is bad input too. Each field is mutated in a copy of the real manifest, so
+    // the type/range check -- not a missing-field check -- is what refuses it.
+    let good = std::fs::read_to_string(ds.join("data-manifest.json")).unwrap();
+    let mutations: &[(&str, serde_json::Value)] = &[
+        ("rows", serde_json::json!("x")),
+        ("fit", serde_json::json!("x")),
+        ("calibrate", serde_json::json!("x")),
+        ("held_out", serde_json::json!("x")),
+        ("resolved", serde_json::json!("x")),
+        ("feature_schema", serde_json::json!("x")),
+        ("unindexed_tasks", serde_json::json!("x")),
+        ("uncommitted_tasks", serde_json::json!("x")),
+        ("unindexed_tasks", serde_json::json!(-3)),
+        ("unindexed_tasks", serde_json::json!(1e30)),
+        ("uncommitted_tasks", serde_json::json!(-1)),
+    ];
+    for (field, value) in mutations {
+        let mut v: serde_json::Value = serde_json::from_str(&good).unwrap();
+        v[field] = value.clone();
+        let bad = dir.join(format!("bad-manifest-{field}-{value}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        std::fs::write(
+            bad.join("data-manifest.json"),
+            serde_json::to_string_pretty(&v).unwrap(),
+        )
+        .unwrap();
+        let b = dir.join(format!("models/bad-manifest-{field}-{value}"));
+        let (code, out, err) = run(&[
+            "train",
+            "fit",
+            bad.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "F9/B3: fit must refuse data-manifest.json {field}={value} with exit 2, not {code}:\n{out}\n{err}"
+        );
+        assert!(
+            err.contains("data-manifest.json"),
+            "F9/B3: the refusal for {field}={value} must name the file:\n{err}"
+        );
+        assert!(
+            err.contains(field),
+            "F9/B3: the refusal for {field}={value} must name the field:\n{err}"
+        );
+        assert!(
+            !err.contains("fit failed"),
+            "F9/B3: {field}={value} is bad input, not a generic failure:\n{err}"
+        );
+    }
 }
 
 /// F9/B3 (a): the same malformed structural files must exit 2 naming the file on `report`, `apply`
@@ -2956,6 +3009,60 @@ fn f9_report_apply_verify_refuse_malformed_structural_files_naming_them() {
         ]);
         assert_eq!(code, 2, "F9/B3: verify {file}/{form}:\n{out}\n{err}");
         assert!(err.contains(file), "F9/B3: verify names {file}:\n{err}");
+    }
+    // F9/B3 (a): a wrong-typed field in an otherwise valid data-manifest.json is bad input on
+    // report, apply and verify too, not only on fit.
+    let good = std::fs::read_to_string(ds.join("data-manifest.json")).unwrap();
+    for (field, value) in [
+        ("rows", serde_json::json!("x")),
+        ("unindexed_tasks", serde_json::json!("x")),
+    ] {
+        let mut v: serde_json::Value = serde_json::from_str(&good).unwrap();
+        v[field] = value.clone();
+        let bad = dir.join(format!("bad2-manifest-{field}-{value}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        std::fs::write(
+            bad.join("data-manifest.json"),
+            serde_json::to_string_pretty(&v).unwrap(),
+        )
+        .unwrap();
+        let (code, out, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: report {field}={value}:\n{out}\n{err}");
+        assert!(
+            err.contains("data-manifest.json") && err.contains(field),
+            "F9/B3: report names the file and field for {field}={value}:\n{err}"
+        );
+        let (code, out, err) = run(&[
+            "train",
+            "apply",
+            b.to_str().unwrap(),
+            "--dataset",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: apply {field}={value}:\n{out}\n{err}");
+        assert!(
+            err.contains("data-manifest.json") && err.contains(field),
+            "F9/B3: apply names the file and field for {field}={value}:\n{err}"
+        );
+        let (code, out, err) = run(&[
+            "train",
+            "verify",
+            b.to_str().unwrap(),
+            "--rebuild",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: verify {field}={value}:\n{out}\n{err}");
+        assert!(
+            err.contains("data-manifest.json") && err.contains(field),
+            "F9/B3: verify names the file and field for {field}={value}:\n{err}"
+        );
     }
 }
 
@@ -3094,6 +3201,190 @@ fn f9_out_that_is_a_file_is_refused_naming_it() {
     assert!(
         err.contains(afile.to_str().unwrap()),
         "F9/B3: dataset names the --out path:\n{err}"
+    );
+}
+
+/// F9/B3 (b): a duplicate key in any of the three structural files is refused, exit 2 naming the
+/// file -- `features.json` and `split.json` already refuse one; `data-manifest.json` must too.
+#[test]
+fn f9_duplicate_keys_are_refused_in_all_three_structural_files() {
+    let dir = temp_dir("f9-duplicate-keys");
+    let ds = build_dataset(&dir, "7");
+    let cases: &[(&str, &str)] = &[
+        (
+            "features.json",
+            "{\"version\":\"features@v1\",\"version\":\"features@v1\",\"names\":[],\"numeric_widths\":[],\"absent\":[]}",
+        ),
+        (
+            "split.json",
+            "{\"by\":\"time\",\"by\":\"time\",\"seed\":7,\"assignments\":{},\"digest\":\"00\"}",
+        ),
+        (
+            "data-manifest.json",
+            "{\"rows\":1,\"rows\":2}",
+        ),
+    ];
+    for (file, bytes) in cases {
+        let bad = dir.join(format!("dup-{file}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        std::fs::write(bad.join(file), bytes).unwrap();
+        let b = dir.join(format!("models/dup-{file}"));
+        let (code, out, err) = run(&[
+            "train",
+            "fit",
+            bad.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "F9/B3: fit must refuse a duplicate key in {file} with exit 2, not {code}:\n{out}\n{err}"
+        );
+        assert!(
+            err.contains(file),
+            "F9/B3: the duplicate-key refusal for {file} must name the file:\n{err}"
+        );
+        assert!(
+            !err.contains("fit failed"),
+            "F9/B3: a duplicate key in {file} is bad input, not a generic failure:\n{err}"
+        );
+    }
+}
+
+/// F9/B3 (c): `--out <file>/sub` and `--out <dangling symlink>` must exit 2 naming the path on
+/// `fit` and `dataset`, not exit 1 with `io: Not a directory` / `io: File exists`.
+#[test]
+fn f9_out_under_a_file_or_at_a_dangling_symlink_is_refused_naming_it() {
+    let dir = temp_dir("f9-out-under-file");
+    let ds = build_dataset(&dir, "7");
+    let afile = dir.join("not-a-dir");
+    std::fs::write(&afile, "x").unwrap();
+    let under = afile.join("sub");
+    let dangling = dir.join("dangling");
+    std::os::unix::fs::symlink(dir.join("no-such-target"), &dangling).unwrap();
+
+    for out in [&under, &dangling] {
+        let (code, stdout, err) = run(&[
+            "train",
+            "fit",
+            ds.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code,
+            2,
+            "F9/B3: fit --out {} must exit 2, not {code}:\n{stdout}\n{err}",
+            out.display()
+        );
+        assert!(
+            err.contains(out.to_str().unwrap()),
+            "F9/B3: fit must name the --out path {}:\n{err}",
+            out.display()
+        );
+        assert!(
+            !err.contains("fit failed"),
+            "F9/B3: a bad --out is refused input, not a generic failure:\n{err}"
+        );
+    }
+
+    let (ev, tk, lb) = regenerate(&dir);
+    for out in [&under, &dangling] {
+        let (code, stdout, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "time",
+            "--calibrate",
+            "0.25",
+            "--holdout",
+            "0.25",
+            "--seed",
+            "7",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code,
+            2,
+            "F9/B3: dataset --out {} must exit 2, not {code}:\n{stdout}\n{err}",
+            out.display()
+        );
+        assert!(
+            err.contains(out.to_str().unwrap()),
+            "F9/B3: dataset must name the --out path {}:\n{err}",
+            out.display()
+        );
+    }
+}
+
+/// F9/B3 (d): a non-finite, zero or negative `learning_rate` in features.json is bad input -- exit
+/// 2 naming the field, rather than fitting `null` weights into head.json.
+#[test]
+fn f9_out_of_range_learning_rate_is_refused_naming_the_field() {
+    let dir = temp_dir("f9-learning-rate");
+    let ds = build_dataset(&dir, "7");
+    for value in ["1e308", "0", "-1"] {
+        let bad = dir.join(format!("lr-{value}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        let spec = std::fs::read_to_string(bad.join("features.json")).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&spec).unwrap();
+        v["learning_rate"] = serde_json::json!(value.parse::<f64>().unwrap());
+        std::fs::write(
+            bad.join("features.json"),
+            serde_json::to_string_pretty(&v).unwrap(),
+        )
+        .unwrap();
+        let b = dir.join(format!("models/lr-{value}"));
+        let (code, out, err) = run(&[
+            "train",
+            "fit",
+            bad.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "F9/B3: fit must refuse learning_rate {value} with exit 2, not {code}:\n{out}\n{err}"
+        );
+        assert!(
+            err.contains("learning_rate"),
+            "F9/B3: the refusal for learning_rate {value} must name the field:\n{err}"
+        );
+        assert!(
+            !err.contains("fit failed"),
+            "F9/B3: an out-of-range learning_rate is bad input, not a generic failure:\n{err}"
+        );
+    }
+}
+
+/// F9/B3 (d): a bundle content file that fails to parse is named in the error, not a bare
+/// `json: invalid type: null, expected f64` with no file.
+#[test]
+fn f9_a_malformed_bundle_file_is_named_in_the_error() {
+    let dir = temp_dir("f9-malformed-bundle");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    // A digest-valid but malformed head.json: rewrite it and fix the manifest digest so the parse
+    // error, not the digest check, is what surfaces.
+    let head_path = b.join("head.json");
+    let mut head: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&head_path).unwrap()).unwrap();
+    head["weights"] = serde_json::json!(null);
+    std::fs::write(&head_path, serde_json::to_string_pretty(&head).unwrap()).unwrap();
+    let (code, out, err) = run(&["train", "verify", b.to_str().unwrap()]);
+    assert_eq!(code, 2, "F9/B3: verify a malformed bundle:\n{out}\n{err}");
+    assert!(
+        err.contains("head.json"),
+        "F9/B3: the parse error must name the bundle file:\n{err}"
     );
 }
 

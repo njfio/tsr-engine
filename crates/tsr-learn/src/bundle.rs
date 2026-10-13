@@ -60,6 +60,95 @@ pub struct Manifest {
     pub content_digests: BTreeMap<String, String>,
 }
 
+/// F9/B3 (a): the typed `data-manifest.json`.
+///
+/// `write_dataset` writes exactly these fields, so the loader deserializes them into a struct with
+/// `deny_unknown_fields` rather than reading a `serde_json::Value` by name. A missing, wrong-typed,
+/// negative or out-of-range field is then bad input naming the file and the field, and nothing
+/// defaults silently. The custom `Deserialize` names the offending field in the error, so `fit`,
+/// `report`, `apply` and `verify` all exit 2 with `data-manifest.json: <field> ...`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DataManifest {
+    pub feature_schema: String,
+    pub data_root: String,
+    pub training_root: String,
+    pub source_root: String,
+    pub split_digest: String,
+    pub rows: u64,
+    pub fit: u64,
+    pub calibrate: u64,
+    pub held_out: u64,
+    pub resolved: u64,
+    pub unindexed_tasks: usize,
+    pub uncommitted_tasks: usize,
+}
+
+impl<'de> Deserialize<'de> for DataManifest {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let v = serde_json::Value::deserialize(d)?;
+        let obj = v
+            .as_object()
+            .ok_or_else(|| D::Error::custom("expected a JSON object"))?;
+        const KNOWN: &[&str] = &[
+            "feature_schema",
+            "data_root",
+            "training_root",
+            "source_root",
+            "split_digest",
+            "rows",
+            "fit",
+            "calibrate",
+            "held_out",
+            "resolved",
+            "unindexed_tasks",
+            "uncommitted_tasks",
+        ];
+        for key in obj.keys() {
+            if !KNOWN.contains(&key.as_str()) {
+                return Err(D::Error::custom(format!("unknown field `{key}`")));
+            }
+        }
+        let string = |name: &str| -> Result<String, D::Error> {
+            match obj.get(name) {
+                Some(serde_json::Value::String(s)) => Ok(s.clone()),
+                Some(_) => Err(D::Error::custom(format!("{name}: expected a string"))),
+                None => Err(D::Error::custom(format!("{name}: the field is missing"))),
+            }
+        };
+        let count = |name: &str| -> Result<u64, D::Error> {
+            match obj.get(name) {
+                Some(serde_json::Value::Number(n)) => n.as_u64().ok_or_else(|| {
+                    D::Error::custom(format!("{name}: expected a non-negative integer, got {n}"))
+                }),
+                Some(_) => Err(D::Error::custom(format!(
+                    "{name}: expected a non-negative integer"
+                ))),
+                None => Err(D::Error::custom(format!("{name}: the field is missing"))),
+            }
+        };
+        let tasks = |name: &str| -> Result<usize, D::Error> {
+            let n = count(name)?;
+            usize::try_from(n)
+                .map_err(|_| D::Error::custom(format!("{name}: {n} is out of range for a count")))
+        };
+        Ok(DataManifest {
+            feature_schema: string("feature_schema")?,
+            data_root: string("data_root")?,
+            training_root: string("training_root")?,
+            source_root: string("source_root")?,
+            split_digest: string("split_digest")?,
+            rows: count("rows")?,
+            fit: count("fit")?,
+            calibrate: count("calibrate")?,
+            held_out: count("held_out")?,
+            resolved: count("resolved")?,
+            unindexed_tasks: tasks("unindexed_tasks")?,
+            uncommitted_tasks: tasks("uncommitted_tasks")?,
+        })
+    }
+}
+
 /// A loaded bundle: the id, its directory, the manifest and every content file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
@@ -225,7 +314,84 @@ fn parse_structural<T: serde::de::DeserializeOwned>(
     name: &str,
 ) -> Result<T, LearnError> {
     let text = read_text_named(dir, name)?;
+    // F9/B3 (b): `serde_json` accepts a duplicate key (last wins) in every structural file, so a
+    // hand-edited `features.json` or `split.json` could carry two `version`s and one would be
+    // silently dropped. Refuse a duplicate key in any of the three, naming the file and the key,
+    // before the typed parse runs.
+    refuse_duplicate_keys(name, &text)?;
     serde_json::from_str(&text).map_err(|e| LearnError::Invalid(format!("{name}: {e}")))
+}
+
+/// F9/B3 (b): refuse a duplicate key in a structural JSON file, naming the file and the key.
+///
+/// `serde_json`'s derived `Deserialize` takes the last value for a repeated key, so a file with two
+/// `version`s parses and one is dropped. This walks the document with a duplicate-rejecting visitor
+/// and reports the first repeated key, so all three structural files refuse one alike.
+fn refuse_duplicate_keys(name: &str, text: &str) -> Result<(), LearnError> {
+    use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+    use std::fmt;
+
+    struct NoDup;
+    impl<'de> Deserialize<'de> for NoDup {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = NoDup;
+                fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                    f.write_str("a JSON document with no duplicate keys")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<NoDup, A::Error> {
+                    let mut seen: Vec<String> = Vec::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if seen.contains(&key) {
+                            return Err(serde::de::Error::custom(format!("duplicate key `{key}`")));
+                        }
+                        seen.push(key);
+                        map.next_value::<NoDup>()?;
+                    }
+                    Ok(NoDup)
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> Result<NoDup, A::Error> {
+                    while seq.next_element::<NoDup>()?.is_some() {}
+                    Ok(NoDup)
+                }
+                fn visit_f64<E>(self, _v: f64) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_i64<E>(self, _v: i64) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_u64<E>(self, _v: u64) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_bool<E>(self, _v: bool) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_str<E>(self, _v: &str) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_none<E>(self) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+                fn visit_unit<E>(self) -> Result<NoDup, E> {
+                    Ok(NoDup)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    // A malformed document is left to the typed parse below, which reports it with the file name.
+    if let Err(e) = serde_json::from_str::<NoDup>(text) {
+        let msg = e.to_string();
+        if msg.contains("duplicate key") {
+            return Err(LearnError::Invalid(format!("{name}: {msg}")));
+        }
+    }
+    Ok(())
 }
 
 /// Load a dataset directory written by `write_dataset`.
@@ -242,34 +408,22 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     // into `Invalid("<file>: <what is wrong>")`, so all five subcommands exit 2 naming the file.
     let split: SplitManifest = parse_structural(dir, "split.json")?;
     let spec: FeatureSpec = parse_structural(dir, "features.json")?;
-    let manifest: serde_json::Value = parse_structural(dir, "data-manifest.json")?;
-    // F9/B3 (a): `data-manifest.json` is read by name, so an unknown field would be silently
-    // ignored. Refuse one, naming the file, so a wrong-typed or misspelled field is bad input.
-    {
-        const KNOWN: &[&str] = &[
-            "feature_schema",
-            "data_root",
-            "training_root",
-            "source_root",
-            "split_digest",
-            "rows",
-            "fit",
-            "calibrate",
-            "held_out",
-            "resolved",
-            "unindexed_tasks",
-            "uncommitted_tasks",
-        ];
-        let obj = manifest.as_object().ok_or_else(|| {
-            LearnError::Invalid("data-manifest.json: expected a JSON object".into())
-        })?;
-        for key in obj.keys() {
-            if !KNOWN.contains(&key.as_str()) {
-                return Err(LearnError::Invalid(format!(
-                    "data-manifest.json: unknown field `{key}`"
-                )));
-            }
-        }
+    // F9/B3 (d): every numeric hyperparameter in `features.json` must be finite and within its
+    // documented range -- a `learning_rate` of 1e308, 0 or -1 is bad input naming the field, not a
+    // bundle that writes `null` weights and fails later with no file named.
+    spec.validate()
+        .map_err(|e| LearnError::Invalid(format!("features.json: {e}")))?;
+    // F9/B3 (a): `data-manifest.json` is deserialized into a typed struct with `deny_unknown_fields`,
+    // so a missing, wrong-typed, negative or out-of-range field is bad input naming the file and the
+    // field -- never silently defaulted. The custom `Deserialize` names the offending field.
+    let manifest: DataManifest = parse_structural(dir, "data-manifest.json")?;
+    // F9/B3 (a): `feature_schema` must name the schema the rows were built with, so a manifest that
+    // disagrees with `features.json` is bad input naming the field, not a silently accepted string.
+    if manifest.feature_schema != spec.version {
+        return Err(LearnError::Invalid(format!(
+            "data-manifest.json: feature_schema {:?} disagrees with features.json version {:?}",
+            manifest.feature_schema, spec.version
+        )));
     }
 
     // B2: recompute every row id, both roots and the split digest from `rows.jsonl` and
@@ -293,12 +447,8 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     let training_root = crate::dataset::training_root(&rows);
     let split_digest = crate::dataset::split_digest(split.by, split.seed, &split.assignments);
 
-    let stored_data_root = Hash::from_hex(
-        manifest["data_root"]
-            .as_str()
-            .ok_or_else(|| LearnError::Invalid("data-manifest.json has no data_root".into()))?,
-    )
-    .map_err(|e| LearnError::Invalid(format!("data_root: {e}")))?;
+    let stored_data_root = Hash::from_hex(&manifest.data_root)
+        .map_err(|e| LearnError::Invalid(format!("data-manifest.json: data_root: {e}")))?;
     if stored_data_root != data_root {
         return Err(LearnError::Invalid(format!(
             "data-manifest.json: data_root {} disagrees with the recomputed {}",
@@ -306,11 +456,8 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
             data_root.to_hex()
         )));
     }
-    let stored_training_root =
-        Hash::from_hex(manifest["training_root"].as_str().ok_or_else(|| {
-            LearnError::Invalid("data-manifest.json has no training_root".into())
-        })?)
-        .map_err(|e| LearnError::Invalid(format!("training_root: {e}")))?;
+    let stored_training_root = Hash::from_hex(&manifest.training_root)
+        .map_err(|e| LearnError::Invalid(format!("data-manifest.json: training_root: {e}")))?;
     if stored_training_root != training_root {
         return Err(LearnError::Invalid(format!(
             "data-manifest.json: training_root {} disagrees with the recomputed {}",
@@ -318,12 +465,8 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
             training_root.to_hex()
         )));
     }
-    let stored_split_digest = Hash::from_hex(
-        manifest["split_digest"]
-            .as_str()
-            .ok_or_else(|| LearnError::Invalid("data-manifest.json has no split_digest".into()))?,
-    )
-    .map_err(|e| LearnError::Invalid(format!("split_digest: {e}")))?;
+    let stored_split_digest = Hash::from_hex(&manifest.split_digest)
+        .map_err(|e| LearnError::Invalid(format!("data-manifest.json: split_digest: {e}")))?;
     if stored_split_digest != split_digest {
         return Err(LearnError::Invalid(format!(
             "data-manifest.json: split_digest {} disagrees with the recomputed {}",
@@ -354,12 +497,8 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     }
     spec.standardize_mean = mean;
     spec.standardize_std = std;
-    let source_root = Hash::from_hex(
-        manifest["source_root"]
-            .as_str()
-            .ok_or_else(|| LearnError::Invalid("data-manifest.json has no source_root".into()))?,
-    )
-    .map_err(|e| LearnError::Invalid(format!("source_root: {e}")))?;
+    let source_root = Hash::from_hex(&manifest.source_root)
+        .map_err(|e| LearnError::Invalid(format!("data-manifest.json: source_root: {e}")))?;
     Ok(Dataset {
         rows,
         split,
@@ -369,10 +508,10 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
         source_root,
         // A8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
         // rows, not the index, so it carries the stored count when present.
-        unindexed_tasks: manifest["unindexed_tasks"].as_u64().unwrap_or(0) as usize,
+        unindexed_tasks: manifest.unindexed_tasks,
         // F8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
         // rows, not the index, so it carries the stored count when present.
-        uncommitted_tasks: manifest["uncommitted_tasks"].as_u64().unwrap_or(0) as usize,
+        uncommitted_tasks: manifest.uncommitted_tasks,
     })
 }
 
@@ -673,14 +812,20 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
         }
     }
 
-    // F6/B8: name the file that is missing, rather than an io error with no file name.
-    let read = |name: &str| -> Result<String, LearnError> {
-        std::fs::read_to_string(dir.join(name)).map_err(|e| {
+    // F9/B3 (d): parse a bundle content file, naming the file in the error. A `serde_json` error
+    // (a `null` weight, a wrong-typed field) becomes `Invalid("<file>: <what is wrong>")`, so
+    // `verify`, `report` and `apply` exit 2 naming the file rather than a bare `json:` error.
+    fn parse_bundle_file<T: serde::de::DeserializeOwned>(
+        dir: &Path,
+        name: &str,
+    ) -> Result<T, LearnError> {
+        let text = std::fs::read_to_string(dir.join(name)).map_err(|e| {
             LearnError::Invalid(format!(
                 "bundle file {name:?} is missing or unreadable: {e}"
             ))
-        })
-    };
+        })?;
+        serde_json::from_str(&text).map_err(|e| LearnError::Invalid(format!("{name}: {e}")))
+    }
 
     // Recompute every content file's digest and compare with the stored digest BEFORE parsing the
     // files, so a one-byte change is refused naming the file rather than surfacing as a JSON parse
@@ -706,11 +851,15 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
         content_digests.push((name.to_string(), found));
     }
 
-    let head: Head = serde_json::from_str(&read("head.json")?)?;
-    let isotonic: Isotonic = serde_json::from_str(&read("isotonic.json")?)?;
-    let spec: FeatureSpec = serde_json::from_str(&read("features.json")?)?;
-    let split: SplitManifest = serde_json::from_str(&read("split.json")?)?;
-    let support_file: SupportFile = serde_json::from_str(&read("support.json")?)?;
+    // F9/B3 (d): a bundle content file that fails to parse is named in the error, rather than a bare
+    // `json: invalid type: null, expected f64` with no file. `parse_bundle_file` wraps the
+    // `serde_json` error as `Invalid("<file>: <what is wrong>")`, so `verify`, `report` and `apply`
+    // all exit 2 naming the file.
+    let head: Head = parse_bundle_file(dir, "head.json")?;
+    let isotonic: Isotonic = parse_bundle_file(dir, "isotonic.json")?;
+    let spec: FeatureSpec = parse_bundle_file(dir, "features.json")?;
+    let split: SplitManifest = parse_bundle_file(dir, "split.json")?;
+    let support_file: SupportFile = parse_bundle_file(dir, "support.json")?;
 
     let id = bundle_id(&content_digests, &manifest);
     if manifest.id != id.to_hex() {
