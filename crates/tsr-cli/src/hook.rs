@@ -138,8 +138,19 @@ fn command_words_after_prefix(words: &[String]) -> &[String] {
     }
     if words.get(i).map(String::as_str) == Some("env") {
         i += 1;
-        while i < words.len() && is_assignment(&words[i]) {
-            i += 1;
+        // `env` accepts its own options before the command word: `-i`, `-u NAME`, `--unset=NAME`,
+        // `-C DIR`, `-S`, `--`, and `NAME=value` assignments. Skip them all.
+        while i < words.len() {
+            let w = words[i].as_str();
+            if is_assignment(w) || w == "--" || w == "-i" || w == "-S" {
+                i += 1;
+            } else if w == "-u" || w == "-C" {
+                i += 2; // option plus its argument
+            } else if w.starts_with("--unset=") || w.starts_with("--chdir=") || w.starts_with('-') {
+                i += 1;
+            } else {
+                break;
+            }
         }
     }
     &words[i..]

@@ -179,11 +179,12 @@ pub fn parse(cmd: &str, _cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> Pa
                 }
                 skip_redirection(&mut chars, c);
             }
-            '(' | ')' => {
-                // A subshell or a function definition: not a simple command we can evaluate.
-                has_word = true;
-                cur.push(c);
-                unevaluable = true;
+            '(' | ')' | '{' | '}' => {
+                // A subshell `( … )` or a brace group `{ …; }` wraps simple commands; descend into
+                // it by treating the delimiter as a command separator, so the inner `tsr exec` is
+                // found. A `{`/`}` that is part of a word (e.g. `${VAR}`) is handled by the `$`
+                // expansion above and never reaches here.
+                flush_command!();
             }
             _ => {
                 cur.push(c);

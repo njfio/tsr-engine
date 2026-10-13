@@ -783,3 +783,27 @@ fn the_three_test_run_spellings_record_run_approved_test() {
         );
     }
 }
+
+/// A `tsr exec` wrapped in an `env` prefix with options, a subshell or a brace group must still be
+/// recognised as the one `tsr exec` invocation (r3 review: `env -i`/`env -u FOO` and `( … )`/`{ …; }`
+/// each gave two proposals and one forecast).
+#[test]
+fn a_wrapped_tsr_exec_is_still_one_candidate() {
+    for (name, bash_cmd) in [
+        ("env-i", "env -i tsr exec -- cargo test"),
+        ("env-u", "env -u FOO tsr exec -- cargo test"),
+        ("subshell", "(tsr exec -- cargo test)"),
+        ("subshell-cd", "(cd crate && tsr exec -- cargo test)"),
+        ("brace", "{ tsr exec -- cargo test; }"),
+    ] {
+        let dir = scratch(&format!("typed-{name}"));
+        let trace = record_typed_spelling(
+            &dir,
+            &format!("typed-{name}"),
+            bash_cmd,
+            "cargo test",
+            &["cargo", "test"],
+        );
+        assert_one_proposal_one_forecast_and_reconstructs(&trace, name);
+    }
+}
