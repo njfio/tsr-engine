@@ -111,41 +111,43 @@ pub fn shell_words(cmd: &str) -> Vec<String> {
     words
 }
 
-/// The hook's environment, as the shell would see it: `$VAR`/`${VAR}` resolve from the hook
-/// process's environment.
-fn hook_env(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
-/// The hook's cwd, as the shell would see it: globs expand against the process's current directory.
-fn hook_cwd() -> std::path::PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-}
-
-/// Parse a Bash command string with POSIX shell grammar: split into simple commands on `;`, `&&`,
-/// `||`, `|`, `&` and newlines, remove redirections, and expand `~`, `$VAR`, `${VAR}` and globs from
-/// the hook's environment and cwd. See [`shell::parse`].
+/// Parse a Bash command string with POSIX shell grammar only: split into simple commands on `;`,
+/// `&&`, `||`, `|`, `&` and newlines, remove redirections, and mark each word the shell would expand
+/// (glob, `~`, `$VAR`, `${VAR}`, command/process substitution) as a wildcard. No expansion is
+/// evaluated — the hook cannot know the shell that will run the command. See [`shell::parse`].
 fn parse_command(cmd: &str) -> shell::Parsed {
-    shell::parse(cmd, &hook_cwd(), &hook_env)
+    shell::parse(cmd)
 }
 
-/// Skip the leading `VAR=value` assignments and an `env` prefix (and any assignments after it) that
-/// the shell grammar allows in front of a simple command, returning the remaining words.
-fn command_words_after_prefix(words: &[String]) -> &[String] {
+/// The texts of a simple command's words, quotes removed. Used by the prefix/test-run logic, which
+/// only needs the literal text of each word.
+fn word_texts(words: &[shell::Word]) -> Vec<String> {
+    words.iter().map(|w| w.text.clone()).collect()
+}
+
+/// Skip the leading `VAR=value` assignments, an `env` prefix (and any assignments after it), and the
+/// command-prefix wrappers the shell grammar allows in front of a simple command — `time`, `nohup`,
+/// `!`, the keywords `if`/`then`/`do`/`while`, `nice [-n N]` and `timeout [options] DURATION` —
+/// returning the remaining words.
+///
+/// A trailing `env -u`, `nice -n` or `timeout -s` (an option with no argument) is a plain word list,
+/// not a panic: every index is clamped to the slice length (defect 3).
+fn command_words_after_prefix(words: &[shell::Word]) -> &[shell::Word] {
     let mut i = 0;
-    while i < words.len() && is_assignment(&words[i]) {
+    while i < words.len() && is_assignment(&words[i].text) {
         i += 1;
     }
-    if words.get(i).map(String::as_str) == Some("env") {
+    if words.get(i).map(|w| w.text.as_str()) == Some("env") {
         i += 1;
         // `env` accepts its own options before the command word: `-i`, `-u NAME`, `--unset=NAME`,
         // `-C DIR`, `-S`, `--`, and `NAME=value` assignments. Skip them all.
         while i < words.len() {
-            let w = words[i].as_str();
+            let w = words[i].text.as_str();
             if is_assignment(w) || w == "--" || w == "-i" || w == "-S" {
                 i += 1;
             } else if w == "-u" || w == "-C" {
-                i += 2; // option plus its argument
+                // Option plus its argument; a trailing option with no argument is a plain word.
+                i = (i + 2).min(words.len());
             } else if w.starts_with("--unset=") || w.starts_with("--chdir=") || w.starts_with('-') {
                 i += 1;
             } else {
@@ -153,16 +155,205 @@ fn command_words_after_prefix(words: &[String]) -> &[String] {
             }
         }
     }
-    &words[i..]
+    let mut rest = &words[i..];
+    // The wrappers may nest (`time nice -n 5 timeout 60 cargo test`), so loop until none applies.
+    loop {
+        match rest {
+            [w, ..] if matches!(w.text.as_str(), "time" | "nohup" | "!") => rest = &rest[1..],
+            [w, ..] if matches!(w.text.as_str(), "if" | "then" | "do" | "while") => {
+                rest = &rest[1..]
+            }
+            [w, ..] if w.text == "nice" => {
+                let mut j = 1;
+                if rest.get(j).map(|w| w.text.as_str()) == Some("-n") {
+                    // `nice -n N`: a trailing `-n` with no argument is a plain word list (defect 3).
+                    j = (j + 2).min(rest.len());
+                } else if rest
+                    .get(j)
+                    .map(|w| w.text.starts_with('-'))
+                    .unwrap_or(false)
+                {
+                    j += 1;
+                }
+                rest = &rest[j..];
+            }
+            [w, ..] if w.text == "timeout" => {
+                // `timeout [options] DURATION command…`: skip the options, then the duration.
+                // `-s SIGNAL` and `-k DURATION` take an argument; other options do not.
+                let mut j = 1;
+                while j < rest.len() {
+                    let t = rest[j].text.as_str();
+                    if t == "-s" || t == "-k" {
+                        j = (j + 2).min(rest.len());
+                    } else if t.starts_with('-') {
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if j < rest.len() {
+                    j += 1; // the duration
+                }
+                rest = &rest[j..];
+            }
+            _ => break,
+        }
+    }
+    rest
 }
 
-/// Expand a word's glob against the hook's cwd, as the shell would before `tsr exec` sees the argv.
-fn expand_word_globs(word: &str) -> Vec<String> {
-    shell::expand_glob(word, &hook_cwd())
+/// A pattern for the argv a `tsr exec` simple command will receive: the argument words after `--`,
+/// quote-removed, redirections dropped, with each word the shell would expand marked as a wildcard.
+///
+/// The hook cannot evaluate expansions (it is not the shell that runs the command), so it records
+/// what it *can* know — the literal words and the positions where the shell may substitute an
+/// arbitrary number of argv words — and `tsr exec` matches its argv against that pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pattern {
+    pub words: Vec<PatternWord>,
+}
+
+/// One word of a [`Pattern`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternWord {
+    /// A word with no expansion: it matches exactly this text.
+    Literal(String),
+    /// A word the shell would expand (unquoted glob, `~`, `$…`, `${…}`, command or arithmetic
+    /// substitution): it matches any sequence of zero or more argv words.
+    Wildcard,
+    /// A quoted word containing an expansion: it matches exactly one argv word.
+    QuotedWildcard,
+}
+
+impl Pattern {
+    /// Build a pattern from the words after `--` of a `tsr exec` simple command.
+    fn from_words(words: &[shell::Word]) -> Pattern {
+        Pattern {
+            words: words
+                .iter()
+                .map(|w| match w.kind {
+                    shell::WordKind::Literal => PatternWord::Literal(w.text.clone()),
+                    shell::WordKind::Wildcard => PatternWord::Wildcard,
+                    shell::WordKind::QuotedWildcard => PatternWord::QuotedWildcard,
+                })
+                .collect(),
+        }
+    }
+
+    /// The canonical string of this pattern, used as the candidate's args so the hook and
+    /// `tsr forecast` agree on identity. A wildcard is encoded as `*` and a quoted wildcard as `?`,
+    /// which cannot collide with a literal word (a literal `*` is quoted by [`quote_word`]).
+    pub fn canonical(&self) -> String {
+        self.words
+            .iter()
+            .map(|w| match w {
+                PatternWord::Literal(s) => quote_word(s),
+                PatternWord::Wildcard => "*".to_string(),
+                PatternWord::QuotedWildcard => "?".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Parse a canonical pattern string back into a [`Pattern`]. The inverse of [`Pattern::canonical`].
+    pub fn parse(s: &str) -> Pattern {
+        let mut words = Vec::new();
+        for tok in shell_words(s) {
+            match tok.as_str() {
+                "*" => words.push(PatternWord::Wildcard),
+                "?" => words.push(PatternWord::QuotedWildcard),
+                _ => words.push(PatternWord::Literal(tok)),
+            }
+        }
+        Pattern { words }
+    }
+
+    /// Whether `argv` matches this pattern. Linear in `argv.len() * words.len()`: a wildcard consumes
+    /// zero or more argv words, and the match is a single left-to-right scan with no backtracking
+    /// (defect 10 — the exponential glob matcher is gone).
+    pub fn matches(&self, argv: &[String]) -> bool {
+        // `dp[j]` = the pattern prefix up to the current word can match the first `j` argv words.
+        let n = argv.len();
+        let mut dp = vec![false; n + 1];
+        dp[0] = true;
+        for pw in &self.words {
+            let mut next = vec![false; n + 1];
+            match pw {
+                PatternWord::Literal(lit) => {
+                    for j in 0..n {
+                        if dp[j] && argv[j] == *lit {
+                            next[j + 1] = true;
+                        }
+                    }
+                }
+                PatternWord::QuotedWildcard => {
+                    for j in 0..n {
+                        if dp[j] {
+                            next[j + 1] = true;
+                        }
+                    }
+                }
+                PatternWord::Wildcard => {
+                    // A wildcard matches zero or more argv words: once reachable, every later `j`
+                    // is reachable too. A single forward scan, no backtracking.
+                    let mut reachable = false;
+                    for j in 0..=n {
+                        if dp[j] {
+                            reachable = true;
+                        }
+                        if reachable {
+                            next[j] = true;
+                        }
+                    }
+                }
+            }
+            dp = next;
+        }
+        dp[n]
+    }
 }
 
 /// POSIX-quote a word: a word that is non-empty and contains only shell-safe characters is emitted
 /// bare; otherwise it is wrapped in single quotes with any embedded `'` replaced by `'\''`.
+/// The file, beside the store, that maps a `tsr exec` candidate id to its pattern string.
+///
+/// The hook cannot put the pattern in the candidate (its args are a digest), so it leaves the pattern
+/// on disk where `tsr exec` can read it. The file lives in the store's directory, so it is per-store
+/// and hermetic in tests.
+pub fn pattern_file() -> std::path::PathBuf {
+    crate::store_path::session_dir().join("patterns.jsonl")
+}
+
+/// Remember the pattern of a `tsr exec` candidate so `tsr exec` can match its argv against it.
+/// Best-effort: a write failure must never fail the hook.
+pub fn remember_pattern(cid: CandidateId, pattern: &str) {
+    use std::io::Write;
+    let path = pattern_file();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{} {}", cid.0.to_hex(), pattern);
+    }
+}
+
+/// The candidate-id → pattern map written by [`remember_pattern`]. A later line for the same id wins.
+pub fn load_patterns() -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(text) = std::fs::read_to_string(pattern_file()) {
+        for line in text.lines() {
+            if let Some((id, pat)) = line.split_once(' ') {
+                map.insert(id.to_string(), pat.to_string());
+            }
+        }
+    }
+    map
+}
+
 fn quote_word(word: &str) -> String {
     let safe = !word.is_empty()
         && word
@@ -201,7 +392,7 @@ pub fn canonical_args(words: &[String]) -> String {
 /// it), the command begins with `cargo test` or `cargo nextest run`, skipping the wrappers the shell
 /// grammar allows in front of a test run: `timeout [options] DURATION`, `nice [-n N]`, `time`, and a
 /// `+toolchain` argument to cargo (`cargo +1.90.0 test`).
-fn words_are_test_run(words: &[String]) -> bool {
+fn words_are_test_run(words: &[shell::Word]) -> bool {
     test_run_words(words).is_some()
 }
 
@@ -211,52 +402,26 @@ fn words_are_test_run(words: &[String]) -> bool {
 /// `time`), the command begins with `cargo test` or `cargo nextest run`. The returned slice starts
 /// at `cargo` and keeps a `+toolchain` argument (`cargo +1.90.0 test`), so the digest is the argv
 /// `tsr exec` receives for the same spelling.
-fn test_run_words(words: &[String]) -> Option<&[String]> {
-    let mut rest = command_words_after_prefix(words);
-    loop {
-        match rest {
-            [w, ..] if w == "timeout" => {
-                // `timeout [options] DURATION command…`: skip the options, then the duration.
-                let mut i = 1;
-                while i < rest.len() && rest[i].starts_with('-') {
-                    i += 1;
-                }
-                if i < rest.len() {
-                    i += 1; // the duration
-                }
-                rest = &rest[i..];
-            }
-            [w, ..] if w == "nice" => {
-                let mut i = 1;
-                if rest.get(i).map(String::as_str) == Some("-n") {
-                    i += 2;
-                } else if rest.get(i).map(|s| s.starts_with('-')).unwrap_or(false) {
-                    i += 1;
-                }
-                rest = &rest[i..];
-            }
-            [w, ..] if w == "time" => {
-                rest = &rest[1..];
-            }
-            _ => break,
-        }
-    }
+fn test_run_words(words: &[shell::Word]) -> Option<&[shell::Word]> {
+    let rest = command_words_after_prefix(words);
     match rest {
-        [cargo, test, ..] if cargo == "cargo" && test == "test" => Some(rest),
-        [cargo, nextest, run, ..] if cargo == "cargo" && nextest == "nextest" && run == "run" => {
+        [cargo, test, ..] if cargo.text == "cargo" && test.text == "test" => Some(rest),
+        [cargo, nextest, run, ..]
+            if cargo.text == "cargo" && nextest.text == "nextest" && run.text == "run" =>
+        {
             Some(rest)
         }
         // `cargo +toolchain test`: the `+toolchain` argument is kept in the digest.
         [cargo, toolchain, test, ..]
-            if cargo == "cargo" && toolchain.starts_with('+') && test == "test" =>
+            if cargo.text == "cargo" && toolchain.text.starts_with('+') && test.text == "test" =>
         {
             Some(rest)
         }
         [cargo, toolchain, nextest, run, ..]
-            if cargo == "cargo"
-                && toolchain.starts_with('+')
-                && nextest == "nextest"
-                && run == "run" =>
+            if cargo.text == "cargo"
+                && toolchain.text.starts_with('+')
+                && nextest.text == "nextest"
+                && run.text == "run" =>
         {
             Some(rest)
         }
@@ -270,7 +435,7 @@ fn test_run_command_words(cmd: &str) -> Option<Vec<String>> {
     parse_command(cmd)
         .commands
         .iter()
-        .find_map(|c| test_run_words(&c.words).map(<[String]>::to_vec))
+        .find_map(|c| test_run_words(&c.words).map(word_texts))
 }
 
 /// Whether a `Bash` command is a test run: any simple command in the chain, after skipping leading
@@ -409,7 +574,7 @@ pub fn action_args(payload: &HookPayload) -> String {
         // Without this the hook's candidate for `tsr exec -- cargo test …` would differ from the
         // forecast's for `cargo test …`, and the commitment would orphan the forecast.
         if let Some(inner) = tsr_exec_inner(&cmd) {
-            return inner;
+            return inner.canonical();
         }
         // A test run commits to the canonical argv of the test run itself, so a forecast written
         // `cargo test` matches the hook's `cd crate⏎cargo test`, `timeout 60 cargo test` and
@@ -489,29 +654,28 @@ pub fn is_tsr_forecast_command(cmd: &str) -> bool {
 
 /// Whether a simple command's words are a `tsr <sub>` invocation: after skipping leading `VAR=value`
 /// assignments and an `env` prefix, the first word's basename is `tsr` and the second word is `sub`.
-fn words_are_tsr_subcommand(words: &[String], sub: &str) -> bool {
+fn words_are_tsr_subcommand(words: &[shell::Word], sub: &str) -> bool {
     let rest = command_words_after_prefix(words);
     match rest {
         [tsr, s, ..] => {
-            let base = tsr.rsplit('/').next().unwrap_or(tsr);
-            base == "tsr" && s == sub
+            let base = tsr.text.rsplit('/').next().unwrap_or(&tsr.text);
+            base == "tsr" && s.text == sub
         }
         _ => false,
     }
 }
 
-/// The inner command of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
+/// The pattern of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
 ///
-/// The inner command is the argv `tsr exec` is handed, joined by single spaces — the same string
-/// `exec::mint_candidate` digests — so the hook's candidate for the wrapper call equals the one the
-/// forecast names and the one `tsr exec` dispatches.
+/// The pattern is the argument words after `--`, quote-removed, redirections dropped, with each word
+/// the shell would expand marked as a wildcard. `tsr exec` matches its argv against it, so the hook's
+/// candidate for the wrapper call is the one the forecast names and the one `tsr exec` dispatches.
 ///
-/// The hook parses the command string with POSIX shell grammar, so the words after `--` are what the
-/// shell would hand `tsr exec`: redirections removed, `~`/`$VAR`/`${VAR}` expanded from the hook's
-/// environment and globs expanded against the hook's cwd. A word the parser cannot evaluate
-/// (command/process substitution, arithmetic) is digested as written and the hook prints one stderr
-/// line saying the forecast may not match.
-pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
+/// The hook parses the command string with POSIX shell grammar only: it does not evaluate `~`,
+/// `$VAR`, `${VAR}` or globs (it is not the shell that runs the command). A word the parser cannot
+/// evaluate (command/process substitution, arithmetic) is recorded as a wildcard and the hook prints
+/// one stderr line saying the forecast may not match.
+pub fn tsr_exec_inner(cmd: &str) -> Option<Pattern> {
     let parsed = parse_command(cmd);
     for c in &parsed.commands {
         if !words_are_tsr_subcommand(&c.words, "exec") {
@@ -520,16 +684,11 @@ pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
         let rest = command_words_after_prefix(&c.words);
         // rest[0] is the `tsr` token, rest[1] is `exec`.
         let mut inner = &rest[2..];
-        if inner.first().map(String::as_str) == Some("--") {
+        if inner.first().map(|w| w.text.as_str()) == Some("--") {
             inner = &inner[1..];
         }
         if inner.is_empty() {
             return None;
-        }
-        // Expand globs against the hook's cwd, as the shell would before `tsr exec` sees the argv.
-        let mut words: Vec<String> = Vec::new();
-        for w in inner {
-            words.extend(expand_word_globs(w));
         }
         if c.unevaluable {
             eprintln!(
@@ -537,7 +696,7 @@ pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
                  substitution or arithmetic); the forecast may not match"
             );
         }
-        return Some(canonical_args(&words));
+        return Some(Pattern::from_words(inner));
     }
     None
 }
@@ -679,8 +838,32 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
 
     // Identity is `(kind, args digest)` only — the same candidate `tsr forecast` minted for this
     // tool call, so a prior forecast's `Proposed` is recognised here.
-    let candidate = mint_candidate(kind, &action_args(payload))?;
+    let args = action_args(payload);
+    let is_exec = payload
+        .bash_command()
+        .as_deref()
+        .is_some_and(|c| tsr_exec_inner(c).is_some());
+
+    // A `tsr exec -- …` call commits to a *pattern* (the words after `--`, with expansions marked as
+    // wildcards). `tsr forecast --args` writes its own pattern; when the hook's pattern matches a
+    // pending forecast's pattern, the two name the same action and must share one candidate — the
+    // hook reuses the forecast's id rather than minting a second proposal (r4: `tsr forecast --args`
+    // pairs with the hook's proposal by the same matcher).
+    let paired = if is_exec {
+        pair_with_pending_pattern(store, &task, kind, &args)?
+    } else {
+        None
+    };
+    // When paired, the forecast's own pattern string is the candidate's args, so the id the hook
+    // mints equals the forecast's id and no second proposal is recorded.
+    let args = paired.unwrap_or(args);
+    let candidate = mint_candidate(kind, &args)?;
     let cid = candidate.id;
+
+    // Leave the pattern on disk for `tsr exec` to match its argv against.
+    if is_exec {
+        remember_pattern(cid, &args);
+    }
 
     let mut batch: Vec<Event> = Vec::new();
     let mut push = |kind: EventKind, source: Source, parents: Vec<EventId>| {
@@ -782,6 +965,71 @@ fn pending_proposal(store: &Store, task: &TaskId, cid: CandidateId) -> anyhow::R
         (Some(p), Some(c)) => p > c,
         (Some(_), None) => true,
         _ => false,
+    })
+}
+
+/// The pending candidates of `kind` in `task`: those whose newest `Proposed`/`Committed` comes after
+/// their newest `Dispatched` (or which have no `Dispatched`). Mirrors `exec::pending_candidates`.
+fn pending_candidates_of_kind(store: &Store, task: &TaskId, kind: ActionKind) -> Vec<CandidateId> {
+    let events = match store.by_task(task) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut pending: Vec<CandidateId> = Vec::new();
+    for (_, e) in &events {
+        match &e.kind {
+            EventKind::Proposed { candidate } => {
+                if candidate.kind == kind && !pending.contains(&candidate.id) {
+                    pending.push(candidate.id);
+                }
+            }
+            EventKind::Committed { candidate, .. } => {
+                if pending.contains(candidate) {
+                    continue;
+                }
+                if let Some(c) = events.iter().find_map(|(_, p)| match &p.kind {
+                    EventKind::Proposed { candidate: p } if p.id == *candidate => Some(p),
+                    _ => None,
+                }) {
+                    if c.kind == kind && !pending.contains(candidate) {
+                        pending.push(*candidate);
+                    }
+                }
+            }
+            EventKind::Dispatched { candidate, .. } => {
+                pending.retain(|p| p != candidate);
+            }
+            _ => {}
+        }
+    }
+    pending
+}
+
+/// The args string of a pending candidate whose recorded pattern the hook's pattern matches, if
+/// exactly one does. `tsr forecast --args` writes its pattern to the same sidecar the hook writes
+/// its own to, so a forecast written `echo 2024-01-01` pairs with the hook's `tsr exec -- echo $(date)`
+/// pattern `echo *`: the hook reuses the forecast's candidate instead of minting a second proposal.
+fn pair_with_pending_pattern(
+    store: &Store,
+    task: &TaskId,
+    kind: ActionKind,
+    pattern: &str,
+) -> anyhow::Result<Option<String>> {
+    let patterns = load_patterns();
+    let pat = Pattern::parse(pattern);
+    let mut matches: Vec<String> = Vec::new();
+    for cid in pending_candidates_of_kind(store, task, kind) {
+        if let Some(stored) = patterns.get(&cid.0.to_hex()) {
+            let argv = shell_words(stored);
+            if pat.matches(&argv) {
+                matches.push(stored.clone());
+            }
+        }
+    }
+    Ok(if matches.len() == 1 {
+        Some(matches.remove(0))
+    } else {
+        None
     })
 }
 
@@ -983,7 +1231,11 @@ fn append_forecast(
 /// re-quoted word by word, exactly as the hook does for a `Bash` command. A forecast written
 /// `sh -c "a; b"` therefore matches the hook's `sh -c 'a; b'`.
 pub fn canonical_forecast_args(args: &str) -> String {
-    canonical_args(&shell_words(args))
+    // The forecast's `--args` is a *pattern*, the same encoding the hook records for a `tsr exec`
+    // call: a bare `*` is a wildcard, a bare `?` a quoted wildcard, everything else literal. So a
+    // forecast written `cargo test` pairs with the hook's `cargo test` pattern, and one written
+    // `cargo test *` pairs with the hook's `tsr exec -- cargo test *`.
+    Pattern::parse(args).canonical()
 }
 
 /// Record a forecast for a gated action, before the tool call (B5, B7).
@@ -1008,6 +1260,10 @@ pub fn record_forecast_for_action(
     let args = canonical_forecast_args(args);
     let candidate = mint_candidate(kind, &args)?;
     let cid = candidate.id;
+
+    // Leave the forecast's pattern on disk so the hook can pair its own pattern with it (r4): a
+    // forecast written `echo 2024-01-01` and a hook pattern `echo *` name the same action.
+    remember_pattern(cid, &args);
 
     // Append `Proposed` unless a pending proposal with this id already exists.
     if !pending_proposal(store, task, cid)? {
@@ -1612,11 +1868,15 @@ mod tests {
             "env RUST_BACKTRACE=1 tsr exec -- cargo test",
             "cd crate && tsr exec -- cargo test",
             "./target/debug/tsr exec -- cargo test",
+            "time tsr exec -- cargo test",
+            "nice -n 5 tsr exec -- cargo test",
+            "timeout 60 tsr exec -- cargo test",
+            "nohup tsr exec -- cargo test",
         ] {
             assert!(is_tsr_exec_command(cmd), "{cmd:?} is a tsr exec");
             assert_eq!(
-                tsr_exec_inner(cmd).as_deref(),
-                Some("cargo test"),
+                tsr_exec_inner(cmd).map(|p| p.canonical()),
+                Some("cargo test".to_string()),
                 "{cmd:?} extracts the inner command"
             );
         }
@@ -1666,7 +1926,7 @@ mod tests {
         let a = tsr_exec_inner("tsr exec -- sh -c 'a; b'").expect("single-quoted");
         let b = tsr_exec_inner("tsr exec -- sh -c \"a; b\"").expect("double-quoted");
         let c = tsr_exec_inner("tsr exec -- sh -c a\\;\\ b").expect("escaped");
-        assert_eq!(a, "sh -c 'a; b'");
+        assert_eq!(a.canonical(), "sh -c 'a; b'");
         assert_eq!(a, b, "single- and double-quoted spellings agree");
         assert_eq!(a, c, "escaped spelling agrees");
     }

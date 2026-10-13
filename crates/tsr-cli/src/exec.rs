@@ -429,18 +429,19 @@ pub fn run_with(
     runner.available()?;
 
     // Record the dispatch only once the runner is known to be able to run.
-    let cid = match pending_commitment(
-        store,
-        task,
-        ActionKind::RunApprovedTest,
-        crate::hook::args_digest(
-            ActionKind::RunApprovedTest,
-            &crate::hook::canonical_args(argv),
-        ),
-    ) {
-        // The hook committed this candidate for the same argv: dispatch it, do not mint a second.
+    let (matched, n_matches) = pending_matching(store, task, argv);
+    let cid = match matched {
+        // Exactly one pending candidate's pattern matches this argv: dispatch it, do not mint a
+        // second. The hook committed it a moment ago for the same command.
         Some(cid) => cid,
         None => {
+            if n_matches == 0 {
+                eprintln!("tsr: exec: no pending candidate matches this argv; minting a fresh one");
+            } else {
+                eprintln!(
+                    "tsr: exec: {n_matches} pending candidates match this argv; minting a fresh one"
+                );
+            }
             let candidate = mint_candidate(argv)?;
             let cid = candidate.id;
             let proposed = append(
@@ -562,6 +563,62 @@ fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
         &crate::hook::canonical_args(argv),
     )
     .map_err(|_| ExecRefusal::NoRuntime)
+}
+
+/// The pending candidates of `kind` in `task`: those whose newest `Proposed`/`Committed` comes after
+/// their newest `Dispatched` (or which have no `Dispatched`). The occurrence walk is the same as
+/// [`pending_commitment`], but it keeps every pending id rather than the last one, so the caller can
+/// test each against the argv.
+fn pending_candidates(store: &Store, task: &TaskId, kind: ActionKind) -> Vec<CandidateId> {
+    let events = match store.by_task(task) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut pending: Vec<CandidateId> = Vec::new();
+    for (_, e) in &events {
+        match &e.kind {
+            EventKind::Proposed { candidate } => {
+                if candidate.kind == kind && !pending.contains(&candidate.id) {
+                    pending.push(candidate.id);
+                }
+            }
+            EventKind::Committed { candidate, .. } => {
+                if pending.contains(candidate) {
+                    continue;
+                }
+                if let Some(c) = events.iter().find_map(|(_, p)| match &p.kind {
+                    EventKind::Proposed { candidate: p } if p.id == *candidate => Some(p),
+                    _ => None,
+                }) {
+                    if c.kind == kind && !pending.contains(candidate) {
+                        pending.push(*candidate);
+                    }
+                }
+            }
+            EventKind::Dispatched { candidate, .. } => {
+                pending.retain(|p| p != candidate);
+            }
+            _ => {}
+        }
+    }
+    pending
+}
+
+/// The pending `RunApprovedTest` candidate whose recorded pattern matches `argv`, if exactly one
+/// does. Returns the matching id and the number of matches, so the caller can report why it minted a
+/// fresh candidate when the count is not one.
+fn pending_matching(store: &Store, task: &TaskId, argv: &[String]) -> (Option<CandidateId>, usize) {
+    let patterns = crate::hook::load_patterns();
+    let mut matches: Vec<CandidateId> = Vec::new();
+    for cid in pending_candidates(store, task, ActionKind::RunApprovedTest) {
+        if let Some(pat) = patterns.get(&cid.0.to_hex()) {
+            if crate::hook::Pattern::parse(pat).matches(argv) {
+                matches.push(cid);
+            }
+        }
+    }
+    let n = matches.len();
+    (if n == 1 { Some(matches[0]) } else { None }, n)
 }
 
 /// The candidate of the most recent `Committed` for `(kind, args_digest)` that has no `Dispatched`
