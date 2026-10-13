@@ -466,6 +466,26 @@ pub fn build_dataset(
         .cloned()
         .collect();
     let split = make_split(&split_index, by, fractions, seed);
+    // F9/B3 (b): a share that leaves any side empty is refused, naming the side. An empty side is
+    // not a split: `fit` would skip it (probes.rs) and write a bundle with no held-out rows, and an
+    // empty calibrate slice fits an identity calibrator. Refuse at the source, with the counts.
+    {
+        let count = |side: Side| split.assignments.values().filter(|s| **s == side).count();
+        for (side, name) in [
+            (Side::Fit, "fit"),
+            (Side::Calibrate, "calibrate"),
+            (Side::HeldOut, "held_out"),
+        ] {
+            let n = count(side);
+            if n == 0 {
+                return Err(LearnError::Invalid(format!(
+                    "the split leaves the {name} side empty ({n} of {} tasks); refusing a share \
+                     that leaves any side empty",
+                    split.assignments.len()
+                )));
+            }
+        }
+    }
     let mut fit_families: BTreeSet<String> = BTreeSet::new();
     for row in index {
         if split.assignments.get(&row.task.to_string()) == Some(&Side::Fit) {
@@ -873,7 +893,13 @@ mod tests {
             let t = task(&[i]);
             events.extend(session(t, &[i], 0.9));
             let family = if i % 2 == 0 { "over" } else { "cal" };
-            let lineage = if i < 6 { "repo-a" } else { "repo-b" };
+            // F9/B3 (b): three lineages, so a repo split can give all three sides a non-empty
+            // share (a split that leaves a side empty is now refused).
+            let lineage = match i / 4 {
+                0 => "repo-a",
+                1 => "repo-b",
+                _ => "repo-c",
+            };
             let ts = format!("2024-01-{:02}T00:00:00Z", i + 1);
             index.push(index_row(t, family, lineage, &ts));
             labels.push(label(t, i % 3 != 0));
@@ -930,7 +956,9 @@ mod tests {
         let mut events = Vec::new();
         let mut index = Vec::new();
         let mut labels = Vec::new();
-        for i in 0..8u8 {
+        // F9/B3 (b): three clone groups, so the split can give all three sides a non-empty share
+        // (a split that leaves a side empty is now refused) while each group still stays together.
+        for i in 0..12u8 {
             let t = task(&[100 + i]);
             events.extend(session(t, &[100 + i], 0.9));
             let mut row = index_row(
@@ -939,7 +967,7 @@ mod tests {
                 "repo-a",
                 &format!("2024-01-{:02}T00:00:00Z", i + 1),
             );
-            row.clone_group = Some("clone-1".to_string());
+            row.clone_group = Some(format!("clone-{}", i / 4));
             index.push(row);
             labels.push(label(t, true));
         }
@@ -959,11 +987,22 @@ mod tests {
             Hash::of(&[b"src"]),
         )
         .unwrap();
-        let mut sides: BTreeSet<Side> = BTreeSet::new();
+        // Each clone group must stay on one side; with three groups the dataset as a whole spans
+        // three sides, so check per group rather than globally. The clone group lives on the index
+        // row, so map each dataset row's task back to its group.
+        let group_of: BTreeMap<TaskId, String> = index
+            .iter()
+            .map(|r| (r.task, r.clone_group.clone().unwrap_or_default()))
+            .collect();
+        let mut sides: BTreeMap<String, BTreeSet<Side>> = BTreeMap::new();
         for r in &ds.rows {
-            sides.insert(r.side);
+            let group = group_of.get(&r.task).cloned().unwrap_or_default();
+            sides.entry(group).or_default().insert(r.side);
         }
-        assert_eq!(sides.len(), 1, "a clone group must stay on one side");
+        assert_eq!(sides.len(), 3, "three clone groups");
+        for (group, s) in &sides {
+            assert_eq!(s.len(), 1, "clone group {group} must stay on one side");
+        }
     }
 
     #[test]
@@ -973,7 +1012,13 @@ mod tests {
         for i in 0..12u8 {
             let t = task(&[i]);
             let family = if i % 2 == 0 { "over" } else { "cal" };
-            let lineage = if i < 6 { "repo-a" } else { "repo-b" };
+            // F9/B3 (b): three lineages, so a repo split can give all three sides a non-empty
+            // share (a split that leaves a side empty is now refused).
+            let lineage = match i / 4 {
+                0 => "repo-a",
+                1 => "repo-b",
+                _ => "repo-c",
+            };
             let ts = format!("2024-01-{:02}T00:00:00Z", i + 1);
             real_index.push(index_row(t, family, lineage, &ts));
         }

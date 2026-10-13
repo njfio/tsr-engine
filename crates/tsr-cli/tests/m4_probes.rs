@@ -226,10 +226,12 @@ fn a12_dataset_refuses_a_leaking_split_before_writing() {
         labels.to_str().unwrap(),
         "--by",
         "time",
+        // F9/B3 (b): a share that leaves a side empty is now refused before the probes run, so use
+        // a split with all three sides non-empty; the leak is in the corpus, not the split.
         "--calibrate",
-        "0",
+        "0.25",
         "--holdout",
-        "0",
+        "0.25",
         "--seed",
         "7",
         "--out",

@@ -214,6 +214,20 @@ fn read_text_named(dir: &Path, name: &str) -> Result<String, LearnError> {
     }
 }
 
+/// F9/B3 (a): parse a structural input file, reporting `<file>: <what is wrong>` as bad input.
+///
+/// A `serde_json` error (empty, truncated, `null`, `[]`, `{}`, a wrong-typed field) becomes
+/// `LearnError::Invalid`, so every subcommand exits 2 naming the file rather than 1 with a bare
+/// `json:` error. The file is read through `read_text_named`, so a missing or non-UTF-8 file is
+/// refused naming it too.
+fn parse_structural<T: serde::de::DeserializeOwned>(
+    dir: &Path,
+    name: &str,
+) -> Result<T, LearnError> {
+    let text = read_text_named(dir, name)?;
+    serde_json::from_str(&text).map_err(|e| LearnError::Invalid(format!("{name}: {e}")))
+}
+
 /// Load a dataset directory written by `write_dataset`.
 ///
 /// Reads `rows.jsonl`, `split.json`, `features.json` and `data-manifest.json`.
@@ -223,10 +237,12 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     let rows: Vec<Row> = crate::dataset::read_records(&dir.join("rows.jsonl"), "row")?;
     // F9/B3: a missing or non-UTF-8 structural input is bad input, refused naming the file -- not a
     // generic `io:` failure. `read_text_named` turns both into `Invalid`, so `fit` exits 2.
-    let split: SplitManifest = serde_json::from_str(&read_text_named(dir, "split.json")?)?;
-    let spec: FeatureSpec = serde_json::from_str(&read_text_named(dir, "features.json")?)?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&read_text_named(dir, "data-manifest.json")?)?;
+    // F9/B3 (a): every structural parse names the file and what is wrong, as bad input -- never a
+    // bare `json:` error that `fit` maps to exit 1. `parse_structural` turns a `serde_json` error
+    // into `Invalid("<file>: <what is wrong>")`, so all five subcommands exit 2 naming the file.
+    let split: SplitManifest = parse_structural(dir, "split.json")?;
+    let spec: FeatureSpec = parse_structural(dir, "features.json")?;
+    let manifest: serde_json::Value = parse_structural(dir, "data-manifest.json")?;
 
     // B2: recompute every row id, both roots and the split digest from `rows.jsonl` and
     // `split.json`, and refuse when `data-manifest.json` disagrees. The manifest's roots are

@@ -327,16 +327,20 @@ fn two_real_sessions_pair_each_commitment_with_its_own_generator_forecast() {
 
     drive("m4-two-sessions-a", "cargo test --offline -p parser");
     drive("m4-two-sessions-b", "cargo test --offline -p lexer");
+    // F9/B3 (b): `dataset` refuses a share that leaves any side empty, so the corpus needs at least
+    // three tasks for all three sides to be non-empty.
+    drive("m4-two-sessions-c", "cargo test --offline -p ast");
 
     // R6: `--tasks` is required. One index row per session, each its own lineage. The task id is
     // `task_for_session(session_id)`, exactly as the hook derives it.
     let tasks = dir.join("tasks.jsonl");
     let ta = tsr_cli::store_path::task_for_session("m4-two-sessions-a");
     let tb = tsr_cli::store_path::task_for_session("m4-two-sessions-b");
+    let tc = tsr_cli::store_path::task_for_session("m4-two-sessions-c");
     std::fs::write(
         &tasks,
         format!(
-            "{{\"task\":\"{ta}\",\"family\":\"calibrated\",\"lineage\":\"lineage-a\",\"timestamp\":\"2026-02-01T00:00:00Z\"}}\n{{\"task\":\"{tb}\",\"family\":\"calibrated\",\"lineage\":\"lineage-b\",\"timestamp\":\"2026-02-02T00:00:00Z\"}}\n"
+            "{{\"task\":\"{ta}\",\"family\":\"calibrated\",\"lineage\":\"lineage-a\",\"timestamp\":\"2026-02-01T00:00:00Z\"}}\n{{\"task\":\"{tb}\",\"family\":\"calibrated\",\"lineage\":\"lineage-b\",\"timestamp\":\"2026-02-02T00:00:00Z\"}}\n{{\"task\":\"{tc}\",\"family\":\"calibrated\",\"lineage\":\"lineage-c\",\"timestamp\":\"2026-02-03T00:00:00Z\"}}\n"
         ),
     )
     .expect("write tasks.jsonl");
@@ -376,7 +380,7 @@ fn two_real_sessions_pair_each_commitment_with_its_own_generator_forecast() {
         .map(|l| serde_json::from_str(l).expect("a row is JSON"))
         .collect();
 
-    assert_eq!(rows.len(), 2, "one row per session's commitment");
+    assert_eq!(rows.len(), 3, "one row per session's commitment");
     for row in &rows {
         assert!(
             row["generator_raw"].is_number(),
@@ -585,7 +589,13 @@ fn two_real_forecasts_pair_both_with_the_commitment() {
     let db = dir.join("tsr.db");
     let out = dir.join("dataset");
     let tsr = PathBuf::from(env!("CARGO_BIN_EXE_tsr"));
-    let session = "m4-two-forecasts";
+    // F9/B3 (b): `dataset` refuses a share that leaves any side empty, so the corpus needs at least
+    // three tasks for all three sides to be non-empty.
+    let sessions = [
+        "m4-two-forecasts-a",
+        "m4-two-forecasts-b",
+        "m4-two-forecasts-c",
+    ];
     let cmd = "cargo test --offline -p parser";
 
     let hook = |stage: &str, payload: serde_json::Value| {
@@ -612,61 +622,62 @@ fn two_real_forecasts_pair_both_with_the_commitment() {
         );
     };
 
-    hook(
-        "SessionStart",
-        serde_json::json!({
-            "session_id": session,
-            "hook_event_name": "SessionStart",
-            "cwd": "/workspace",
-        }),
-    );
-
-    for source in ["generator", "operator"] {
-        let forecast = Command::new(&tsr)
-            .args([
-                "forecast",
-                "--kind",
-                "run_approved_test",
-                "--args",
-                cmd,
-                "--p",
-                "0.7",
-                "--source",
-                source,
-                "--task",
-                session,
-            ])
-            .env("TSR_DB", &db)
-            .output()
-            .expect("run tsr forecast");
-        assert!(
-            forecast.status.success(),
-            "F5: tsr forecast --source {source} succeeds: {}",
-            String::from_utf8_lossy(&forecast.stderr)
+    let mut task_rows = String::new();
+    for (i, session) in sessions.iter().enumerate() {
+        hook(
+            "SessionStart",
+            serde_json::json!({
+                "session_id": session,
+                "hook_event_name": "SessionStart",
+                "cwd": "/workspace",
+            }),
         );
+
+        for source in ["generator", "operator"] {
+            let forecast = Command::new(&tsr)
+                .args([
+                    "forecast",
+                    "--kind",
+                    "run_approved_test",
+                    "--args",
+                    cmd,
+                    "--p",
+                    "0.7",
+                    "--source",
+                    source,
+                    "--task",
+                    session,
+                ])
+                .env("TSR_DB", &db)
+                .output()
+                .expect("run tsr forecast");
+            assert!(
+                forecast.status.success(),
+                "F5: tsr forecast --source {source} succeeds: {}",
+                String::from_utf8_lossy(&forecast.stderr)
+            );
+        }
+
+        hook(
+            "PreToolUse",
+            serde_json::json!({
+                "session_id": session,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": { "command": cmd },
+                "cwd": "/workspace",
+            }),
+        );
+
+        // R6: `--tasks` is required. One index row per session, keyed by the id the hook derives.
+        let tid = tsr_cli::store_path::task_for_session(session);
+        task_rows.push_str(&format!(
+            "{{\"task\":\"{tid}\",\"family\":\"calibrated\",\"lineage\":\"lineage-{i}\",\"timestamp\":\"2026-02-0{}T00:00:00Z\"}}\n",
+            i + 1
+        ));
     }
-
-    hook(
-        "PreToolUse",
-        serde_json::json!({
-            "session_id": session,
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": { "command": cmd },
-            "cwd": "/workspace",
-        }),
-    );
-
-    // R6: `--tasks` is required. One index row for the session, keyed by the id the hook derives.
     let tasks = dir.join("tasks.jsonl");
-    let tid = tsr_cli::store_path::task_for_session(session);
-    std::fs::write(
-        &tasks,
-        format!(
-            "{{\"task\":\"{tid}\",\"family\":\"calibrated\",\"lineage\":\"lineage-a\",\"timestamp\":\"2026-02-01T00:00:00Z\"}}\n"
-        ),
-    )
-    .expect("write tasks.jsonl");
+    std::fs::write(&tasks, task_rows).expect("write tasks.jsonl");
 
     let dataset = Command::new(&tsr)
         .args([
@@ -701,16 +712,17 @@ fn two_real_forecasts_pair_both_with_the_commitment() {
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str(l).expect("a row is JSON"))
         .collect();
-    assert_eq!(rows.len(), 1, "one row for the one commitment");
-    let row = &rows[0];
-    assert!(
-        row["generator_raw"].is_number(),
-        "F5: the generator forecast pairs with the commitment, got generator_raw={}",
-        row["generator_raw"]
-    );
-    assert!(
-        row["operator_raw"].is_number(),
-        "F5: the operator forecast pairs with the commitment, got operator_raw={}",
-        row["operator_raw"]
-    );
+    assert_eq!(rows.len(), 3, "one row per commitment");
+    for row in &rows {
+        assert!(
+            row["generator_raw"].is_number(),
+            "F5: the generator forecast pairs with the commitment, got generator_raw={}",
+            row["generator_raw"]
+        );
+        assert!(
+            row["operator_raw"].is_number(),
+            "F5: the operator forecast pairs with the commitment, got operator_raw={}",
+            row["operator_raw"]
+        );
+    }
 }

@@ -215,6 +215,16 @@ fn write_log_into(
     Ok(())
 }
 
+/// F9/B3 (c): an `--out` that exists and is not a directory is bad input -- exit 2 naming it,
+/// rather than a generic `io: Not a directory` (exit 1) from `create_dir_all`.
+fn refuse_out_that_is_not_a_directory(out: &Path) -> Option<std::process::ExitCode> {
+    if out.exists() && !out.is_dir() {
+        eprintln!("tsr: --out {} exists and is not a directory", out.display());
+        return Some(std::process::ExitCode::from(2));
+    }
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_dataset(
     store: Option<&Path>,
@@ -235,6 +245,9 @@ fn run_dataset(
             return std::process::ExitCode::from(2);
         }
     };
+    if let Some(code) = refuse_out_that_is_not_a_directory(out) {
+        return code;
+    }
     // F9/B3 (d): one parser. Each input is parsed once, by its record loader below
     // (`read_events_records` / `read_task_index`), which refuses a line that is not a record naming
     // the file, the line and the field. There is no JSON-only pre-pass: a file that is not data is
@@ -287,6 +300,12 @@ fn run_dataset(
             eprintln!("tsr: label record names reviewer {reviewer:?}, who is not the operator (B8: labels only after review)");
             return std::process::ExitCode::from(2);
         }
+        // F9/B3 (b): a share that leaves a side empty is bad input -- exit 2 naming the side, not a
+        // generic failure.
+        Err(LearnError::Invalid(msg)) => {
+            eprintln!("tsr: dataset refused: {msg}");
+            return std::process::ExitCode::from(2);
+        }
         Err(e) => {
             eprintln!("tsr: cannot build dataset: {e}");
             return std::process::ExitCode::from(1);
@@ -334,6 +353,9 @@ fn run_dataset(
 }
 
 fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::process::ExitCode {
+    if let Some(code) = refuse_out_that_is_not_a_directory(out) {
+        return code;
+    }
     // B3: the probes need the log and the task index. Without them they pass silently (and without
     // events.jsonl the probe pass panics), so refuse with exit 2 naming the missing file.
     //
@@ -350,6 +372,40 @@ fn run_fit(dataset_dir: &Path, out: &Path, support_floor: Option<u32>) -> std::p
                 dataset_dir.display()
             );
             return std::process::ExitCode::from(2);
+        }
+    }
+    // F9/B3 (b): a split with an empty side is refused, naming the side and its count. An empty
+    // held_out side would otherwise be skipped by the probes and yield a bundle with no held-out
+    // rows. The check lives here, not in `write_bundle`, so the library's own tests can still build
+    // a synthetic dataset with an empty side to exercise id stability and tamper detection.
+    match tsr_learn::bundle::load_dataset(dataset_dir) {
+        Ok(ds) => {
+            let count = |side: tsr_learn::dataset::Side| {
+                ds.rows.iter().filter(|r| r.side == side).count()
+            };
+            for (side, name) in [
+                (tsr_learn::dataset::Side::Fit, "fit"),
+                (tsr_learn::dataset::Side::Calibrate, "calibrate"),
+                (tsr_learn::dataset::Side::HeldOut, "held_out"),
+            ] {
+                let n = count(side);
+                if n == 0 {
+                    eprintln!(
+                        "tsr: fit refused: the split leaves the {name} side empty ({n} of {} rows); \
+                         refusing a split with an empty side",
+                        ds.rows.len()
+                    );
+                    return std::process::ExitCode::from(2);
+                }
+            }
+        }
+        Err(LearnError::Invalid(msg)) => {
+            eprintln!("tsr: fit refused: {msg}");
+            return std::process::ExitCode::from(2);
+        }
+        Err(e) => {
+            eprintln!("tsr: fit failed: {e}");
+            return std::process::ExitCode::from(1);
         }
     }
     let floor = support_floor.unwrap_or_else(tsr_learn::support::default_support_floor);

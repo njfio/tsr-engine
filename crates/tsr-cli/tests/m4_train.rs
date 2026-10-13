@@ -919,18 +919,11 @@ fn f3_fit_refuses_an_empty_calibrate_slice() {
         "--out",
         ds.to_str().unwrap(),
     ]);
-    assert_eq!(code, 0, "dataset failed: {err}");
-    let b = dir.join("models").join("m4");
-    let (code, out, err) = run(&[
-        "train",
-        "fit",
-        ds.to_str().unwrap(),
-        "--out",
-        b.to_str().unwrap(),
-    ]);
+    // F9/B3 (b): the refusal moved to `dataset`, which now refuses a share that leaves any side
+    // empty -- so an empty calibrate slice never reaches `fit`.
     assert_eq!(
         code, 2,
-        "F3/R2: fit refuses an empty calibrate slice:\n{out}\n{err}"
+        "F3/R2: dataset refuses an empty calibrate slice:\n{err}"
     );
     assert!(
         err.contains("calibrate"),
@@ -965,19 +958,9 @@ fn f3_fit_refuses_an_empty_fit_slice() {
         "--out",
         ds.to_str().unwrap(),
     ]);
-    assert_eq!(code, 0, "dataset failed: {err}");
-    let b = dir.join("models").join("m4");
-    let (code, out, err) = run(&[
-        "train",
-        "fit",
-        ds.to_str().unwrap(),
-        "--out",
-        b.to_str().unwrap(),
-    ]);
-    assert_eq!(
-        code, 2,
-        "F3/R2: fit refuses an empty fit slice:\n{out}\n{err}"
-    );
+    // F9/B3 (b): the refusal moved to `dataset`, which now refuses a share that leaves any side
+    // empty -- so an empty fit slice never reaches `fit`.
+    assert_eq!(code, 2, "F3/R2: dataset refuses an empty fit slice:\n{err}");
     assert!(
         err.contains("fit"),
         "F3/R2: the refusal names the empty fit slice: {err}"
@@ -2826,4 +2809,275 @@ fn f9_fit_refuses_a_truncated_events_line_with_the_loader_message() {
         !err.contains(ds.to_str().unwrap()),
         "F9/B3: one message format -- the loader names the file, not the full path: {err}"
     );
+}
+
+/// F9/B3 (a): every malformed structural input file must make `fit` exit 2 naming the file, not
+/// exit 1 with a bare `json:` error. The three structural files are `features.json`, `split.json`
+/// and `data-manifest.json`; the malformed forms are empty, truncated, `null`, `[]`, `{}` and a
+/// wrong-typed field.
+#[test]
+fn f9_fit_refuses_every_malformed_structural_file_naming_it() {
+    let dir = temp_dir("f9-structural-fit");
+    let ds = build_dataset(&dir, "7");
+    // (file, form, bytes). A wrong-typed field is a field of the wrong JSON type for that file's
+    // schema: `seed` is a u64 in split.json, `version` a string in features.json.
+    let cases: &[(&str, &str, &str)] = &[
+        ("features.json", "empty", ""),
+        ("features.json", "truncated", "{\"a\":"),
+        ("features.json", "null", "null"),
+        ("features.json", "array", "[]"),
+        ("features.json", "object", "{}"),
+        (
+            "features.json",
+            "wrong-typed",
+            "{\"version\":5,\"names\":[],\"numeric_widths\":[],\"absent\":[]}",
+        ),
+        ("split.json", "empty", ""),
+        ("split.json", "truncated", "{\"a\":"),
+        ("split.json", "null", "null"),
+        ("split.json", "array", "[]"),
+        ("split.json", "object", "{}"),
+        (
+            "split.json",
+            "wrong-typed",
+            "{\"by\":\"time\",\"seed\":\"x\",\"assignments\":{},\"digest\":\"00\"}",
+        ),
+        ("data-manifest.json", "empty", ""),
+        ("data-manifest.json", "truncated", "{\"a\":"),
+        ("data-manifest.json", "null", "null"),
+        ("data-manifest.json", "array", "[]"),
+        ("data-manifest.json", "object", "{}"),
+    ];
+    for (file, form, bytes) in cases {
+        let bad = dir.join(format!("bad-{file}-{form}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        std::fs::write(bad.join(file), bytes).unwrap();
+        let b = dir.join(format!("models/bad-{file}-{form}"));
+        let (code, out, err) = run(&[
+            "train",
+            "fit",
+            bad.to_str().unwrap(),
+            "--out",
+            b.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "F9/B3: fit must refuse {file}/{form} with exit 2, not {code}:\n{out}\n{err}"
+        );
+        assert!(
+            err.contains(file),
+            "F9/B3: the refusal for {file}/{form} must name the file:\n{err}"
+        );
+        assert!(
+            !err.contains("fit failed"),
+            "F9/B3: {file}/{form} is bad input, not a generic failure:\n{err}"
+        );
+    }
+}
+
+/// F9/B3 (a): the same malformed structural files must exit 2 naming the file on `report`, `apply`
+/// and `verify --rebuild` too, so all five subcommands agree.
+#[test]
+fn f9_report_apply_verify_refuse_malformed_structural_files_naming_them() {
+    let dir = temp_dir("f9-structural-others");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let cases: &[(&str, &str, &str)] = &[
+        ("features.json", "empty", ""),
+        ("features.json", "null", "null"),
+        ("split.json", "truncated", "{\"a\":"),
+        (
+            "split.json",
+            "wrong-typed",
+            "{\"by\":\"time\",\"seed\":\"x\",\"assignments\":{},\"digest\":\"00\"}",
+        ),
+        ("data-manifest.json", "empty", ""),
+        ("data-manifest.json", "object", "{}"),
+    ];
+    for (file, form, bytes) in cases {
+        let bad = dir.join(format!("bad2-{file}-{form}"));
+        let _ = std::fs::remove_dir_all(&bad);
+        copy_dir(&ds, &bad);
+        std::fs::write(bad.join(file), bytes).unwrap();
+        let (code, out, err) = run(&[
+            "train",
+            "report",
+            b.to_str().unwrap(),
+            "--dataset",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: report {file}/{form}:\n{out}\n{err}");
+        assert!(err.contains(file), "F9/B3: report names {file}:\n{err}");
+        let (code, out, err) = run(&[
+            "train",
+            "apply",
+            b.to_str().unwrap(),
+            "--dataset",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: apply {file}/{form}:\n{out}\n{err}");
+        assert!(err.contains(file), "F9/B3: apply names {file}:\n{err}");
+        let (code, out, err) = run(&[
+            "train",
+            "verify",
+            b.to_str().unwrap(),
+            "--rebuild",
+            bad.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "F9/B3: verify {file}/{form}:\n{out}\n{err}");
+        assert!(err.contains(file), "F9/B3: verify names {file}:\n{err}");
+    }
+}
+
+/// F9/B3 (b): `dataset` must refuse a share that leaves any side empty, exit 2 naming the side,
+/// rather than writing a dataset with an empty side that `fit` then skips.
+#[test]
+fn f9_dataset_refuses_a_share_that_leaves_a_side_empty() {
+    let dir = temp_dir("f9-empty-side-dataset");
+    let (ev, tk, lb) = regenerate(&dir);
+    for (flag, share) in [("--holdout", "0"), ("--calibrate", "0")] {
+        let out = dir.join(format!("ds-{flag}"));
+        let (code, stdout, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "time",
+            "--calibrate",
+            if flag == "--calibrate" { share } else { "0.25" },
+            "--holdout",
+            if flag == "--holdout" { share } else { "0.25" },
+            "--seed",
+            "7",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 2,
+            "F9/B3: dataset {flag} {share} must refuse an empty side:\n{stdout}\n{err}"
+        );
+        let side = if flag == "--holdout" {
+            "held_out"
+        } else {
+            "calibrate"
+        };
+        assert!(
+            err.contains(side),
+            "F9/B3: the refusal names the empty side {side}:\n{err}"
+        );
+    }
+}
+
+/// F9/B3 (b): `fit` must refuse a split with an empty side, exit 2 naming the side and its count,
+/// rather than skipping the empty side and writing a bundle with no held-out rows.
+#[test]
+fn f9_fit_refuses_a_split_with_an_empty_side() {
+    let dir = temp_dir("f9-empty-side-fit");
+    let ds = build_dataset(&dir, "7");
+    // Forge a dataset whose held_out side is empty, through the library so every root stays
+    // consistent: drop the held_out rows, recompute the roots and the split digest, and rewrite.
+    let mut d = tsr_learn::bundle::load_dataset(&ds).unwrap();
+    d.rows
+        .retain(|r| r.side != tsr_learn::dataset::Side::HeldOut);
+    d.split
+        .assignments
+        .retain(|_task, side| *side != tsr_learn::dataset::Side::HeldOut);
+    d.split.digest =
+        tsr_learn::dataset::split_digest(d.split.by, d.split.seed, &d.split.assignments);
+    d.data_root = tsr_learn::dataset::data_root(&d.rows);
+    d.training_root = tsr_learn::dataset::training_root(&d.rows);
+    let bad = dir.join("ds-empty-held-out");
+    tsr_learn::dataset::write_dataset(&d, &bad).unwrap();
+    // `fit`'s probes read the log and the task index from the dataset directory too.
+    for name in ["events.jsonl", "tasks.jsonl"] {
+        std::fs::copy(ds.join(name), bad.join(name)).unwrap();
+    }
+    let b = dir.join("models").join("m4");
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        bad.to_str().unwrap(),
+        "--out",
+        b.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "F9/B3: fit must refuse a split with an empty held_out side:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains("held_out"),
+        "F9/B3: the refusal names the empty side:\n{err}"
+    );
+}
+
+/// F9/B3 (c): an `--out` that exists and is not a directory must exit 2 naming it, on `fit` and on
+/// `dataset`, not exit 1 with `io: Not a directory`.
+#[test]
+fn f9_out_that_is_a_file_is_refused_naming_it() {
+    let dir = temp_dir("f9-out-file");
+    let ds = build_dataset(&dir, "7");
+    let afile = dir.join("not-a-dir");
+    std::fs::write(&afile, "x").unwrap();
+    let (code, out, err) = run(&[
+        "train",
+        "fit",
+        ds.to_str().unwrap(),
+        "--out",
+        afile.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 2, "F9/B3: fit --out <file>:\n{out}\n{err}");
+    assert!(
+        err.contains(afile.to_str().unwrap()),
+        "F9/B3: fit names the --out path:\n{err}"
+    );
+    assert!(
+        !err.contains("fit failed"),
+        "F9/B3: a bad --out is refused input, not a generic failure:\n{err}"
+    );
+    let (ev, tk, lb) = regenerate(&dir);
+    let (code, out, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.25",
+        "--holdout",
+        "0.25",
+        "--seed",
+        "7",
+        "--out",
+        afile.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 2, "F9/B3: dataset --out <file>:\n{out}\n{err}");
+    assert!(
+        err.contains(afile.to_str().unwrap()),
+        "F9/B3: dataset names the --out path:\n{err}"
+    );
+}
+
+/// Copy a directory tree (the dataset) to a fresh path, so a test can corrupt one file.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let dst = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &dst);
+        } else {
+            std::fs::copy(entry.path(), &dst).unwrap();
+        }
+    }
 }
