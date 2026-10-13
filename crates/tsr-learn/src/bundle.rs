@@ -912,8 +912,9 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     let spec: FeatureSpec = parse_bundle_file(dir, "features.json")?;
     // D5: the feature spec's lengths and widths are checked here too, so `verify` (which does not
     // load the dataset) refuses a `features.json` whose `numeric_widths` or `standardize_*` length
-    // does not equal `names`', naming the field.
-    spec.validate()
+    // does not equal `names`', naming the field. A fitted bundle must carry its standardization
+    // statistics, so empty ones are refused here (a dataset's spec may leave them to `fit`).
+    spec.validate_fitted()
         .map_err(|e| LearnError::Invalid(format!("features.json: {e}")))?;
     let split: SplitManifest = parse_bundle_file(dir, "split.json")?;
     let support_file: SupportFile = parse_bundle_file(dir, "support.json")?;

@@ -65,13 +65,37 @@ fn default_learning_rate() -> f64 {
 }
 
 impl FeatureSpec {
+    /// D5 (r5b6 defect 2): a fitted bundle's spec must carry its standardization statistics, one per
+    /// name. `head.rs` reads them by index and an empty vector would silently standardize with 0.0,
+    /// changing every raw p, so `verify`, `report` and `apply` refuse it naming the field.
+    pub fn validate_fitted(&self) -> Result<(), String> {
+        self.validate()?;
+        let n = self.names.len();
+        for (field, v) in [
+            ("standardize_mean", &self.standardize_mean),
+            ("standardize_std", &self.standardize_std),
+        ] {
+            if v.len() != n {
+                return Err(format!(
+                    "{field}: expected {n} values (one per name), got {}",
+                    v.len()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// F9/B3 (d): every numeric hyperparameter must be finite and within its documented range.
     ///
     /// `learning_rate` must be finite and in (0, 1]; the standardization statistics must be finite
-    /// and have exactly one entry per name (empty included); the per-feature window widths must be
+    /// and, when present, have exactly one entry per name; the per-feature window widths must be
     /// finite and non-negative. A violation names the field, so `fit`, `report`, `apply` and
     /// `verify` exit 2 naming it rather than writing `null` weights into `head.json` and failing
     /// later with no file named.
+    ///
+    /// Empty standardization vectors are allowed here because a dataset's `features.json` may carry
+    /// none: `fit` recomputes them from the fit slice. A fitted bundle's spec goes through
+    /// [`FeatureSpec::validate_fitted`], which refuses empty ones.
     pub fn validate(&self) -> Result<(), String> {
         // The documented range: a full-batch learning rate is a step size on a normalized update,
         // so it must be finite and in (0, 1]. 1e308 overflows the weight update to +/-inf (which
@@ -93,13 +117,13 @@ impl FeatureSpec {
                 self.numeric_widths.len()
             ));
         }
-        if self.standardize_mean.len() != n {
+        if !self.standardize_mean.is_empty() && self.standardize_mean.len() != n {
             return Err(format!(
                 "standardize_mean: expected {n} values (one per name), got {}",
                 self.standardize_mean.len()
             ));
         }
-        if self.standardize_std.len() != n {
+        if !self.standardize_std.is_empty() && self.standardize_std.len() != n {
             return Err(format!(
                 "standardize_std: expected {n} values (one per name), got {}",
                 self.standardize_std.len()
