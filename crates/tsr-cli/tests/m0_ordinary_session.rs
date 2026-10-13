@@ -428,3 +428,358 @@ fn store_is_workspace_refusal_leaves_no_empty_db() {
         db.display()
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// M0 r3: the hook, `tsr exec` and `tsr forecast --args` agree on one candidate for the commands
+// people actually type (r2 review defects 1, 2 and 3).
+// ---------------------------------------------------------------------------------------------
+
+/// A `tsr` invocation whose child process has a deterministic `HOME`, so `~` and `$HOME` expand to
+/// a known value in both the hook and `tsr exec`.
+fn tsr_with_home(env: &Env<'_>, home: &Path, args: &[&str]) -> std::process::Output {
+    let mut cmd = env.command(tsr_bin().to_str().expect("utf8 path").as_ref());
+    cmd.env("HOME", home).args(args);
+    cmd.output().expect("run tsr")
+}
+
+/// Pipe one hook payload into `tsr hook <stage>` with a deterministic `HOME`.
+fn hook_with_home(env: &Env<'_>, home: &Path, stage: &str, payload: &str) -> std::process::Output {
+    let mut cmd = env.command(tsr_bin().to_str().expect("utf8 path").as_ref());
+    cmd.env("HOME", home)
+        .arg("hook")
+        .arg("--stage")
+        .arg(stage)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn tsr hook");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(payload.as_bytes())
+            .expect("write payload");
+    }
+    child.wait_with_output().expect("tsr hook output")
+}
+
+/// A PreToolUse payload whose `cwd` is the scratch dir (so the hook's globs expand there).
+fn pretooluse_in(session: &str, cwd: &Path, tool: &str, input: serde_json::Value) -> String {
+    serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": input,
+        "cwd": cwd.to_str().expect("utf8 cwd"),
+    })
+    .to_string()
+}
+
+/// A PostToolUse payload whose `cwd` is the scratch dir.
+fn posttooluse_in(
+    session: &str,
+    cwd: &Path,
+    tool: &str,
+    input: serde_json::Value,
+    exit_code: i32,
+) -> String {
+    serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "PostToolUse",
+        "tool_name": tool,
+        "tool_input": input,
+        "tool_response": { "stdout": "ok", "stderr": "", "exit_code": exit_code },
+        "cwd": cwd.to_str().expect("utf8 cwd"),
+    })
+    .to_string()
+}
+
+/// Count the `proposed` events and the `forecast` events in an exported trace.
+fn count_proposed_and_forecast(trace: &str) -> (usize, usize) {
+    let mut proposed = 0;
+    let mut forecast = 0;
+    for line in trace.lines().filter(|l| !l.trim().is_empty()) {
+        let v: serde_json::Value = serde_json::from_str(line).expect("an event line");
+        match v["event"]["kind"]["kind"].as_str() {
+            Some("proposed") => proposed += 1,
+            Some("forecast") => forecast += 1,
+            _ => {}
+        }
+    }
+    (proposed, forecast)
+}
+
+/// Drive one typed spelling end to end and return the exported trace.
+///
+/// The sequence is: SessionStart, `tsr forecast --args <forecast_args>`, the hook's PreToolUse for
+/// the Bash command string, `tsr exec -- <exec_argv…>`, the hook's PostToolUse, Stop. The hook and
+/// `tsr exec` run with `HOME` set to `home` and cwd the scratch dir, so `~`, `$HOME` and globs
+/// expand to a known value in both.
+fn record_typed_spelling(
+    dir: &Path,
+    session: &str,
+    bash_cmd: &str,
+    forecast_args: &str,
+    exec_argv: &[&str],
+) -> PathBuf {
+    let bin = fake_docker(dir, 0);
+    let db = dir.join(".tsr/tsr.db");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("home dir");
+    let env = Env {
+        cwd: dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    let out = hook_with_home(&env, &home, "SessionStart", &start);
+    assert!(out.status.success(), "SessionStart exits 0: {out:?}");
+
+    let out = tsr_with_home(
+        &env,
+        &home,
+        &[
+            "forecast",
+            "--kind",
+            "run_approved_test",
+            "--args",
+            forecast_args,
+            "--p",
+            "0.9",
+            "--source",
+            "generator",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "tsr forecast --args {forecast_args:?} exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let input = serde_json::json!({ "command": bash_cmd });
+    let out = hook_with_home(
+        &env,
+        &home,
+        "PreToolUse",
+        &pretooluse_in(session, dir, "Bash", input.clone()),
+    );
+    assert!(
+        out.status.success(),
+        "PreToolUse for {bash_cmd:?} exits 0: {out:?}"
+    );
+
+    let mut exec_args = vec!["exec", "--"];
+    exec_args.extend_from_slice(exec_argv);
+    let out = tsr_with_home(&env, &home, &exec_args);
+    assert!(
+        out.status.success(),
+        "tsr exec -- {exec_argv:?} exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let out = hook_with_home(
+        &env,
+        &home,
+        "PostToolUse",
+        &posttooluse_in(session, dir, "Bash", input, 0),
+    );
+    assert!(
+        out.status.success(),
+        "PostToolUse for {bash_cmd:?} exits 0: {out:?}"
+    );
+
+    let stop = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "Stop",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    let out = hook_with_home(&env, &home, "Stop", &stop);
+    assert!(out.status.success(), "Stop exits 0: {out:?}");
+
+    let task = task_for(session);
+    let out = tsr_with_home(&env, &home, &["task", "export", &task]);
+    assert!(
+        out.status.success(),
+        "tsr task export exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let trace = dir.join("events.jsonl");
+    std::fs::write(&trace, &out.stdout).expect("write trace");
+    trace
+}
+
+/// Assert one proposal, one forecast, and that reconstruct accepts the log.
+fn assert_one_proposal_one_forecast_and_reconstructs(trace: &Path, what: &str) {
+    let text = std::fs::read_to_string(trace).expect("the session's log");
+    let (proposed, forecast) = count_proposed_and_forecast(&text);
+    if proposed != 1 {
+        eprintln!("=== TRACE {what} ===\n{text}");
+    }
+    assert_eq!(proposed, 1, "{what}: exactly one proposal (got {proposed})");
+    assert_eq!(forecast, 1, "{what}: exactly one forecast (got {forecast})");
+    let session = reconstruct::from_events(trace).expect("reconstruct accepts the log");
+    assert!(
+        session.every_gated_action_has_prior_forecast_at_same_state_version(),
+        "{what}: B5 holds"
+    );
+    assert!(
+        session.every_dispatch_reconciled_or_unresolved(),
+        "{what}: B6 holds"
+    );
+    assert!(session.every_command_ran_in_sandbox(), "{what}: B4 holds");
+}
+
+/// A redirect, pipe or expansion on a `tsr exec` command must not lose the forecast (defect 1).
+#[test]
+fn a_redirect_pipe_or_expansion_keeps_the_forecast() {
+    // `tsr exec -- cargo test 2>&1 | tail -20`: the hook must digest `cargo test`, not the whole
+    // pipeline, and `tsr exec` must receive `cargo test`.
+    let dir = scratch("typed-pipe");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-pipe",
+        "tsr exec -- cargo test 2>&1 | tail -20",
+        "cargo test",
+        &["cargo", "test"],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "pipe");
+
+    // `tsr exec -- cargo test > out.txt`: the redirection is removed.
+    let dir = scratch("typed-redirect");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-redirect",
+        "tsr exec -- cargo test > out.txt",
+        "cargo test",
+        &["cargo", "test"],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "redirect");
+
+    // `tsr exec -- cargo test 2>/dev/null`: the redirection is removed.
+    let dir = scratch("typed-devnull");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-devnull",
+        "tsr exec -- cargo test 2>/dev/null",
+        "cargo test",
+        &["cargo", "test"],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "devnull");
+}
+
+/// `$HOME`, `~` and a glob on a `tsr exec` command must expand to what `tsr exec` receives
+/// (defect 1).
+#[test]
+fn an_expansion_on_tsr_exec_matches_the_argv_exec_receives() {
+    // `tsr exec -- cat "$HOME/x"`: the hook expands `$HOME` from its environment.
+    let dir = scratch("typed-home");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("home dir");
+    let expanded = home.join("x");
+    let expanded = expanded.to_str().expect("utf8 path");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-home",
+        "tsr exec -- cat \"$HOME/x\"",
+        &format!("cat {expanded}"),
+        &["cat", expanded],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "$HOME");
+
+    // `tsr exec -- ls ~`: the hook expands `~` to `$HOME`.
+    let dir = scratch("typed-tilde");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("home dir");
+    let home_str = home.to_str().expect("utf8 path");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-tilde",
+        "tsr exec -- ls ~",
+        &format!("ls {home_str}"),
+        &["ls", home_str],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "~");
+
+    // `tsr exec -- ls *.toml`: the hook expands the glob against its cwd.
+    let dir = scratch("typed-glob");
+    std::fs::write(dir.join("Cargo.toml"), "[package]\n").expect("write Cargo.toml");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-glob",
+        "tsr exec -- ls *.toml",
+        "ls Cargo.toml",
+        &["ls", "Cargo.toml"],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "glob");
+}
+
+/// A forecast written with different quoting than the hook's command string must still match
+/// (defect 2): `--args sh -c "a; b"` for the hook's `sh -c 'a; b'`.
+#[test]
+fn a_forecast_with_different_quoting_matches_the_hook() {
+    let dir = scratch("typed-quoting");
+    let trace = record_typed_spelling(
+        &dir,
+        "typed-quoting",
+        "tsr exec -- sh -c 'a; b'",
+        "sh -c \"a; b\"",
+        &["sh", "-c", "a; b"],
+    );
+    assert_one_proposal_one_forecast_and_reconstructs(&trace, "quoting");
+}
+
+/// The three spellings in defect 3 must record `run_approved_test`, not `generate`.
+///
+/// These are host test runs (not `tsr exec`), so the hook records a host dispatch
+/// (`in_sandbox: false`); the assertion is on the classification, not on the sandbox invariant.
+#[test]
+fn the_three_test_run_spellings_record_run_approved_test() {
+    for (name, cmd) in [
+        ("newline", "cd crate\ncargo test"),
+        ("timeout", "timeout 60 cargo test"),
+        ("toolchain", "cargo +1.90.0 test"),
+    ] {
+        let dir = scratch(&format!("typed-{name}"));
+        let bin = fake_docker(&dir, 0);
+        let db = dir.join(".tsr/tsr.db");
+        let session = format!("typed-{name}");
+        let env = Env {
+            cwd: &dir,
+            db: &db,
+            session: &session,
+            bin: &bin,
+        };
+        let start = serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "SessionStart",
+            "cwd": dir.to_str().expect("utf8 cwd"),
+        })
+        .to_string();
+        let out = env.hook("SessionStart", &start);
+        assert!(out.status.success(), "SessionStart exits 0: {out:?}");
+
+        let input = serde_json::json!({ "command": cmd });
+        let out = env.hook("PreToolUse", &pretooluse(&session, "Bash", input));
+        assert!(
+            out.status.success(),
+            "PreToolUse for {cmd:?} exits 0: {out:?}"
+        );
+
+        let text = env.export(&session);
+        assert_eq!(
+            last_proposed_kind(&text).as_deref(),
+            Some("run_approved_test"),
+            "`{cmd}` records run_approved_test"
+        );
+    }
+}

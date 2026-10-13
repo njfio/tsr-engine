@@ -18,6 +18,11 @@
 //! observed; only `tsr exec` records a sandboxed dispatch.
 
 use crate::store_path;
+
+/// The POSIX-shell command parser (see `shell.rs`). Declared here, with an explicit path, so the
+/// crate root (`lib.rs`) stays byte-identical to the base commit.
+#[path = "shell.rs"]
+mod shell;
 use serde_json::Value;
 use tsr_domain::{
     ActionKind, Candidate, CandidateId, Decision, Event, EventId, EventKind, Forecast, Forecaster,
@@ -33,6 +38,9 @@ pub const ALLOWLISTED_TEST_PREFIX: &str = "cargo test";
 /// escapes. Quotes are removed; a backslash escapes the next character outside single quotes. This
 /// is the same word-splitting the shell applies to the command string, so the hook and `tsr exec`
 /// (which is handed the argv after the shell split it) can agree on one encoding.
+///
+/// This is the *word* level only: it does not split on `;`/`|`/`&`, remove redirections or expand
+/// `~`/`$VAR`/globs. Use [`shell::parse`] for the command string the hook receives.
 pub fn shell_words(cmd: &str) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -103,6 +111,45 @@ pub fn shell_words(cmd: &str) -> Vec<String> {
     words
 }
 
+/// The hook's environment, as the shell would see it: `$VAR`/`${VAR}` resolve from the hook
+/// process's environment.
+fn hook_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// The hook's cwd, as the shell would see it: globs expand against the process's current directory.
+fn hook_cwd() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Parse a Bash command string with POSIX shell grammar: split into simple commands on `;`, `&&`,
+/// `||`, `|`, `&` and newlines, remove redirections, and expand `~`, `$VAR`, `${VAR}` and globs from
+/// the hook's environment and cwd. See [`shell::parse`].
+fn parse_command(cmd: &str) -> shell::Parsed {
+    shell::parse(cmd, &hook_cwd(), &hook_env)
+}
+
+/// Skip the leading `VAR=value` assignments and an `env` prefix (and any assignments after it) that
+/// the shell grammar allows in front of a simple command, returning the remaining words.
+fn command_words_after_prefix(words: &[String]) -> &[String] {
+    let mut i = 0;
+    while i < words.len() && is_assignment(&words[i]) {
+        i += 1;
+    }
+    if words.get(i).map(String::as_str) == Some("env") {
+        i += 1;
+        while i < words.len() && is_assignment(&words[i]) {
+            i += 1;
+        }
+    }
+    &words[i..]
+}
+
+/// Expand a word's glob against the hook's cwd, as the shell would before `tsr exec` sees the argv.
+fn expand_word_globs(word: &str) -> Vec<String> {
+    shell::expand_glob(word, &hook_cwd())
+}
+
 /// POSIX-quote a word: a word that is non-empty and contains only shell-safe characters is emitted
 /// bare; otherwise it is wrapped in single quotes with any embedded `'` replaced by `'\''`.
 fn quote_word(word: &str) -> String {
@@ -138,65 +185,92 @@ pub fn canonical_args(words: &[String]) -> String {
         .join(" ")
 }
 
-/// Split a command string into top-level segments on `&&`, `;`, `|` and `||`, outside quotes. A
-/// command chain is a test run if any segment is one.
-fn command_segments(cmd: &str) -> Vec<String> {
-    let mut segments: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut chars = cmd.chars().peekable();
-    let mut in_single = false;
-    let mut in_double = false;
-    while let Some(c) = chars.next() {
-        if in_single {
-            cur.push(c);
-            if c == '\'' {
-                in_single = false;
-            }
-            continue;
-        }
-        if in_double {
-            cur.push(c);
-            match c {
-                '"' => in_double = false,
-                '\\' => {
-                    if let Some(n) = chars.next() {
-                        cur.push(n);
-                    }
+/// Whether a simple command (already parsed, redirections removed, expansions applied) is a test
+/// run: after skipping leading `VAR=value` assignments and an `env` prefix (and any assignments after
+/// it), the command begins with `cargo test` or `cargo nextest run`, skipping the wrappers the shell
+/// grammar allows in front of a test run: `timeout [options] DURATION`, `nice [-n N]`, `time`, and a
+/// `+toolchain` argument to cargo (`cargo +1.90.0 test`).
+fn words_are_test_run(words: &[String]) -> bool {
+    test_run_words(words).is_some()
+}
+
+/// The words of the test run inside a simple command, or `None` when it is not one: after skipping
+/// leading `VAR=value` assignments and an `env` prefix (and any assignments after it), the wrappers
+/// the shell grammar allows in front of a test run (`timeout [options] DURATION`, `nice [-n N]`,
+/// `time`), the command begins with `cargo test` or `cargo nextest run`. The returned slice starts
+/// at `cargo` and keeps a `+toolchain` argument (`cargo +1.90.0 test`), so the digest is the argv
+/// `tsr exec` receives for the same spelling.
+fn test_run_words(words: &[String]) -> Option<&[String]> {
+    let mut rest = command_words_after_prefix(words);
+    loop {
+        match rest {
+            [w, ..] if w == "timeout" => {
+                // `timeout [options] DURATION command…`: skip the options, then the duration.
+                let mut i = 1;
+                while i < rest.len() && rest[i].starts_with('-') {
+                    i += 1;
                 }
-                _ => {}
-            }
-            continue;
-        }
-        match c {
-            '\'' => {
-                in_single = true;
-                cur.push(c);
-            }
-            '"' => {
-                in_double = true;
-                cur.push(c);
-            }
-            '\\' => {
-                cur.push(c);
-                if let Some(n) = chars.next() {
-                    cur.push(n);
+                if i < rest.len() {
+                    i += 1; // the duration
                 }
+                rest = &rest[i..];
             }
-            '&' | '|' => {
-                // Consume the doubled operator (`&&`, `||`) so it is one separator.
-                if chars.peek() == Some(&c) {
-                    chars.next();
+            [w, ..] if w == "nice" => {
+                let mut i = 1;
+                if rest.get(i).map(String::as_str) == Some("-n") {
+                    i += 2;
+                } else if rest.get(i).map(|s| s.starts_with('-')).unwrap_or(false) {
+                    i += 1;
                 }
-                segments.push(std::mem::take(&mut cur));
+                rest = &rest[i..];
             }
-            ';' => {
-                segments.push(std::mem::take(&mut cur));
+            [w, ..] if w == "time" => {
+                rest = &rest[1..];
             }
-            _ => cur.push(c),
+            _ => break,
         }
     }
-    segments.push(cur);
-    segments
+    match rest {
+        [cargo, test, ..] if cargo == "cargo" && test == "test" => Some(rest),
+        [cargo, nextest, run, ..] if cargo == "cargo" && nextest == "nextest" && run == "run" => {
+            Some(rest)
+        }
+        // `cargo +toolchain test`: the `+toolchain` argument is kept in the digest.
+        [cargo, toolchain, test, ..]
+            if cargo == "cargo" && toolchain.starts_with('+') && test == "test" =>
+        {
+            Some(rest)
+        }
+        [cargo, toolchain, nextest, run, ..]
+            if cargo == "cargo"
+                && toolchain.starts_with('+')
+                && nextest == "nextest"
+                && run == "run" =>
+        {
+            Some(rest)
+        }
+        _ => None,
+    }
+}
+
+/// The words of the test run in a `Bash` command string, or `None`: the first simple command that is
+/// a test run, after the shell grammar has split the chain and removed redirections.
+fn test_run_command_words(cmd: &str) -> Option<Vec<String>> {
+    parse_command(cmd)
+        .commands
+        .iter()
+        .find_map(|c| test_run_words(&c.words).map(<[String]>::to_vec))
+}
+
+/// Whether a `Bash` command is a test run: any simple command in the chain, after skipping leading
+/// `VAR=value` assignments and an `env` prefix, begins with `cargo test` or `cargo nextest run`.
+/// A chain (`cd crate && cargo test`, `a; cargo test`, `x | cargo test`, `cd crate⏎cargo test`) is a
+/// test run if any simple command is one.
+pub fn is_test_run_command(cmd: &str) -> bool {
+    parse_command(cmd)
+        .commands
+        .iter()
+        .any(|c| words_are_test_run(&c.words))
 }
 
 /// Whether a word is a leading `VAR=value` assignment (`^[A-Za-z_][A-Za-z0-9_]*=`).
@@ -215,43 +289,6 @@ fn is_assignment(word: &str) -> bool {
         }
     }
     false
-}
-
-/// Whether a single command segment (no top-level operators) is a test run: after skipping leading
-/// `VAR=value` assignments and an `env` prefix (and any assignments after it), the command begins
-/// with `cargo test` or `cargo nextest run`.
-fn segment_is_test_run(segment: &str) -> bool {
-    let words = shell_words(segment);
-    let mut i = 0;
-    // Skip leading `VAR=value` assignments.
-    while i < words.len() && is_assignment(&words[i]) {
-        i += 1;
-    }
-    // Skip a leading `env` (and any assignments after it).
-    if i < words.len() && words[i] == "env" {
-        i += 1;
-        while i < words.len() && is_assignment(&words[i]) {
-            i += 1;
-        }
-    }
-    let rest = &words[i..];
-    match rest {
-        [cargo, test, ..] if cargo == "cargo" && test == "test" => true,
-        [cargo, nextest, run, ..] if cargo == "cargo" && nextest == "nextest" && run == "run" => {
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Whether a `Bash` command is a test run: any top-level segment, after skipping leading
-/// `VAR=value` assignments and an `env` prefix, begins with `cargo test` or `cargo nextest run`.
-/// A chain (`cd crate && cargo test`, `a; cargo test`, `x | cargo test`) is a test run if any
-/// segment is one.
-pub fn is_test_run_command(cmd: &str) -> bool {
-    command_segments(cmd)
-        .iter()
-        .any(|seg| segment_is_test_run(seg))
 }
 
 /// The common decision event (B7): every candidate forecasts `task_accepted_in_budget@v1`.
@@ -363,7 +400,14 @@ pub fn action_args(payload: &HookPayload) -> String {
         if let Some(inner) = tsr_exec_inner(&cmd) {
             return inner;
         }
-        return cmd;
+        // A test run commits to the canonical argv of the test run itself, so a forecast written
+        // `cargo test` matches the hook's `cd crate⏎cargo test`, `timeout 60 cargo test` and
+        // `cargo +1.90.0 test` however the shell wrapped or quoted it.
+        if let Some(words) = test_run_command_words(&cmd) {
+            return canonical_args(&words);
+        }
+        // Any other Bash call commits to the canonical argv the shell would produce.
+        return canonical_args(&shell_words(&cmd));
     }
     if let Some(v) = &payload.tool_input {
         if let Some(fp) = v.get("file_path").and_then(|x| x.as_str()) {
@@ -410,11 +454,13 @@ pub fn mint_candidate(kind: ActionKind, args: &str) -> anyhow::Result<Candidate>
 /// assignments and an `env` prefix (and any assignments after it), the first token's basename is
 /// `tsr` (optionally with a path prefix, e.g. `./target/debug/tsr`) and the second token is `exec`.
 /// Such a command records its own dispatch inside `tsr exec`, so the hook records nothing further
-/// for it. A chain (`cd crate && tsr exec -- …`) is a `tsr exec` invocation if any segment is one.
+/// for it. A chain (`cd crate && tsr exec -- …`) is a `tsr exec` invocation if any simple command is
+/// one.
 pub fn is_tsr_exec_command(cmd: &str) -> bool {
-    command_segments(cmd)
+    parse_command(cmd)
+        .commands
         .iter()
-        .any(|seg| segment_is_tsr_subcommand(seg, "exec"))
+        .any(|c| words_are_tsr_subcommand(&c.words, "exec"))
 }
 
 /// Whether a `Bash` command is a `tsr forecast …` invocation (after the same prefix-skipping, the
@@ -424,27 +470,16 @@ pub fn is_tsr_exec_command(cmd: &str) -> bool {
 /// the commitment it names, so the forecast's state version never matched (found by the first real
 /// Claude Code session, 2026-10-11).
 pub fn is_tsr_forecast_command(cmd: &str) -> bool {
-    command_segments(cmd)
+    parse_command(cmd)
+        .commands
         .iter()
-        .any(|seg| segment_is_tsr_subcommand(seg, "forecast"))
+        .any(|c| words_are_tsr_subcommand(&c.words, "forecast"))
 }
 
-/// Whether a single command segment (no top-level operators) is a `tsr <sub>` invocation: after
-/// skipping leading `VAR=value` assignments and an `env` prefix, the first word's basename is `tsr`
-/// and the second word is `sub`.
-fn segment_is_tsr_subcommand(segment: &str, sub: &str) -> bool {
-    let words = shell_words(segment);
-    let mut i = 0;
-    while i < words.len() && is_assignment(&words[i]) {
-        i += 1;
-    }
-    if i < words.len() && words[i] == "env" {
-        i += 1;
-        while i < words.len() && is_assignment(&words[i]) {
-            i += 1;
-        }
-    }
-    let rest = &words[i..];
+/// Whether a simple command's words are a `tsr <sub>` invocation: after skipping leading `VAR=value`
+/// assignments and an `env` prefix, the first word's basename is `tsr` and the second word is `sub`.
+fn words_are_tsr_subcommand(words: &[String], sub: &str) -> bool {
+    let rest = command_words_after_prefix(words);
     match rest {
         [tsr, s, ..] => {
             let base = tsr.rsplit('/').next().unwrap_or(tsr);
@@ -459,31 +494,39 @@ fn segment_is_tsr_subcommand(segment: &str, sub: &str) -> bool {
 /// The inner command is the argv `tsr exec` is handed, joined by single spaces — the same string
 /// `exec::mint_candidate` digests — so the hook's candidate for the wrapper call equals the one the
 /// forecast names and the one `tsr exec` dispatches.
+///
+/// The hook parses the command string with POSIX shell grammar, so the words after `--` are what the
+/// shell would hand `tsr exec`: redirections removed, `~`/`$VAR`/`${VAR}` expanded from the hook's
+/// environment and globs expanded against the hook's cwd. A word the parser cannot evaluate
+/// (command/process substitution, arithmetic) is digested as written and the hook prints one stderr
+/// line saying the forecast may not match.
 pub fn tsr_exec_inner(cmd: &str) -> Option<String> {
-    for seg in command_segments(cmd) {
-        if !segment_is_tsr_subcommand(&seg, "exec") {
+    let parsed = parse_command(cmd);
+    for c in &parsed.commands {
+        if !words_are_tsr_subcommand(&c.words, "exec") {
             continue;
         }
-        let words = shell_words(&seg);
-        let mut i = 0;
-        while i < words.len() && is_assignment(&words[i]) {
-            i += 1;
+        let rest = command_words_after_prefix(&c.words);
+        // rest[0] is the `tsr` token, rest[1] is `exec`.
+        let mut inner = &rest[2..];
+        if inner.first().map(String::as_str) == Some("--") {
+            inner = &inner[1..];
         }
-        if i < words.len() && words[i] == "env" {
-            i += 1;
-            while i < words.len() && is_assignment(&words[i]) {
-                i += 1;
-            }
-        }
-        // words[i] is the `tsr` token, words[i+1] is `exec`.
-        let mut rest = &words[i + 2..];
-        if rest.first().map(String::as_str) == Some("--") {
-            rest = &rest[1..];
-        }
-        if rest.is_empty() {
+        if inner.is_empty() {
             return None;
         }
-        return Some(canonical_args(rest));
+        // Expand globs against the hook's cwd, as the shell would before `tsr exec` sees the argv.
+        let mut words: Vec<String> = Vec::new();
+        for w in inner {
+            words.extend(expand_word_globs(w));
+        }
+        if c.unevaluable {
+            eprintln!(
+                "tsr: hook: a word in `tsr exec` could not be evaluated (command/process \
+                 substitution or arithmetic); the forecast may not match"
+            );
+        }
+        return Some(canonical_args(&words));
     }
     None
 }
@@ -924,6 +967,14 @@ fn append_forecast(
     )
 }
 
+/// The canonical form of a `tsr forecast --args` string: the same canonical argv the hook and
+/// `tsr exec` digest. `--args` is a command string, so it is parsed with POSIX shell grammar and
+/// re-quoted word by word, exactly as the hook does for a `Bash` command. A forecast written
+/// `sh -c "a; b"` therefore matches the hook's `sh -c 'a; b'`.
+pub fn canonical_forecast_args(args: &str) -> String {
+    canonical_args(&shell_words(args))
+}
+
 /// Record a forecast for a gated action, before the tool call (B5, B7).
 ///
 /// This is how a forecast enters the log: `tsr forecast` mints the candidate exactly as the hook
@@ -932,6 +983,9 @@ fn append_forecast(
 /// where `state_version` is the index the next event will occupy — the number of events in the task
 /// after the forecast itself is appended. That is the version the commitment will occupy, which is
 /// what the M0 invariant checks.
+///
+/// `args` is canonicalised through [`canonical_forecast_args`] before the digest, so a forecast
+/// written with different quoting than the hook's command string still mints the same candidate.
 pub fn record_forecast_for_action(
     store: &Store,
     task: &TaskId,
@@ -940,7 +994,8 @@ pub fn record_forecast_for_action(
     p: f64,
     source: &str,
 ) -> anyhow::Result<EventId> {
-    let candidate = mint_candidate(kind, args)?;
+    let args = canonical_forecast_args(args);
+    let candidate = mint_candidate(kind, &args)?;
     let cid = candidate.id;
 
     // Append `Proposed` unless a pending proposal with this id already exists.
