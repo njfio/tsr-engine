@@ -189,6 +189,23 @@ run "report foreign" "$BIN" train report "$BUNDLE" --dataset "$REPO_DS"
 # --- known limitations -----------------------------------------------------
 section "Known limitations"
 
+# (0) an `--out` directory the user cannot write to still exits 1. The sandbox
+#     runs as root, so a mode-bit test cannot make a directory unwritable (root
+#     writes a 0555 directory); the read-only filesystem `/sys/kernel/debug` is
+#     an existing, empty, unwritable directory that root cannot write either.
+#     Nothing is created in the tree: the probe only reads /sys.
+LIM_RO="/sys/kernel/debug"
+if [ -d "$LIM_RO" ] && [ -w "$LIM_RO" ] 2>/dev/null; then
+    printf '# %s is writable here; skipping the unwritable --out probe\n\n' "$LIM_RO"
+else
+    run "dataset, --out is an unwritable directory" "$BIN" train dataset \
+        --events "$ROOT/fixtures/m4/events.jsonl" \
+        --tasks "$ROOT/fixtures/m4/tasks.jsonl" \
+        --labels "$ROOT/fixtures/m4/labels.jsonl" \
+        --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out "$LIM_RO"
+    run "fit, --out is an unwritable directory" "$BIN" train fit "$DS" --out "$LIM_RO"
+fi
+
 # (1) `fit` with `holdout-access.jsonl` as a directory exits 1.
 LIM_DS="$WORK/m4-lim-holdout"
 cp -R "$DS" "$LIM_DS"
