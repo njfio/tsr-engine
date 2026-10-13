@@ -4101,3 +4101,134 @@ fn d7_duplicate_task_ids_and_label_records_exit_2_naming_file_line_and_id() {
         llines.len()
     );
 }
+
+/// r5b6 defect 1: an input path follows symlinks and is judged by what it points to. A bundle
+/// directory reached through a symlink (`models/current` -> a real bundle) must verify, report and
+/// apply exactly as the real path does -- r5b6 tested `!meta.is_dir()` on `symlink_metadata`, so a
+/// symlinked bundle exited 2 "is not a directory".
+#[test]
+fn r5b7_a_symlinked_bundle_directory_is_accepted() {
+    let dir = temp_dir("r5b7-symlink-bundle");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let link = dir.join("models").join("current");
+    std::os::unix::fs::symlink(&b, &link).unwrap();
+
+    let (code, out, err) = run(&["train", "verify", link.to_str().unwrap()]);
+    assert_eq!(
+        code, 0,
+        "r5b7: verify a symlinked bundle must exit 0, not {code}:\n{out}\n{err}"
+    );
+    assert!(
+        out.contains("verified"),
+        "r5b7: verify a symlinked bundle must report it verified:\n{out}"
+    );
+    for sub in ["report", "apply"] {
+        let (code, out, err) = run(&[
+            "train",
+            sub,
+            link.to_str().unwrap(),
+            "--dataset",
+            ds.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            code, 0,
+            "r5b7: {sub} a symlinked bundle must exit 0, not {code}:\n{out}\n{err}"
+        );
+    }
+}
+
+/// r5b6 defect 1 (second slip): a `holdout-access.jsonl` that is a symlink to a directory resolves
+/// to a directory, so it is bad input -- exit 2 naming the path, never exit 1 "Is a directory".
+#[test]
+fn r5b7_a_symlinked_holdout_access_to_a_directory_is_refused_naming_it() {
+    let dir = temp_dir("r5b7-symlink-holdout");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let target = dir.join("holdout-target-dir");
+    std::fs::create_dir_all(&target).unwrap();
+    let ha = ds.join("holdout-access.jsonl");
+    let _ = std::fs::remove_file(&ha);
+    std::os::unix::fs::symlink(&target, &ha).unwrap();
+
+    let (code, _o, err) = run(&[
+        "train",
+        "apply",
+        b.to_str().unwrap(),
+        "--dataset",
+        ds.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "r5b7: apply with holdout-access.jsonl a symlink to a directory must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains(ha.to_str().unwrap()),
+        "r5b7: apply must name {}:\n{err}",
+        ha.display()
+    );
+
+    let (ev, tk, lb) = regenerate(&dir);
+    let out = dir.join("ds-symlink-holdout");
+    std::fs::create_dir_all(&out).unwrap();
+    let ha_out = out.join("holdout-access.jsonl");
+    std::os::unix::fs::symlink(&target, &ha_out).unwrap();
+    let (code, _o, err) = run(&[
+        "train",
+        "dataset",
+        "--events",
+        ev.to_str().unwrap(),
+        "--tasks",
+        tk.to_str().unwrap(),
+        "--labels",
+        lb.to_str().unwrap(),
+        "--by",
+        "time",
+        "--calibrate",
+        "0.2",
+        "--holdout",
+        "0.2",
+        "--seed",
+        "7",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        code, 2,
+        "r5b7: dataset --out with holdout-access.jsonl a symlink to a directory must exit 2, not {code}:\n{err}"
+    );
+    assert!(
+        err.contains(ha_out.to_str().unwrap()),
+        "r5b7: dataset must name {}:\n{err}",
+        ha_out.display()
+    );
+}
+
+/// D5 (r5b6 defect 2): an empty `standardize_mean` or `standardize_std` is not a valid spec -- the
+/// lengths must equal `names`' length, empty included. r5b6 skipped the length check when the vector
+/// was empty and `head.rs` fell back to 0.0, silently changing every raw p.
+#[test]
+fn r5b7_an_empty_standardize_vector_is_refused_naming_the_field() {
+    let dir = temp_dir("r5b7-empty-standardize");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    for field_name in ["standardize_mean", "standardize_std"] {
+        let b2 = dir.join(format!("b-empty-{field_name}"));
+        copy_dir(&b, &b2);
+        let fp = b2.join("features.json");
+        let mut f: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&fp).unwrap()).unwrap();
+        f[field_name] = serde_json::json!([]);
+        std::fs::write(&fp, serde_json::to_string_pretty(&f).unwrap()).unwrap();
+        remint_bundle(&b2);
+        let (code, _o, err) = run(&["train", "verify", b2.to_str().unwrap()]);
+        assert_eq!(
+            code, 2,
+            "D5: verify with {field_name}=[] must exit 2, not {code}:\n{err}"
+        );
+        assert!(
+            err.contains(field_name),
+            "D5: verify must name the field {field_name}:\n{err}"
+        );
+    }
+}

@@ -261,19 +261,21 @@ fn refuse_out_that_is_not_a_directory(out: &Path) -> Option<std::process::ExitCo
                 if !dir.is_dir() {
                     return refuse("has a non-directory ancestor");
                 }
-                // D2: the nearest existing ancestor must be writable, or `create_dir_all` fails
-                // EACCES/EROFS (exit 1). `/proc/x/y` is the case: `/proc` exists but cannot be
-                // written. Refuse it here, naming the path.
-                if std::fs::metadata(dir)
-                    .map(|m| m.permissions().readonly())
-                    .unwrap_or(false)
-                {
-                    return refuse("has a read-only ancestor");
-                }
                 break;
             }
             Err(_) => ancestor = dir.parent(),
         }
+    }
+    // r5b7: the writability of the nearest existing ancestor is not a mode-bit question -- a mode
+    // test refuses root under a 0555 directory (root can write it) and misses a non-root EACCES.
+    // Attempt the create instead and map any io error to exit 2 naming the path. The probe removes
+    // the directory it created, so a later refusal (a missing store, say) still leaves nothing.
+    let existed = out.exists();
+    if let Err(e) = std::fs::create_dir_all(out) {
+        return refuse(&format!("cannot be created: {e}"));
+    }
+    if !existed {
+        let _ = std::fs::remove_dir(out);
     }
     None
 }
@@ -292,7 +294,10 @@ fn refuse_holdout_access_that_is_not_a_file(dir: &Path) -> Option<std::process::
             if meta.file_type().is_symlink() && !path.exists() {
                 return refuse("is a dangling symlink");
             }
-            if meta.is_dir() {
+            // r5b7: an input path follows symlinks and is judged by what it points to. `meta` is
+            // the link itself, so `meta.is_dir()` is false for a symlink to a directory; the
+            // resolved `path.is_dir()` is the right question.
+            if path.is_dir() {
                 return refuse("is a directory, not a file");
             }
             None
@@ -313,7 +318,10 @@ fn refuse_bundle_that_is_not_a_directory(bundle: &Path) -> Option<std::process::
             if meta.file_type().is_symlink() && !bundle.exists() {
                 return refuse("is a dangling symlink");
             }
-            if !meta.is_dir() {
+            // r5b7: an input path follows symlinks and is judged by what it points to. `meta` is
+            // the link itself, so `meta.is_dir()` is false for a symlink to a real bundle
+            // directory; `bundle.is_dir()` (which follows the link) is the right question.
+            if !bundle.is_dir() {
                 return refuse("is not a directory");
             }
         }
@@ -338,7 +346,8 @@ fn refuse_store_that_is_not_a_sqlite_file(store: &Path) -> Option<std::process::
             if meta.file_type().is_symlink() && !store.exists() {
                 return refuse("is a dangling symlink");
             }
-            if meta.is_dir() {
+            // r5b7: an input path follows symlinks and is judged by what it points to.
+            if store.is_dir() {
                 return refuse("is a directory, not a sqlite file");
             }
         }

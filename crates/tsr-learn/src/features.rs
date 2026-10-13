@@ -52,7 +52,9 @@ pub struct FeatureSpec {
     #[serde(default)]
     pub standardize_std: Vec<f64>,
     /// B15: the learning rate of the head's full-batch updates, declared in the spec so it is
-    /// recorded in the bundle rather than living only as a constant in the code.
+    /// recorded in the bundle rather than living only as a constant in the code. Its range is
+    /// (0, 1]: a full-batch step size on a normalized update, so 0 or a negative value never moves
+    /// the weights and a value above 1 overshoots. `validate` refuses a value outside it.
     #[serde(default = "default_learning_rate")]
     pub learning_rate: f64,
 }
@@ -65,10 +67,11 @@ fn default_learning_rate() -> f64 {
 impl FeatureSpec {
     /// F9/B3 (d): every numeric hyperparameter must be finite and within its documented range.
     ///
-    /// `learning_rate` must be finite and strictly positive; the standardization statistics must be
-    /// finite; the per-feature window widths must be finite and non-negative. A violation names the
-    /// field, so `fit`, `report`, `apply` and `verify` exit 2 naming it rather than writing `null`
-    /// weights into `head.json` and failing later with no file named.
+    /// `learning_rate` must be finite and in (0, 1]; the standardization statistics must be finite
+    /// and have exactly one entry per name (empty included); the per-feature window widths must be
+    /// finite and non-negative. A violation names the field, so `fit`, `report`, `apply` and
+    /// `verify` exit 2 naming it rather than writing `null` weights into `head.json` and failing
+    /// later with no file named.
     pub fn validate(&self) -> Result<(), String> {
         // The documented range: a full-batch learning rate is a step size on a normalized update,
         // so it must be finite and in (0, 1]. 1e308 overflows the weight update to +/-inf (which
@@ -90,13 +93,13 @@ impl FeatureSpec {
                 self.numeric_widths.len()
             ));
         }
-        if !self.standardize_mean.is_empty() && self.standardize_mean.len() != n {
+        if self.standardize_mean.len() != n {
             return Err(format!(
                 "standardize_mean: expected {n} values (one per name), got {}",
                 self.standardize_mean.len()
             ));
         }
-        if !self.standardize_std.is_empty() && self.standardize_std.len() != n {
+        if self.standardize_std.len() != n {
             return Err(format!(
                 "standardize_std: expected {n} values (one per name), got {}",
                 self.standardize_std.len()
