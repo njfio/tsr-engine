@@ -875,9 +875,14 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
 /// Whether the hook may commit the candidate `cid` a `tsr exec --candidate <id> -- …` call names.
 ///
 /// `Ok(())` only when `cid` is a candidate of `task` (a `Proposed` for it exists), has a forecast (a
-/// `Forecast` for it exists), and has no `Dispatched` at all — neither committed-and-dispatched nor
-/// already dispatched (defect 1). `Err(reason)` names the first condition that fails, so the caller
-/// can print one line and record the call as an ordinary non-gated call instead.
+/// `Forecast` for it exists), and its newest `Forecast` comes after its newest `Dispatched` (or it
+/// has never been dispatched) — **one forecast authorizes one run** (operator correction, r5c
+/// re-arm). A candidate id is `(kind, args digest)` only, so the same command forecast again later
+/// gets the same id and is dispatchable again; a second run on the same forecast is not. The hook is
+/// the one that writes the commitment this PreToolUse authorizes, so it cannot require a prior
+/// commitment — `exec::check_named_candidate` adds that condition when it runs the command, and the
+/// two agree on which runs are authorized. `Err(reason)` names the first condition that fails, so
+/// the caller can print one line and record the call as an ordinary non-gated call instead.
 fn named_candidate_gate(
     store: &Store,
     task: &TaskId,
@@ -885,23 +890,25 @@ fn named_candidate_gate(
 ) -> anyhow::Result<Result<(), String>> {
     let events = store.by_task(task)?;
     let mut proposed = false;
-    let mut forecast = false;
-    let mut dispatched = false;
-    for (_, e) in &events {
+    let mut last_forecast: Option<usize> = None;
+    let mut last_dispatched: Option<usize> = None;
+    for (i, (_, e)) in events.iter().enumerate() {
         match &e.kind {
             EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
-            EventKind::Forecast { candidate, .. } if *candidate == cid => forecast = true,
-            EventKind::Dispatched { candidate, .. } if *candidate == cid => dispatched = true,
+            EventKind::Forecast { candidate, .. } if *candidate == cid => last_forecast = Some(i),
+            EventKind::Dispatched { candidate, .. } if *candidate == cid => {
+                last_dispatched = Some(i)
+            }
             _ => {}
         }
     }
     if !proposed {
         return Ok(Err("it is not a candidate of this task".to_string()));
     }
-    if !forecast {
+    let Some(forecast) = last_forecast else {
         return Ok(Err("it has no forecast".to_string()));
-    }
-    if dispatched {
+    };
+    if last_dispatched.is_some_and(|d| d > forecast) {
         return Ok(Err("it is already dispatched".to_string()));
     }
     Ok(Ok(()))
@@ -932,8 +939,6 @@ fn pending_proposal(store: &Store, task: &TaskId, cid: CandidateId) -> anyhow::R
     })
 }
 
-/// The pending candidates of `kind` in `task`: those whose newest `Proposed`/`Committed` comes after
-/// their newest `Dispatched` (or which have no `Dispatched`). Mirrors `exec::pending_candidates`.
 /// The exit code and log digest of a `PostToolUse` response, if the payload carries them.
 fn exec_outcome(payload: &HookPayload) -> (Option<i32>, Option<Hash>) {
     let resp = match &payload.tool_response {
@@ -1214,13 +1219,10 @@ pub const SELFTEST_RECORDED_AT: &str = "2026-01-01T00:00:00Z";
 
 /// The argv the self-test runs in the container: `cargo test --offline -p parser`.
 const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "parser"];
-/// The full command string the forecast and the hook payload name for the first run.
+/// The full command string the forecast and the hook payload name. Both gated runs use it: a
+/// candidate id is `(kind, args digest)` only, so the second run names the same id as the first and
+/// is authorized by its own fresh forecast — exactly as `fixtures/m0` runs one candidate twice.
 const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
-/// The second run's argv: a *different* command, so it mints a distinct candidate. A second run of
-/// the same command would name the first (already dispatched) candidate, which defect 1 refuses.
-const SELFTEST_TEST_ARGV2: [&str; 5] = ["cargo", "test", "--offline", "-p", "lexer"];
-/// The full command string the forecast and the hook payload name for the second run.
-const SELFTEST_TEST_CMD2: &str = "cargo test --offline -p lexer";
 
 /// Send the hook what Claude Code sends around a `tsr forecast …` Bash call: the PreToolUse before
 /// it, or the PostToolUse after it with a Bash tool response as Claude Code shapes it (stdout,
@@ -1424,21 +1426,22 @@ fn selftest_inner(
     record_tool(&store, &edit)?;
 
     // 6. A forecast before the second gated action, then the second run the same way. The second
-    //    run names a *different* command, so it mints a distinct candidate: a second run of the
-    //    first command would name the first (already dispatched) candidate, which defect 1 refuses.
+    //    run is the *same* command as the first, so it names the same candidate id — the fresh
+    //    forecast re-arms it (one forecast authorizes one run), exactly as `fixtures/m0` runs one
+    //    candidate twice, each time after a fresh forecast.
     forecast_call_hooks(
         &store,
         session,
         "PreToolUse",
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD2,
+        SELFTEST_TEST_CMD,
         0.6,
     )?;
     let candidate2 = record_forecast_for_action(
         &store,
         &task,
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD2,
+        SELFTEST_TEST_CMD,
         0.6,
         "generator",
     )?;
@@ -1447,11 +1450,11 @@ fn selftest_inner(
         session,
         "PostToolUse",
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD2,
+        SELFTEST_TEST_CMD,
         0.6,
     )?;
     let exec_cmd2 = format!(
-        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD2}",
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
         candidate2.0.to_hex()
     );
     let pre2 = HookPayload {
@@ -1462,7 +1465,7 @@ fn selftest_inner(
         ..Default::default()
     };
     record_tool(&store, &pre2)?;
-    let argv2: Vec<String> = SELFTEST_TEST_ARGV2.iter().map(|s| s.to_string()).collect();
+    let argv2: Vec<String> = SELFTEST_TEST_ARGV.iter().map(|s| s.to_string()).collect();
     crate::exec::run(&store, &task, &workspace, Some(candidate2), &argv2)
         .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
     ensure_last_run_executed(&store, &task)?;

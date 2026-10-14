@@ -66,6 +66,41 @@ esac
     bin
 }
 
+/// Write a fake `docker` that appends one line to `dir/runs.log` for every `run` it is asked to do,
+/// so a test can count container runs. `info` succeeds (a daemon answers).
+fn fake_docker_counting(dir: &Path) -> PathBuf {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("fake bin dir");
+    let log = dir.join("runs.log");
+    let script = format!(
+        r#"#!/bin/sh
+case "$1" in
+  --version) exit 0 ;;
+  info) exit 0 ;;
+  run) echo "run" >> "{log}"; echo "fake docker run"; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+        log = log.display(),
+    );
+    let path = bin.join("docker");
+    std::fs::write(&path, script).expect("write fake docker");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fake docker");
+    }
+    bin
+}
+
+/// How many container runs the counting fake runtime recorded.
+fn container_runs(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("runs.log"))
+        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
 /// A `PATH` with the built `tsr` binary's directory first, then the fake runtime's directory, then
 /// the real `PATH`. The `tsr` directory must come first so the `bash -c` that runs the command
 /// string finds *this* build's `tsr`, not one installed on the host (defect 4: hermetic).
@@ -542,6 +577,300 @@ fn exec_without_candidate_says_so_and_records_no_forecast() {
         "the bare exec records no forecast"
     );
     assert_eq!(count(&ks, "dispatched"), 1, "the bare exec dispatches once");
+}
+
+/// One forecast authorizes one run (operator correction, r5c re-arm): forecast once, then run the
+/// *same* `tsr exec --candidate <id>` command three times through the hook and a real `bash -c`.
+/// The first run dispatches; the second and third are refused (exit 2, nothing runs), because the
+/// candidate's newest forecast no longer comes after its newest dispatch. Exactly one container run.
+#[test]
+fn one_forecast_authorizes_one_run_three_attempts_one_container_run() {
+    let dir = scratch("one-forecast-one-run");
+    let session = "m0-candidate-one-forecast";
+    let bin = fake_docker_counting(&dir);
+    let db = dir.join(".tsr/tsr.db");
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    assert!(env.hook("SessionStart", &start).status.success());
+
+    let id = forecast(&env, "cargo test", "0.9");
+    let command = format!("tsr exec --candidate {id} -- cargo test");
+    let input = serde_json::json!({ "command": command });
+
+    // Attempt 1: the hook commits, the command runs, the container runs once.
+    let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input.clone()));
+    assert!(out.status.success(), "PreToolUse 1 exits 0: {out:?}");
+    let mut bash = env.command("bash");
+    bash.arg("-c").arg(&command);
+    let out = bash.output().expect("run bash -c");
+    assert!(
+        out.status.success(),
+        "attempt 1 `{command}` exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(env
+        .hook(
+            "PostToolUse",
+            &posttooluse(session, "Bash", input.clone(), 0)
+        )
+        .status
+        .success());
+    assert_eq!(container_runs(&dir), 1, "attempt 1 runs the container once");
+
+    // Attempts 2 and 3: the same command, the same candidate id. The hook refuses to commit (one
+    // stderr line) and `tsr exec` refuses with exit 2, running nothing.
+    for attempt in 2..=3 {
+        let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input.clone()));
+        assert!(
+            out.status.success(),
+            "attempt {attempt}: PreToolUse exits 0: {out:?}"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("not committing") && stderr.contains("already dispatched"),
+            "attempt {attempt}: the hook prints one line why it does not commit: {stderr:?}"
+        );
+        let mut bash = env.command("bash");
+        bash.arg("-c").arg(&command);
+        let out = bash.output().expect("run bash -c");
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "attempt {attempt}: `{command}` exits 2: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("already dispatched"),
+            "attempt {attempt}: the refusal names the reason: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    assert_eq!(
+        container_runs(&dir),
+        1,
+        "three attempts, one forecast: exactly one container run"
+    );
+
+    let trace = env.export(session);
+    let ks = kinds(&trace);
+    assert_eq!(count(&ks, "forecast"), 1, "exactly one forecast");
+    assert_eq!(count(&ks, "dispatched"), 1, "exactly one dispatch");
+    assert_eq!(count(&ks, "executed"), 1, "exactly one execution");
+}
+
+/// Forecast, run, forecast again, run again: the second forecast re-arms the same candidate id, so
+/// both runs are accepted and `reconstruct` accepts the log. This is `fixtures/m0`'s shape: one
+/// candidate run twice, each time after a fresh forecast.
+#[test]
+fn forecast_run_forecast_run_two_runs_both_accepted() {
+    let dir = scratch("rearm");
+    let session = "m0-candidate-rearm";
+    let bin = fake_docker_counting(&dir);
+    let db = dir.join(".tsr/tsr.db");
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    assert!(env.hook("SessionStart", &start).status.success());
+
+    let mut ids = Vec::new();
+    for round in 1..=2 {
+        let id = forecast(&env, "cargo test", "0.9");
+        ids.push(id.clone());
+        let command = format!("tsr exec --candidate {id} -- cargo test");
+        let input = serde_json::json!({ "command": command });
+        let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input.clone()));
+        assert!(
+            out.status.success(),
+            "round {round}: PreToolUse exits 0: {out:?}"
+        );
+        let mut bash = env.command("bash");
+        bash.arg("-c").arg(&command);
+        let out = bash.output().expect("run bash -c");
+        assert!(
+            out.status.success(),
+            "round {round}: `{command}` exits 0: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(env
+            .hook("PostToolUse", &posttooluse(session, "Bash", input, 0))
+            .status
+            .success());
+    }
+    assert_eq!(
+        ids[0], ids[1],
+        "the same command mints the same candidate id"
+    );
+    assert_eq!(container_runs(&dir), 2, "two forecasts, two runs");
+
+    let trace = env.export(session);
+    let ks = kinds(&trace);
+    assert_eq!(count(&ks, "forecast"), 2, "two forecasts");
+    assert_eq!(count(&ks, "dispatched"), 2, "two dispatches");
+    assert_eq!(count(&ks, "executed"), 2, "two executions");
+
+    let trace_path = dir.join("rearm.jsonl");
+    std::fs::write(&trace_path, &trace).expect("write trace");
+    let session = reconstruct::from_events(&trace_path)
+        .unwrap_or_else(|e| panic!("reconstruct accepts the log: {e}"));
+    assert!(
+        session.every_gated_action_has_prior_forecast_at_same_state_version(),
+        "B5: every gated action has a forecast at its state version"
+    );
+    assert!(
+        session.every_dispatch_reconciled_or_unresolved(),
+        "B6: every dispatch is reconciled or unresolved"
+    );
+    assert!(
+        session.every_command_ran_in_sandbox(),
+        "B4: no command ran outside the sandbox"
+    );
+}
+
+/// A here-string `<<<` on its own line before `tsr exec --candidate …` (not joined by `&&`) must not
+/// swallow the `tsr exec` command: the hook still sees the candidate and commits it. This is the
+/// d611b5e shell.rs defect — a `<<<` read as a here-document would consume the rest of the line.
+#[test]
+fn here_string_on_its_own_line_before_tsr_exec_is_seen() {
+    let dir = scratch("herestring-own-line");
+    let session = "m0-candidate-herestring-line";
+    let bin = fake_docker_counting(&dir);
+    let db = dir.join(".tsr/tsr.db");
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    assert!(env.hook("SessionStart", &start).status.success());
+
+    let id = forecast(&env, "cargo test", "0.9");
+    // The here-string is on its own line, and the `tsr exec` follows on the next line — no `&&`.
+    let command = format!("cat <<< \"hi\"\ntsr exec --candidate {id} -- cargo test");
+    let input = serde_json::json!({ "command": command });
+    let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input.clone()));
+    assert!(out.status.success(), "PreToolUse exits 0: {out:?}");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("not committing"),
+        "the hook commits the candidate the here-string precedes: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mut bash = env.command("bash");
+    bash.arg("-c").arg(&command);
+    let out = bash.output().expect("run bash -c");
+    assert!(
+        out.status.success(),
+        "`{command}` exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(env
+        .hook("PostToolUse", &posttooluse(session, "Bash", input, 0))
+        .status
+        .success());
+
+    let trace = env.export(session);
+    let ks = kinds(&trace);
+    assert_eq!(count(&ks, "committed"), 1, "the candidate is committed");
+    assert_eq!(count(&ks, "dispatched"), 1, "the candidate is dispatched");
+    assert_eq!(container_runs(&dir), 1, "the container runs once");
+}
+
+/// The brief's spellings sent to the hook as the shell text the agent types — pipes, redirects,
+/// globs, `~`, `$HOME`, `<<<`, `[ab]`, `'*'`, `find … {} \;` — not as pre-expanded argv. The hook
+/// must still find the `tsr exec --candidate <id>` inside the text and commit the candidate.
+#[test]
+fn spellings_sent_as_shell_text_are_recognised() {
+    let dir = scratch("shell-text");
+    // (name, the shell text the agent types, with `{id}` for the candidate)
+    let cases: &[(&str, &str)] = &[
+        (
+            "pipe",
+            "tsr exec --candidate {id} -- cargo test 2>&1 | tail -20",
+        ),
+        (
+            "redirect",
+            "tsr exec --candidate {id} -- cargo test > out.txt",
+        ),
+        (
+            "dollar-home",
+            "tsr exec --candidate {id} -- cat \"$HOME/x\"",
+        ),
+        ("tilde", "tsr exec --candidate {id} -- ls ~"),
+        ("glob", "tsr exec --candidate {id} -- ls *.toml"),
+        ("herestring", "tsr exec --candidate {id} -- cat <<< \"hi\""),
+        ("bracket", "tsr exec --candidate {id} -- ls [ab].toml"),
+        ("quoted-star", "tsr exec --candidate {id} -- echo '*'"),
+        (
+            "find-exec",
+            "tsr exec --candidate {id} -- find . -exec echo {} \\;",
+        ),
+    ];
+    for (name, template) in cases {
+        let session = format!("m0-candidate-shelltext-{name}");
+        let bin = fake_docker_counting(&dir);
+        let db = dir.join(".tsr/tsr.db");
+        let env = Env {
+            cwd: &dir,
+            db: &db,
+            session: &session,
+            bin: &bin,
+        };
+        let start = serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "SessionStart",
+            "cwd": dir.to_str().expect("utf8 cwd"),
+        })
+        .to_string();
+        assert!(env.hook("SessionStart", &start).status.success());
+
+        let id = forecast(&env, "cargo test", "0.9");
+        let command = template.replace("{id}", &id);
+        let input = serde_json::json!({ "command": command });
+        let out = env.hook("PreToolUse", &pretooluse(&session, "Bash", input.clone()));
+        assert!(
+            out.status.success(),
+            "{name}: PreToolUse exits 0: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&out.stderr).contains("not committing"),
+            "{name}: the hook commits the candidate in the shell text: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let trace = env.export(&session);
+        let ks = kinds(&trace);
+        assert_eq!(
+            count(&ks, "committed"),
+            1,
+            "{name}: the candidate is committed"
+        );
+    }
 }
 
 /// No input panics the hook: random strings through PreToolUse for a Bash command. Bounded to

@@ -578,13 +578,15 @@ fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
     .map_err(|_| ExecRefusal::NoRuntime)
 }
 
-/// Check that `cid` is a candidate of `task` that has a forecast and is not yet dispatched, and
-/// refuse with exit 2 naming the reason otherwise (operator decision (b)).
+/// Check that `cid` is a candidate of `task` that a forecast authorizes to run now, and refuse with
+/// exit 2 naming the reason otherwise (operator decision (b); operator correction, r5c re-arm).
 ///
-/// "Has a forecast" means a `Forecast { candidate: cid }` event exists for it. "Not yet dispatched"
-/// means no `Dispatched { candidate: cid }` follows the newest `Committed` for it — the same
-/// per-occurrence rule [`pending_commitment`] uses, so a re-committed candidate is dispatchable
-/// again.
+/// **One forecast authorizes one run.** A candidate is dispatchable when its newest `Forecast` comes
+/// after its newest `Dispatched` (or it has never been dispatched) *and* it has been committed after
+/// that forecast. A candidate id is `(kind, args digest)` only, so the same command forecast again
+/// later gets the same id and is dispatchable again; a second run on the same forecast is not. This
+/// is the same rule `hook::named_candidate_gate` applies when it decides whether to commit a named
+/// `--candidate` (the hook cannot require the commitment it is about to write).
 fn check_named_candidate(
     store: &Store,
     task: &TaskId,
@@ -596,17 +598,17 @@ fn check_named_candidate(
     let hex = cid.0.to_hex();
 
     let mut proposed = false;
-    let mut forecast = false;
-    let mut committed = false;
-    let mut dispatched = false;
-    for (_, e) in &events {
+    let mut last_forecast: Option<usize> = None;
+    let mut last_committed: Option<usize> = None;
+    let mut last_dispatched: Option<usize> = None;
+    for (i, (_, e)) in events.iter().enumerate() {
         match &e.kind {
             EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
-            EventKind::Forecast { candidate, .. } if *candidate == cid => forecast = true,
-            EventKind::Committed { candidate, .. } if *candidate == cid => committed = true,
-            // Any `Dispatched` for this id blocks it, whatever came after it (defect 1): a
-            // `Committed` does not clear a dispatch, so an already-run candidate cannot run again.
-            EventKind::Dispatched { candidate, .. } if *candidate == cid => dispatched = true,
+            EventKind::Forecast { candidate, .. } if *candidate == cid => last_forecast = Some(i),
+            EventKind::Committed { candidate, .. } if *candidate == cid => last_committed = Some(i),
+            EventKind::Dispatched { candidate, .. } if *candidate == cid => {
+                last_dispatched = Some(i)
+            }
             _ => {}
         }
     }
@@ -616,73 +618,22 @@ fn check_named_candidate(
             "--candidate {hex} is not a candidate of this task"
         )));
     }
-    if !forecast {
+    let Some(forecast) = last_forecast else {
         return Err(ExecRefusal::UnknownCandidate(format!(
             "--candidate {hex} has no forecast"
         )));
-    }
-    if !committed {
+    };
+    if last_committed.is_none_or(|c| c <= forecast) {
         return Err(ExecRefusal::UnknownCandidate(format!(
-            "--candidate {hex} has not been committed"
+            "--candidate {hex} has not been committed after its forecast"
         )));
     }
-    if dispatched {
+    if last_dispatched.is_some_and(|d| d > forecast) {
         return Err(ExecRefusal::UnknownCandidate(format!(
             "--candidate {hex} is already dispatched"
         )));
     }
     Ok(())
-}
-
-/// The candidate of the most recent `Committed` for `(kind, args_digest)` that has no `Dispatched`
-/// after it — the commitment this dispatch is meant to fulfil, if any.
-///
-/// The walk is per *occurrence*, in sequence order, not per id. A candidate id is content-addressed
-/// by `(kind, args, parents)`, so the second run of the same command mints the same id as the first:
-/// treating "this id has a `Dispatched`" as "dispatched" would make the second run mint a fresh
-/// candidate with no forecast (the defect the operator's real record shows at events 19–20). A
-/// `Committed` is pending again once a later `Committed` for the same digest follows the
-/// `Dispatched`, exactly as a re-`Proposed` candidate is pending again.
-///
-/// Matching is on the committed candidate's `(kind, args digest)`, not on the id alone: the id also
-/// commits to the parents, which differ between the hook's mint and a fresh one.
-pub fn pending_commitment(
-    store: &Store,
-    task: &TaskId,
-    kind: ActionKind,
-    args_digest: Hash,
-) -> Option<CandidateId> {
-    let events = store.by_task(task).ok()?;
-    let mut pending: Option<CandidateId> = None;
-    for (_, e) in &events {
-        match &e.kind {
-            EventKind::Proposed { candidate } => {
-                if candidate.kind == kind && candidate.args == args_digest {
-                    // A re-proposal of the same candidate is pending again.
-                    pending = Some(candidate.id);
-                }
-            }
-            EventKind::Committed { candidate, .. } => {
-                if pending == Some(*candidate) {
-                    // Already pending: the commitment does not change which occurrence is pending.
-                } else if let Some(c) = events.iter().find_map(|(_, p)| match &p.kind {
-                    EventKind::Proposed { candidate: p } if p.id == *candidate => Some(p),
-                    _ => None,
-                }) {
-                    if c.kind == kind && c.args == args_digest {
-                        pending = Some(*candidate);
-                    }
-                }
-            }
-            EventKind::Dispatched { candidate, .. } => {
-                if pending == Some(*candidate) {
-                    pending = None;
-                }
-            }
-            _ => {}
-        }
-    }
-    pending
 }
 
 fn last_parent(store: &Store, task: &TaskId) -> Vec<tsr_domain::EventId> {
@@ -787,104 +738,6 @@ mod tests {
             crate::hook::candidate_for_action(ActionKind::RunApprovedTest, cmd)
                 .expect("hook candidate"),
             "tsr exec and the hook must mint the same candidate for the same command"
-        );
-    }
-
-    /// The operator's real `tsr hook --selftest` record from 4d8d7b8 — pinned at
-    /// tests/fixtures/m0/real-record-4d8d7b8.events.jsonl because fixtures/m0/session.events.jsonl is
-    /// regenerated on a host after this repair and no longer holds the defective sequence — events
-    /// 1–18: two `Read`s, then a `tsr forecast` + PreToolUse Bash for `tsr exec -- cargo test
-    /// --offline -p parser` (6–8), the dispatch and execution (9–10), the PostToolUse the hook
-    /// wrongly proposed and committed (11–12), an Edit (13–15), and the *second* run of the same
-    /// command (16–18). The candidate id is content-addressed, so events 6–8 and 16–18 name the
-    /// same id `e07bad41…`; the first occurrence was dispatched at 9, the second was not.
-    const REAL_LISTING_EVENTS_1_TO_18: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/m0/real-record-4d8d7b8.events.jsonl"
-    ));
-
-    /// Build a store holding the operator's real record, truncated to the first `n` events.
-    fn store_with_real_listing(n: usize) -> (Store, TaskId) {
-        let store = Store::open_in_memory().expect("in-memory store");
-        let mut task = None;
-        for line in REAL_LISTING_EVENTS_1_TO_18.lines().take(n) {
-            let row: serde_json::Value = serde_json::from_str(line).expect("fixture line is JSON");
-            let seq = row["seq"].as_i64().expect("seq");
-            let ev: Event = serde_json::from_value(row["event"].clone()).expect("event");
-            assert_eq!(store.append(&ev).expect("append"), seq, "seq preserved");
-            task = Some(ev.task);
-        }
-        (store, task.expect("at least one event"))
-    }
-
-    #[test]
-    fn pending_commitment_over_the_real_listing_returns_the_candidate_committed_at_18() {
-        let (store, task) = store_with_real_listing(18);
-        let digest = crate::hook::args_digest(
-            ActionKind::RunApprovedTest,
-            "cargo test --offline -p parser",
-        );
-        let got = pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest);
-        let want = CandidateId(
-            Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
-                .expect("hex"),
-        );
-        assert_eq!(
-            got,
-            Some(want),
-            "after events 1-18 the pending commitment is the one committed at event 18"
-        );
-    }
-
-    #[test]
-    fn pending_commitment_is_none_before_any_commitment_and_after_a_dispatch() {
-        let digest = crate::hook::args_digest(
-            ActionKind::RunApprovedTest,
-            "cargo test --offline -p parser",
-        );
-        // Events 1–5: the two Reads; the run_approved_test candidate is not proposed yet.
-        let (store, task) = store_with_real_listing(5);
-        assert_eq!(
-            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
-            None,
-            "no commitment exists before event 6"
-        );
-        // Events 1–6: proposed but not committed — a `Proposed` is pending (01b's rule), so the
-        // lookup already names it; the commitment at 8 does not change which occurrence is pending.
-        let (store, task) = store_with_real_listing(6);
-        assert_eq!(
-            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
-            Some(CandidateId(
-                Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
-                    .expect("hex")
-            )),
-            "a Proposed is pending before it is committed"
-        );
-        // Events 1–10: the first occurrence was committed at 8 and dispatched at 9.
-        let (store, task) = store_with_real_listing(10);
-        assert_eq!(
-            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
-            None,
-            "the only commitment was dispatched at event 9"
-        );
-        // Events 1–12: the hook's spurious PostToolUse commitment (11–12) is for the same digest,
-        // so it is pending again — the second run must dispatch it, not mint a third candidate.
-        let (store, task) = store_with_real_listing(12);
-        assert_eq!(
-            pending_commitment(&store, &task, ActionKind::RunApprovedTest, digest),
-            Some(CandidateId(
-                Hash::from_hex("e07bad41b1e4c9dbfd308a93a53ebd1e41019f8651e715be100c8ea770ff91c3")
-                    .expect("hex")
-            )),
-            "the commitment at 12 is pending again after the dispatch at 9"
-        );
-        // A different digest never matches.
-        let other = crate::hook::args_digest(ActionKind::RunApprovedTest, "cargo test -p other");
-        let (store, task) = store_with_real_listing(18);
-        assert_eq!(
-            pending_commitment(&store, &task, ActionKind::RunApprovedTest, other),
-            None,
-            "a different args digest has no commitment"
         );
     }
 
