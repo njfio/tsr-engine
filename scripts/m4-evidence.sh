@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # scripts/m4-evidence.sh — regenerate the M4 (Calibrate) exit evidence, docs/m4-evidence.md.
 #
-# Run from the workspace root (Linux, GNU coreutils, python3, git):
+# Commit first, then run from the workspace root (Linux, GNU coreutils, python3, git):
 #
-#     bash scripts/m4-evidence.sh > out.md
+#     bash scripts/m4-evidence.sh > target/m4-evidence.md
+#
+# The output names the commit it ran at, and its `commit` line notes a tree that differs from that
+# commit (`git status --short` is printed too). Redirect into target/, which git ignores: a file the
+# redirect creates in the tree (`> out.md`) shows in `git status --short` and makes the tree differ.
 #
 # It builds the binary with rust 1.90 and works only in fresh directories under target/
 # (m4-evidence-work, -fresh, -cargo-home and -tmp; never in fixtures/ or the tree). For every claim
@@ -13,6 +17,10 @@
 # are summarised (line count, sha256 and the lines that carry the claim); every summary line the
 # script adds starts with `# `. Cargo's `Compiling`/`Checking`/`Finished` progress lines are
 # omitted; every other line is kept. A short summary, "At a glance", is printed first.
+#
+# "What the operator runs" writes the synthetic corpus into a store, .tsr/tsr.db under
+# target/m4-evidence-work/operator, through the test crates/tsr-learn/tests/m4_operator_store.rs
+# (TSR_M4_OPERATOR_STORE names the path), and runs the operator's commands from that directory.
 #
 # No network: every cargo step runs offline (CARGO_NET_OFFLINE=true) with a private CARGO_HOME
 # under target/, seeded from a local registry (./.cargo-home, else $CARGO_HOME, else ~/.cargo).
@@ -41,7 +49,7 @@ note() { printf 'm4-evidence: %s\n' "$*" >&2; }
 
 # --- preconditions -----------------------------------------------------------------------------
 [ -f Cargo.toml ] && [ -d fixtures/m4 ] && [ -f scripts/m4-evidence.sh ] ||
-    die "run from the workspace root: bash scripts/m4-evidence.sh > out.md"
+    die "run from the workspace root: bash scripts/m4-evidence.sh > target/m4-evidence.md"
 for tool in git python3 sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
 done
@@ -196,17 +204,36 @@ nlines() { wc -l <"$1" | tr -d ' '; }
 
 # xsum <expected exit> <mode> <cmd...> — run with stdout and stderr captured apart, print a summary
 # of stdout and all of stderr. Modes:
-#   head:<n>          the first n lines and the last line, plus the count of `uncalibrated` lines
+#   head:<n>          the first n lines and the last line, plus the counts of `uncalibrated` lines
+#                     and of lines printing `p=0.000000` or `p=1.000000`
 #   json              the top-level keys and the headline fields of `report --json`
 #   nobins            the report without its reliability `bin` lines and its floor sweep
 #   same:<file>:<what> whether stdout is byte-identical to <file>
+#   certain:<rows>    `apply` output: the rows printing p=0.000000 or p=1.000000 with their side and
+#                     label from <rows> (rows.jsonl), and the held-out log loss with and without
+#                     the held-out ones whose label is the opposite
+#   lineages:<rows>   `apply` output: the held-out lineages and each one's mean paired difference
 xsum() {
-    local exp=$1 mode=$2 c rc n
+    local exp=$1 mode=$2 c rc
     shift 2
     c=$(qcmd "$@")
     printf '$ %s\n' "$c"
     "$@" >"$OUT" 2>"$ERR" </dev/null
     rc=$?
+    summarise "$exp" "$mode" "$rc" "$c"
+}
+
+# xsums <expected exit> <mode> <shell text> — the same for a command that needs the shell (cd).
+xsums() {
+    local rc
+    printf '$ %s\n' "$3"
+    bash -c "$3" >"$OUT" 2>"$ERR" </dev/null
+    rc=$?
+    summarise "$1" "$2" "$rc" "$3"
+}
+
+summarise() { # summarise <expected exit> <mode> <rc> <command text>
+    local exp=$1 mode=$2 rc=$3 c=$4 n
     n=$(nlines "$OUT")
     case "$mode" in
         head:*)
@@ -221,6 +248,7 @@ xsum() {
                 tail -n 1 "$OUT"
             fi
             say "lines printing \`uncalibrated\`: $(grep -c ' uncalibrated ' "$OUT")"
+            say "lines printing \`p=0.000000\` or \`p=1.000000\`: $(grep -cE ' p=[01]\.000000 \(' "$OUT")"
             ;;
         json)
             say "stdout: $n lines, sha256 $(sha "$OUT")"
@@ -267,6 +295,81 @@ PY
                 say "stdout: $n lines, sha256 $(sha "$OUT"), NOT identical to the stdout of $what"
             fi
             ;;
+        certain:*)
+            say "stdout: $n lines, sha256 $(sha "$OUT")"
+            python3 -I - "$OUT" "${mode#certain:}" <<'PY'
+import json, math, sys
+CLIP = 1e-12  # report's log_loss_clip
+def ll(p, y):
+    c = min(max(p, CLIP), 1 - CLIP)
+    return -(y * math.log(c) + (1 - y) * math.log(1 - c))
+rows = {}
+for line in open(sys.argv[2]):
+    r = json.loads(line)
+    rows[r["id"]] = r
+certain, scored, n0, n1 = [], [], 0, 0
+for line in open(sys.argv[1]):
+    t = line.split()
+    if len(t) < 7 or t[0] != "row":
+        continue
+    r, p_tok = rows[t[1]], t[6]
+    if p_tok in ("p=0.000000", "p=1.000000"):
+        n0, n1 = n0 + (p_tok == "p=0.000000"), n1 + (p_tok == "p=1.000000")
+        lab = "none" if r["label"] is None else str(r["label"]).lower()
+        certain.append(f"row {t[1]} side={r['side']} family={r['family']} label={lab} {t[4]} {t[5]} {p_tok}")
+    if r["side"] == "held_out" and r["label"] is not None and r["generator_raw"] is not None and p_tok.startswith("p="):
+        scored.append((r["family"], float(p_tok[2:]), 1.0 if r["label"] else 0.0, r["generator_raw"]))
+print(f"# rows printing p=0.000000: {n0}; rows printing p=1.000000: {n1}; each, with its side and label from rows.jsonl:")
+for c in certain:
+    print("# " + c)
+wrong = lambda s: s[1] in (0.0, 1.0) and s[1] != s[2]
+print(f"# held_out rows among them that report scores (a resolved label and a generator p): "
+      f"{sum(1 for s in scored if s[1] in (0.0, 1.0))}; with the opposite label (a success at p=0.000000")
+print(f"# or a failure at p=1.000000): {sum(1 for s in scored if wrong(s))}, each adding -ln(1e-12) = "
+      f"{ll(0.0, 1.0):.6f} to its family's summed log loss")
+print("# log loss on the held_out rows report scores, recomputed by the script from the p apply prints (6")
+print("# decimals) and shown to 4 decimals; `without` drops the held_out rows with the opposite label:")
+mean = lambda v, i: sum(ll(s[i], s[2]) for s in v) / len(v)
+for name in ["all"] + sorted({s[0] for s in scored}):
+    sel = [s for s in scored if name == "all" or s[0] == name]
+    rest = [s for s in sel if not wrong(s)]
+    print(f"# {name} n={len(sel)} controller={mean(sel, 1):.4f} generator={mean(sel, 3):.4f}; "
+          f"without n={len(rest)} controller={mean(rest, 1):.4f} generator={mean(rest, 3):.4f}")
+PY
+            ;;
+        lineages:*)
+            say "stdout: $n lines, sha256 $(sha "$OUT")"
+            python3 -I - "$OUT" "${mode#lineages:}" <<'PY'
+import json, sys
+rows = {}
+for line in open(sys.argv[2]):
+    r = json.loads(line)
+    rows[r["id"]] = r
+tasks = {}
+for line in open(sys.argv[1]):
+    t = line.split()
+    if len(t) < 7 or t[0] != "row":
+        continue
+    r, p_tok = rows[t[1]], t[6]
+    if r["side"] != "held_out" or r["label"] is None or r["generator_raw"] is None or not p_tok.startswith("p="):
+        continue
+    c, g, y = float(p_tok[2:]), r["generator_raw"], 1.0 if r["label"] else 0.0
+    for key in ("all", r["family"]):
+        e = tasks.setdefault((key, r["task"]), [r["lineage"], 0.0, 0.0, 0])
+        e[1], e[2], e[3] = e[1] + (c - y) ** 2, e[2] + (g - y) ** 2, e[3] + 1
+held = sorted({r["lineage"] for r in rows.values() if r["side"] == "held_out"})
+print(f"# held_out lineages in rows.jsonl: {len(held)} ({', '.join(held)})")
+print("# per pair, each lineage's mean of the per-task paired difference (controller minus generator")
+print("# Brier, recomputed by the script from the p apply prints), 6 decimals; report's bootstrap")
+print("# resamples lineages, so with two of them its 90% interval runs from the smaller mean to the larger:")
+by = {}
+for (key, _), (lin, cb, gb, n) in tasks.items():
+    by.setdefault(key, {}).setdefault(lin, []).append((cb - gb) / n)
+for key in ["all"] + sorted(k for k in by if k != "all"):
+    parts = [f"{lin} tasks={len(v)} mean={sum(v) / len(v):.6f}" for lin, v in sorted(by[key].items())]
+    print(f"# {key}: " + "; ".join(parts))
+PY
+            ;;
     esac
     if [ -s "$ERR" ]; then
         say "stderr:"
@@ -291,6 +394,7 @@ body() {
     x 0 git rev-parse HEAD
     keep head.txt
     x 0 git status --short
+    keep status.txt
     say "every cargo step below runs offline (CARGO_NET_OFFLINE=true) with CARGO_HOME set to a"
     say "private copy of a local registry under ./target/m4-evidence-cargo-home, LC_ALL=C, and"
     say "TSR_DB, TSR_CODE_COMMIT, TSR_SESSION and TSR_REGEN_FIXTURES unset"
@@ -328,6 +432,7 @@ body() {
     block "dataset --by time --calibrate 0.2 --holdout 0.2 --seed 7"
     x 0 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out "$DS"
+    keep dataset.txt
     endblock
     block "fit"
     x 0 "$BIN" train fit "$DS" --out "$B" --support-floor 30
@@ -371,6 +476,12 @@ body() {
     block "report --seed 7 (--by repo, summarised)"
     xsum 0 nobins "$BIN" train report "$RB" --dataset "$RDS" --seed 7
     endblock
+    block "apply --side all (--by repo): the rows the calibrator prints at p=0.000000 or p=1.000000"
+    xsum 0 "certain:$RDS/rows.jsonl" "$BIN" train apply "$RB" --dataset "$RDS" --side all
+    endblock
+    block "apply --side held_out (--by repo): the held-out lineages behind the paired intervals"
+    xsum 0 "lineages:$RDS/rows.jsonl" "$BIN" train apply "$RB" --dataset "$RDS" --side held_out
+    endblock
 
     section "apply on the fit side"
     block "apply --side fit (summarised)"
@@ -390,6 +501,24 @@ body() {
     x 0 sed -i 's/"l2": 0.001,/"l2": 0.002,/' "$W/tamper-head/head.json"
     x 0 grep -n '"l2"' "$W/tamper-head/head.json"
     x 2 "$BIN" train verify "$W/tamper-head"
+    endblock
+    block "verify: manifest.toml seed edited (7 to 8), a field the bundle id covers"
+    x 0 cp -R "$B" "$W/tamper-seed"
+    x 0 sed -i 's/^seed = 7$/seed = 8/' "$W/tamper-seed/manifest.toml"
+    x 0 grep -n '^seed = ' "$W/tamper-seed/manifest.toml"
+    x 2 "$BIN" train verify "$W/tamper-seed"
+    endblock
+    block "verify: manifest.toml source_root edited (a root no content file records)"
+    x 0 cp -R "$B" "$W/tamper-source-root"
+    x 0 sed -i 's/^source_root = "3/source_root = "4/' "$W/tamper-source-root/manifest.toml"
+    x 0 grep -n '^source_root = ' "$W/tamper-source-root/manifest.toml"
+    x 2 "$BIN" train verify "$W/tamper-source-root"
+    endblock
+    block "verify: manifest.toml's content_digests entry for head.json edited"
+    x 0 cp -R "$B" "$W/tamper-digest"
+    x 0 sed -i 's/^"head.json" = "1/"head.json" = "2/' "$W/tamper-digest/manifest.toml"
+    x 0 grep -n '^"head.json" = ' "$W/tamper-digest/manifest.toml"
+    x 2 "$BIN" train verify "$W/tamper-digest"
     endblock
     block "verify: code_commit edited (recorded provenance, not verified)"
     x 0 cp -R "$B" "$W/edit-code-commit"
@@ -460,6 +589,12 @@ body() {
     block "a share that leaves a side empty (--holdout 0)"
     x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --holdout 0 --out "$W/in-empty-side"
+    endblock
+    block "an --out that is not empty (a copy of the --by time dataset)"
+    x 0 cp -R "$DS" "$W/in-non-empty"
+    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+        --labels "$FX/labels.jsonl" --by repo --seed 3 --out "$W/in-non-empty"
+    x 0 diff -r "$DS" "$W/in-non-empty"
     endblock
     block "a --store that is not a sqlite database"
     xs 0 "printf 'not a database\\n' > $W/not-sqlite.db"
@@ -645,6 +780,65 @@ PY
     fi
     endblock
 
+    note "what the operator runs"
+    section "What the operator runs"
+    local OP=$W/operator
+    local OPBIN=../../../${BIN#./}
+    block "the operator's store, .tsr/tsr.db, written by the synthetic generator"
+    x 0 mkdir -p "$OP/.tsr"
+    local oc="env CARGO_TARGET_DIR=$FRESH TMPDIR=\"\$PWD/${TMPD#./}\" TSR_M4_OPERATOR_STORE=\"\$PWD/${OP#./}/.tsr/tsr.db\" cargo test -p tsr-learn --test m4_operator_store"
+    printf '$ %s\n' "$oc"
+    bash -c "$oc" >"$OUT" 2>&1 </dev/null
+    local orc=$?
+    say "Compiling, Finished and Running progress lines omitted and the test's timing written as <n>;"
+    say "every other line follows"
+    grep -vE '^[[:space:]]*(Compiling|Checking|Finished|Running|Blocking waiting for file lock) ' "$OUT" |
+        sed -E 's/finished in [0-9.]+s/finished in <n>s/' >"$OUT.kept"
+    show "$OUT.kept"
+    check 0 "$orc" "$oc"
+    x 0 cp "$FX/tasks.jsonl" "$FX/labels.jsonl" "$OP/.tsr/"
+    x 0 ls -A "$OP/.tsr"
+    x 0 python3 -I -c 'import sqlite3,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True); print("events:", c.execute("select count(*) from events").fetchone()[0])' \
+        "$OP/.tsr/tsr.db"
+    x 0 wc -l "$FX/events.jsonl"
+    endblock
+    block "dataset from .tsr/tsr.db"
+    xs 0 "cd $OP && $OPBIN train dataset --store .tsr/tsr.db --tasks .tsr/tasks.jsonl --labels .tsr/labels.jsonl --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out .tsr/m4-data"
+    keep op-dataset.txt
+    local k
+    for k in rows data_root training_root split_digest; do
+        if [ "$(grep "^$k=" "$W/.out/dataset.txt")" = "$(grep "^$k=" "$W/.out/op-dataset.txt")" ]; then
+            say "$k: the same as the --events dataset's (\"dataset --by time --calibrate 0.2 --holdout 0.2 --seed 7\")"
+        else
+            say "$k: DIFFERENT from the --events dataset's (\"dataset --by time --calibrate 0.2 --holdout 0.2 --seed 7\")"
+        fi
+    done
+    endblock
+    block "fit into a new directory"
+    xs 1 "cd $OP && test -e models"
+    xs 0 "cd $OP && $OPBIN train fit .tsr/m4-data --out models/m4"
+    x 0 grep -H '^source_root = ' "$B/manifest.toml" "$OP/models/m4/manifest.toml"
+    endblock
+    block "verify --rebuild"
+    xs 0 "cd $OP && $OPBIN train verify models/m4 --rebuild .tsr/m4-data"
+    endblock
+    block "report --seed 7 (summarised)"
+    xsums 0 nobins "cd $OP && $OPBIN train report models/m4 --dataset .tsr/m4-data --seed 7"
+    if cmp -s <(grep -vE '^(bundle|calibrator) ' "$OUT") <(grep -vE '^(bundle|calibrator) ' "$W/.out/report.txt"); then
+        say "stdout is identical to that of \"report --seed 7 (the full human report)\" apart from its"
+        say "\`bundle\` and \`calibrator\` lines"
+    else
+        say "stdout differs from that of \"report --seed 7 (the full human report)\" beyond its"
+        say "\`bundle\` and \`calibrator\` lines"
+    fi
+    endblock
+    block "apply --side held_out (summarised)"
+    xsums 0 head:3 "cd $OP && $OPBIN train apply models/m4 --dataset .tsr/m4-data --side held_out"
+    endblock
+    block "the operator's directory afterwards"
+    xs 0 "cd $OP && find . -mindepth 1 -maxdepth 2 | sort"
+    endblock
+
     section "Diff base"
     block "The base, and the diff against it"
     if [ -n "$BASE" ]; then
@@ -673,7 +867,12 @@ cargo_line() { # cargo_line <rc> <kept lines>
 printf '# M4 (Calibrate) — exit evidence\n\n'
 section "At a glance"
 printf '### The run\n\n```text\n'
-printf 'commit   %s\n' "$(cat "$W/.out/head.txt" 2>/dev/null)"
+if [ -s "$W/.out/status.txt" ]; then
+    printf 'commit   %s (the tree differs from it: %s lines of git status --short, under "Toolchain, commit and tree state")\n' \
+        "$(cat "$W/.out/head.txt" 2>/dev/null)" "$(nlines "$W/.out/status.txt")"
+else
+    printf 'commit   %s\n' "$(cat "$W/.out/head.txt" 2>/dev/null)"
+fi
 printf 'rustc    %s\n' "$(cat "$W/.out/rustc.txt" 2>/dev/null)"
 printf 'build    %s\n' "$(cargo_line "$BUILD_RC" "$BUILD_KEPT")"
 printf 'fmt      %s\n' "$([ -n "$FMT_RC" ] && echo "exit $FMT_RC" || echo 'not run')"
