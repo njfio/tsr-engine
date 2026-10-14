@@ -7,9 +7,10 @@
 //! * `tsr forecast --kind <k> --args <text> --p <p>` prints the candidate id alone on stdout and
 //!   records the candidate as proposed with that forecast at the current state version;
 //! * `tsr exec --candidate <64-hex> -- <argv…>` binds the run to that candidate — it must be a
-//!   candidate of the session's task that has a forecast and is not yet dispatched; exec records
-//!   `Dispatched` and `Executed` for it and runs argv as today. An unknown, unforecast or
-//!   already-dispatched id exits 2 naming the reason and runs nothing;
+//!   candidate of the session's task that has a forecast and has not been dispatched since that
+//!   newest forecast (one forecast authorizes one run); exec records `Dispatched` and `Executed` for
+//!   it and runs argv as today. An unknown, unforecast, not-committed-after-its-forecast or
+//!   already-dispatched-since-that-forecast id exits 2 naming the reason and runs nothing;
 //! * the hook, at PreToolUse for a Bash command, tokenizes the command with the grammar-only parser
 //!   and, if it finds a `tsr exec` invocation carrying `--candidate <64-hex>`, commits that candidate
 //!   and records no new proposal. No pattern, no sidecar, no matcher;
@@ -870,6 +871,27 @@ fn spellings_sent_as_shell_text_are_recognised() {
             1,
             "{name}: the candidate is committed"
         );
+        // The commit must be the *named* candidate, not the ordinary non-gated fallback: a missed
+        // `--candidate` still yields exactly one commit (of a different candidate), so counting
+        // commits alone cannot tell recognition from a miss (r5c review defect 2). The committed
+        // candidate's id must equal the forecast's id.
+        let committed_ids: Vec<&str> = ks
+            .iter()
+            .filter(|k| k["kind"] == "committed")
+            .filter_map(|k| k["candidate"].as_str())
+            .collect();
+        assert_eq!(
+            committed_ids,
+            vec![id.as_str()],
+            "{name}: the committed candidate is the named one (forecast {id})"
+        );
+        // And the hook must not have refused the named candidate: a refusal line means the commit
+        // above came from the ordinary fallback, not from recognising `--candidate`.
+        assert!(
+            !String::from_utf8_lossy(&out.stderr).contains("not committing"),
+            "{name}: the hook did not refuse the named candidate: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }
 
@@ -925,5 +947,277 @@ fn no_random_command_panics_the_hook() {
     assert!(
         elapsed < std::time::Duration::from_secs(60),
         "the fuzz loop finishes in under 60 s (took {elapsed:?})"
+    );
+}
+
+/// Defect 1 (race): one forecast authorizes one run *across processes*. Eight `tsr exec --candidate
+/// <id>` processes are started at once after a single forecast; exactly one must dispatch and run the
+/// container, the other seven must exit 2 having run nothing. Repeated 20 times, because the defect
+/// was a read followed by a later append and only showed up in 3 of 18 trials.
+///
+/// The check and the `Dispatched` append are one critical section under an exclusive advisory lock on
+/// a lock file beside the store, so the outcome is deterministic, not merely likely.
+#[test]
+fn eight_concurrent_execs_after_one_forecast_dispatch_exactly_one() {
+    const TRIALS: usize = 20;
+    const CONCURRENCY: usize = 8;
+    let root = scratch("race");
+    for trial in 0..TRIALS {
+        let dir = root.join(format!("trial-{trial}"));
+        std::fs::create_dir_all(&dir).expect("trial dir");
+        let session = format!("m0-candidate-race-{trial}");
+        let bin = fake_docker_counting(&dir);
+        let db = dir.join(".tsr/tsr.db");
+        let env = Env {
+            cwd: &dir,
+            db: &db,
+            session: &session,
+            bin: &bin,
+        };
+        let start = serde_json::json!({
+            "session_id": session,
+            "hook_event_name": "SessionStart",
+            "cwd": dir.to_str().expect("utf8 cwd"),
+        })
+        .to_string();
+        assert!(env.hook("SessionStart", &start).status.success());
+
+        // One forecast. The hook commits the named candidate (as a session would), then the eight
+        // `tsr exec` processes race for the single dispatch.
+        let id = forecast(&env, "cargo test", "0.9");
+        let command = format!("tsr exec --candidate {id} -- cargo test");
+        let input = serde_json::json!({ "command": command });
+        let out = env.hook("PreToolUse", &pretooluse(&session, "Bash", input));
+        assert!(
+            out.status.success(),
+            "trial {trial}: PreToolUse exits 0: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // Start all eight at once, then collect. A plain spawn loop staggers the children by the
+        // cost of `fork`/`exec` (~5ms each), which is longer than the check+append critical section
+        // (~1ms), so they never actually overlap and the test would pass even with the lock
+        // removed. Gate them instead: each child signals readiness, then blocks until the parent
+        // writes `go`, so all eight enter `tsr exec` within microseconds of each other and the lock
+        // is the only thing that can make exactly one win.
+        let gate = dir.join("gate");
+        std::fs::create_dir_all(&gate).expect("gate dir");
+        let go = gate.join("go");
+        let wrapper = gate.join("gated-tsr.sh");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\n\
+                 : > \"{gate}/ready.$$\"\n\
+                 while [ ! -e \"{go}\" ]; do sleep 0.001; done\n\
+                 exec \"{tsr}\" \"$@\"\n",
+                gate = gate.display(),
+                go = go.display(),
+                tsr = tsr_bin().display(),
+            ),
+        )
+        .expect("write gate wrapper");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod gate wrapper");
+        }
+        let mut children: Vec<std::process::Child> = Vec::with_capacity(CONCURRENCY);
+        for _ in 0..CONCURRENCY {
+            let mut cmd = env.command(wrapper.to_str().expect("utf8 path"));
+            cmd.args(["exec", "--candidate", &id, "--", "cargo", "test"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped());
+            children.push(cmd.spawn().expect("spawn tsr exec"));
+        }
+        // Wait until every child is parked at the gate, then release them together.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let ready = std::fs::read_dir(&gate)
+                .expect("read gate")
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with("ready."))
+                .count();
+            if ready >= CONCURRENCY {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "trial {trial}: only {ready} of {CONCURRENCY} children reached the gate"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        std::fs::write(&go, b"go").expect("release the gate");
+        let mut dispatched = 0usize;
+        let mut refused = 0usize;
+        for child in children {
+            let out = child.wait_with_output().expect("tsr exec output");
+            match out.status.code() {
+                Some(0) => dispatched += 1,
+                Some(2) => {
+                    refused += 1;
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    assert!(
+                        stderr.contains("already dispatched"),
+                        "trial {trial}: a refused run names the reason: {stderr:?}"
+                    );
+                }
+                other => panic!(
+                    "trial {trial}: unexpected exit {other:?}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ),
+            }
+        }
+        assert_eq!(
+            dispatched, 1,
+            "trial {trial}: exactly one of {CONCURRENCY} concurrent runs dispatches (got {dispatched})"
+        );
+        assert_eq!(
+            refused,
+            CONCURRENCY - 1,
+            "trial {trial}: the other {} runs exit 2 (got {refused})",
+            CONCURRENCY - 1
+        );
+        assert_eq!(
+            container_runs(&dir),
+            1,
+            "trial {trial}: exactly one container run"
+        );
+
+        let trace = env.export(&session);
+        let ks = kinds(&trace);
+        assert_eq!(
+            count(&ks, "dispatched"),
+            1,
+            "trial {trial}: exactly one dispatch in the log"
+        );
+        assert_eq!(
+            count(&ks, "executed"),
+            1,
+            "trial {trial}: exactly one execution in the log"
+        );
+    }
+}
+
+/// Defect 3: the "committed after its forecast" half of exec's rule. A forecast that follows the last
+/// commit re-arms the candidate id, but the commitment is now *older* than the forecast, so `tsr exec
+/// --candidate <id>` called directly must refuse with exit 2 and run nothing.
+#[test]
+fn exec_refuses_a_candidate_whose_forecast_follows_its_last_commit() {
+    let dir = scratch("committed-after-forecast");
+    let session = "m0-candidate-committed-after-forecast";
+    let bin = fake_docker_counting(&dir);
+    let db = dir.join(".tsr/tsr.db");
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    assert!(env.hook("SessionStart", &start).status.success());
+
+    // Forecast, then the hook commits the named candidate.
+    let id = forecast(&env, "cargo test", "0.9");
+    let command = format!("tsr exec --candidate {id} -- cargo test");
+    let input = serde_json::json!({ "command": command });
+    let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input));
+    assert!(
+        out.status.success(),
+        "PreToolUse exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // A second forecast for the same command, after the commit. The candidate id is unchanged, but
+    // its newest forecast now comes after its newest commit.
+    let id2 = forecast(&env, "cargo test", "0.9");
+    assert_eq!(id, id2, "the same command forecasts the same candidate id");
+
+    // Called directly (no hook): the commitment is older than the newest forecast, so exec refuses.
+    let out = env.tsr(&["exec", "--candidate", &id, "--", "cargo", "test"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a candidate whose forecast follows its last commit exits 2: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("has not been committed after its forecast"),
+        "the refusal names the reason: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        container_runs(&dir),
+        0,
+        "nothing runs when the candidate is refused"
+    );
+
+    let trace = env.export(session);
+    let ks = kinds(&trace);
+    assert_eq!(count(&ks, "dispatched"), 0, "nothing is dispatched");
+    assert_eq!(count(&ks, "executed"), 0, "nothing is executed");
+}
+
+/// Defect 5: a malformed `--candidate xyz` is a *named* run the hook cannot vouch for. It must be
+/// recorded as an ordinary non-gated call with one stderr line — never as a gated test run with no
+/// forecast.
+#[test]
+fn malformed_candidate_is_recorded_as_an_ordinary_call_not_a_gated_test_run() {
+    let dir = scratch("malformed-candidate");
+    let session = "m0-candidate-malformed";
+    let bin = fake_docker_counting(&dir);
+    let db = dir.join(".tsr/tsr.db");
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    assert!(env.hook("SessionStart", &start).status.success());
+
+    // No forecast at all: the malformed value must not become a gated test run.
+    let command = "tsr exec --candidate xyz -- cargo test";
+    let input = serde_json::json!({ "command": command });
+    let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input));
+    assert!(
+        out.status.success(),
+        "PreToolUse exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not a 64-hex candidate id"),
+        "the hook prints one line saying the --candidate value is malformed: {stderr:?}"
+    );
+
+    let trace = env.export(session);
+    let ks = kinds(&trace);
+    assert_eq!(
+        count_proposed_test(&ks),
+        0,
+        "a malformed --candidate mints no run_approved_test candidate"
+    );
+    assert_eq!(
+        count(&ks, "dispatched"),
+        0,
+        "a malformed --candidate is never dispatched as a test run"
+    );
+    // It is recorded as an ordinary non-gated call: a `Generate` turn, proposed and committed.
+    assert_eq!(
+        count(&ks, "committed"),
+        1,
+        "the call is still recorded (as an ordinary non-gated call)"
     );
 }

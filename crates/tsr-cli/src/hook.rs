@@ -562,6 +562,45 @@ pub fn tsr_exec_candidate(cmd: &str) -> Option<CandidateId> {
     None
 }
 
+/// Whether `cmd` is a `tsr exec` invocation that names a `--candidate` whose value is **not** a
+/// 64-hex candidate id (r5c review defect 5).
+///
+/// A malformed `--candidate xyz` is a *named* run the hook cannot vouch for: it must be recorded as
+/// an ordinary non-gated call, never as a gated test run. [`tsr_exec_candidate`] returns `None` for
+/// both "no `--candidate`" and "malformed `--candidate`", so the caller cannot tell them apart from
+/// its result alone; this predicate distinguishes the malformed case. A `tsr exec` with no
+/// `--candidate` at all is not malformed — it is the ordinary `tsr exec -- …` wrapper, which records
+/// its own dispatch.
+pub fn tsr_exec_candidate_is_malformed(cmd: &str) -> bool {
+    let parsed = parse_command(cmd);
+    for c in &parsed.commands {
+        if !words_are_tsr_subcommand(&c.words, "exec") {
+            continue;
+        }
+        let rest = command_words_after_prefix(&c.words);
+        let args = &rest[2..];
+        let mut i = 0;
+        while i < args.len() {
+            if args[i].text == "--" {
+                break;
+            }
+            if args[i].text == "--candidate" {
+                // A `--candidate` with no value, or a value that is not 64 hex, is malformed.
+                return args
+                    .get(i + 1)
+                    .and_then(|w| Hash::from_hex(&w.text).ok())
+                    .is_none();
+            }
+            if let Some(value) = args[i].text.strip_prefix("--candidate=") {
+                return Hash::from_hex(value).is_err();
+            }
+            i += 1;
+        }
+        return false;
+    }
+    false
+}
+
 /// The argv words after `--` of a `tsr exec -- …` invocation, or `None` when `cmd` is not one.
 ///
 /// Used to give the hook's candidate for the wrapper call the same identity as the forecast's for the
@@ -738,11 +777,29 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
     // (c) A `tsr exec --candidate <id> -- …` call names its candidate: the hook commits exactly that
     // id and records no new proposal. Nothing is matched — no pattern, no sidecar, no matcher.
     //
-    // The named id is committed only if it is a candidate of *this* task that has a forecast and is
-    // neither committed-and-dispatched nor already dispatched (defect 1). Otherwise the call is
-    // recorded as an ordinary non-gated call and one line says why: committing an id the hook cannot
-    // vouch for would let an already-dispatched candidate run again.
-    if let Some(cid) = payload
+    // The named id is committed only if it is a candidate of *this* task that has a forecast and has
+    // not been dispatched since that newest forecast (one forecast authorizes one run). Otherwise the
+    // call is recorded as an ordinary non-gated call and one line says why: committing an id the hook
+    // cannot vouch for would let an already-dispatched candidate run again.
+    //
+    // A `--candidate` whose value is not a 64-hex id is a *malformed* named run (defect 5): it is
+    // recorded as an ordinary non-gated call with one stderr line, never as a gated test run. Without
+    // this branch `tsr_exec_candidate` returns `None` for the malformed value, the block below is
+    // skipped, and the call falls through to the `RunApprovedTest` path — committing a test run with
+    // no forecast.
+    if payload
+        .bash_command()
+        .as_deref()
+        .is_some_and(tsr_exec_candidate_is_malformed)
+    {
+        eprintln!(
+            "tsr: hook: --candidate value is not a 64-hex candidate id; recording the Bash call as \
+             an ordinary non-gated call"
+        );
+        kind = ActionKind::Generate;
+        source = source_for(kind);
+        args = payload.bash_command().unwrap_or_default();
+    } else if let Some(cid) = payload
         .bash_command()
         .as_deref()
         .and_then(tsr_exec_candidate)
@@ -1866,8 +1923,8 @@ mod tests {
     }
 
     /// Defect 1 (hook side): the hook commits a named candidate only if it belongs to this task, has
-    /// a forecast, and is not already dispatched. Otherwise it records the Bash call as an ordinary
-    /// non-gated call.
+    /// a forecast, and has not been dispatched since that newest forecast. Otherwise it records the
+    /// Bash call as an ordinary non-gated call.
     #[test]
     fn hook_commits_a_named_candidate_only_when_it_is_forecast_and_not_dispatched() {
         let (store, _dir) = fresh_store("named-gate");

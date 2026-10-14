@@ -417,6 +417,101 @@ pub fn store_dir_is_workspace(workspace: &Path) -> bool {
     db.parent().map(|d| d == ws).unwrap_or(false)
 }
 
+/// The path of the advisory lock file that serialises the "check the named candidate, then append
+/// `Dispatched`" critical section across processes (r5c review defect 1).
+///
+/// It sits *beside the store* — the store's parent directory, named after the store file — so two
+/// `tsr exec` processes that share a store share a lock, and two that do not cannot contend. The
+/// path is derived the same way [`store_dir_is_workspace`] derives the store path, so a relative
+/// `TSR_DB` resolves against the workspace.
+pub fn exec_lock_path(workspace: &Path) -> PathBuf {
+    let ws = crate::store_path::resolve_workspace(workspace);
+    let db = match std::env::var_os("TSR_DB") {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => ws.join(crate::store_path::DEFAULT_DB),
+    };
+    let db = crate::store_path::resolve_store_path(&db, &ws);
+    let name = db
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tsr.db".to_string());
+    db.with_file_name(format!("{name}.exec.lock"))
+}
+
+/// How long [`ExecLock::acquire`] waits for a holder before giving up, and how old a lock file must
+/// be before it is treated as abandoned by a crashed holder.
+const EXEC_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// An exclusive cross-process lock on [`exec_lock_path`], held for the lifetime of the value.
+///
+/// The lock is the lock file itself: `OpenOptions::create_new` is an atomic exclusive create, so
+/// exactly one process can hold it and every other process sees `AlreadyExists` and waits. This is
+/// the classic lockfile, and it is used instead of `File::lock` because the workspace declares
+/// `rust-version = "1.85"` and `File::lock` is stable only since 1.89 (clippy's
+/// `incompatible_msrv`), and because `unsafe_code = "deny"` rules out a raw `flock(2)`.
+///
+/// The critical section is short (read the log, append `Dispatched`), so a waiter polls. A holder
+/// that dies without removing the file would wedge the next run, so a lock file older than
+/// [`EXEC_LOCK_TIMEOUT`] is treated as abandoned and removed. The lock is released (the file
+/// removed) before the container runs, so a long test does not block the next dispatch.
+struct ExecLock {
+    path: PathBuf,
+}
+
+impl ExecLock {
+    /// Take the exclusive lock, creating the lock file (and its directory) if needed.
+    fn acquire(workspace: &Path) -> Result<Self, ExecRefusal> {
+        let path = exec_lock_path(workspace);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let deadline = std::time::Instant::now() + EXEC_LOCK_TIMEOUT;
+        loop {
+            match std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(Self { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // A holder that died without removing the file must not wedge us forever.
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        if let Ok(age) = meta.modified().and_then(|m| {
+                            m.elapsed()
+                                .map_err(|e| std::io::Error::other(e.to_string()))
+                        }) {
+                            if age > EXEC_LOCK_TIMEOUT {
+                                let _ = std::fs::remove_file(&path);
+                                continue;
+                            }
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err(ExecRefusal::UnknownCandidate(format!(
+                            "timed out waiting for the exec lock {}",
+                            path.display()
+                        )));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => {
+                    return Err(ExecRefusal::UnknownCandidate(format!(
+                        "cannot create the exec lock {}: {e}",
+                        path.display()
+                    )))
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ExecLock {
+    fn drop(&mut self) {
+        // Best-effort: removing the file releases the lock.
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// [`run`] with the container invocation injected. The harness drives this with a [`FakeRunner`] to
 /// exercise the whole dispatch lifecycle without a container runtime; production calls it with a
 /// [`RealRunner`].
@@ -424,6 +519,12 @@ pub fn store_dir_is_workspace(workspace: &Path) -> bool {
 /// Refusal semantics are unchanged: if `runner.available()` refuses, **nothing is recorded** and the
 /// refusal is returned. Otherwise it records `Dispatched { in_sandbox: true }` then `Executed` (or
 /// `Unresolved` if the runner could not start the container).
+///
+/// **One forecast authorizes one run, across processes.** The named-candidate check and the
+/// `Dispatched` append are one critical section under an exclusive advisory lock on
+/// [`exec_lock_path`] (r5c review defect 1): N concurrent `tsr exec --candidate <id>` after one
+/// forecast dispatch exactly one, and the rest refuse with exit 2 having run nothing. The lock is
+/// released before the container runs, so a long test does not block the next dispatch.
 pub fn run_with(
     store: &Store,
     task: &TaskId,
@@ -435,11 +536,15 @@ pub fn run_with(
     // Refuse before recording anything.
     runner.available()?;
 
+    // The check and the `Dispatched` append are one critical section across processes (defect 1).
+    // The lock is held only until `Dispatched` is appended, never for the container run.
+    let lock = ExecLock::acquire(workspace)?;
+
     // Record the dispatch only once the runner is known to be able to run.
     let cid = match candidate {
         // (b) The agent named the candidate: it must be a candidate of this task that has a forecast
-        // and is not yet dispatched. An unknown, unforecast or already-dispatched id is refused with
-        // exit 2 and nothing is recorded or run.
+        // and is not yet dispatched since that newest forecast. An unknown, unforecast or
+        // already-dispatched id is refused with exit 2 and nothing is recorded or run.
         Some(cid) => {
             check_named_candidate(store, task, cid)?;
             cid
@@ -493,6 +598,9 @@ pub fn run_with(
         },
     )?;
     let _ = dispatched;
+    // The critical section ends here: `Dispatched` is on disk, so the next process sees it. The
+    // container run below is *not* under the lock (defect 1).
+    drop(lock);
 
     let started = std::time::Instant::now();
     let output = runner.run(workspace, argv);
@@ -555,7 +663,8 @@ pub enum ExecRefusal {
     #[error("TSR_DB must not be the workspace itself: refusing to mount the workspace read-only")]
     StoreIsWorkspace,
     /// `--candidate <id>` named a candidate that is not a candidate of this task, has no forecast,
-    /// or is already dispatched. Refused with exit 2, nothing recorded and nothing run.
+    /// has not been committed after its newest forecast, or is already dispatched since that newest
+    /// forecast. Refused with exit 2, nothing recorded and nothing run.
     #[error("{0}")]
     UnknownCandidate(String),
 }
@@ -653,7 +762,12 @@ fn append(
     let parents = last_parent(store, task);
     let ev = Event::new(*task, parents, source, kind, crate::hook::now_rfc3339());
     let id = ev.id;
-    store.append(&ev).map_err(|_| ExecRefusal::NoRuntime)?;
+    // A store failure is a log error, not a missing runtime: reporting it as `NoRuntime` (exit 3)
+    // would tell the caller to install Docker when the log could not be written. Exit 2, like the
+    // read-side failure in `check_named_candidate`.
+    store
+        .append(&ev)
+        .map_err(|e| ExecRefusal::UnknownCandidate(format!("cannot write the log: {e}")))?;
     Ok(id)
 }
 
