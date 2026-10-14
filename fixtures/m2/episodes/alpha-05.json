@@ -238,7 +238,7 @@
             "task_close_days": 7
           },
           "source": "generator",
-          "raw": 0.9193598457953772,
+          "raw": 0.9193598457953773,
           "calibrated": null,
           "support": {
             "episodes": 6
@@ -323,7 +323,7 @@
           "selected": {
             "value": "07ce96488dadecbeaa0ce673e644022455e2f644220786df22345c09da6a7bb8",
             "utility": {
-              "p_success": 0.9193598457953772,
+              "p_success": 0.9193598457953773,
               "value": 1.0,
               "cost": 0.2,
               "ev": 0.7193598457953774

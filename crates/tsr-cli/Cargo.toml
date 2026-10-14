@@ -20,6 +20,7 @@ path = "src/lib.rs"
 tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
 tsr-policy = { path = "../tsr-policy" }
+tsr-learn = { path = "../tsr-learn" }
 tsr-ledger = { path = "../tsr-ledger" }
 tsr-forecast = { path = "../tsr-forecast" }
 clap.workspace = true
@@ -29,6 +30,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+toml = { workspace = true }
 tsr-forecast = { path = "../tsr-forecast" }
 
 [lints]

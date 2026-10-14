@@ -18,6 +18,10 @@ generative model only proposing.
 - Label returns after the fact; render an episode or a family's reliability bins (how often forecasts
   of a given probability came true; nothing is calibrated) (`tsr review`,
   `tsr reflect`, `tsr note`, `tsr task reconcile`).
+- Build a dataset from the log, fit a calibration head with an isotonic calibrator, verify a bundle
+  and score the controller against the generator on held-out rows (`tsr train dataset`, `fit`,
+  `verify`, `report`, `apply`). So far this has run on a synthetic corpus only; the evidence and its
+  known limitations are in [`docs/m4-evidence.md`](docs/m4-evidence.md).
 
 Read [Known limitations](#known-limitations-on-main) before relying on any of it.
 
@@ -45,7 +49,7 @@ More: [`AGENTS.md`](AGENTS.md) (rules for contributors and agents), [`specs/lane
 | M1 Gate | on main | `crates/tsr-policy`, `tsr policy check`; the hook does not call the gate |
 | M2 Reflect | on main | `tsr review`, `tsr reflect`, `tsr note`, `tsr task reconcile`; `crates/tsr-ledger`, `crates/tsr-forecast`; 30 synthetic episodes |
 | M3 Corpus | not on main (in development) | `tsr corpus` is a placeholder |
-| M4 Calibrate | not on main (in development) | `tsr data`, `tsr train`, `tsr eval` are placeholders |
+| M4 Calibrate | on main; synthetic corpus only | `tsr train dataset/fit/verify/report/apply`, `crates/tsr-learn`, `fixtures/m4`, `scripts/m4-evidence.sh`; `tsr data` and `tsr eval` are placeholders |
 | M5 Decide | not started | `tsr model` is a placeholder |
 | M6 Extend | not started | — |
 
@@ -288,10 +292,12 @@ crates/tsr-cli        the `tsr` binary (operator CLI and hook) and reconstruct
 crates/tsr-policy     RATCHET profiles, the gate, approvals, budgets (M1)
 crates/tsr-ledger     the Culmination ledger as folds over the log (M2)
 crates/tsr-forecast   named events, forecast resolution, scoring (M2)
+crates/tsr-learn      datasets, the calibration head and calibrator, bundles, the report (M4)
 profiles/             the default RATCHET profile
 fixtures/m0           recorded M0 sessions (frozen)
 fixtures/m2           the thirty synthetic episodes
-scripts/              m2-evidence.sh and the store builders it uses
+fixtures/m4           the synthetic M4 corpus
+scripts/              m2-evidence.sh and the store builders it uses; m4-evidence.sh
 specs/lanes/          lane briefs and their independent reviews
 docs/                 the PRD, the profile format, evidence pages
 ```

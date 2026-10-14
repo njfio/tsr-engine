@@ -548,8 +548,10 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "toml",
  "tsr-domain",
  "tsr-forecast",
+ "tsr-learn",
  "tsr-ledger",
  "tsr-policy",
  "tsr-store",
@@ -573,6 +575,19 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tsr-domain",
+]
+
+[[package]]
+name = "tsr-learn"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+ "tsr-domain",
+ "tsr-store",
 ]
 
 [[package]]
