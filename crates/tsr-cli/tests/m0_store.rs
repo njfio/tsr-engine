@@ -29,19 +29,23 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// A scratch directory with no `.tsr/tsr.db` in any ancestor, so the store-discovery rule's
-/// "create one in place" branch can be exercised. `/tmp` is the temp dir the brief allows for
-/// scratch; it is not the build cache, so pruning it between runs is harmless.
+/// A scratch directory with no `.git` in any ancestor, so the store-discovery rule's "create one in
+/// place" branch can be exercised: outside a work tree there is no walk, so the store is created in
+/// the current directory. `/tmp` is the temp dir the brief allows for scratch; it is not the build
+/// cache, so pruning it between runs is harmless.
+///
+/// The guard is on `.git`, not on an ancestor store (r6b): an unrelated ancestor store above the
+/// work tree is never used, so a stray `/tmp/.tsr/tsr.db` no longer makes this test host-dependent.
 fn scratch_isolated(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("m0-store").join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    // Guard the test's premise: no ancestor may already hold a store.
+    // Guard the test's premise: no ancestor may be a work tree, so the walk is a single step.
     let mut d: Option<&Path> = Some(&dir);
     while let Some(cur) = d {
         assert!(
-            !cur.join(".tsr/tsr.db").is_file(),
-            "scratch_isolated needs no ancestor store, but {} has one",
+            !cur.join(".git").exists(),
+            "scratch_isolated needs no ancestor work tree, but {} has one",
             cur.display()
         );
         d = cur.parent();
