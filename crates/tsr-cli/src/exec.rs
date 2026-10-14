@@ -392,6 +392,11 @@ pub fn run(
     if store_dir_is_workspace(workspace) {
         return Err(ExecRefusal::StoreIsWorkspace);
     }
+    // A named candidate is checked *before* the runtime probe (defect 6): a bad id is a usage error
+    // (exit 2) whether or not a container runtime is reachable, and nothing is recorded.
+    if let Some(cid) = candidate {
+        check_named_candidate(store, task, cid)?;
+    }
     // The refusal is decided here, before `run_with` records anything: no runtime → exit 3 and an
     // untouched log.
     let runner = RealRunner::detect()?;
@@ -598,10 +603,9 @@ fn check_named_candidate(
         match &e.kind {
             EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
             EventKind::Forecast { candidate, .. } if *candidate == cid => forecast = true,
-            EventKind::Committed { candidate, .. } if *candidate == cid => {
-                committed = true;
-                dispatched = false;
-            }
+            EventKind::Committed { candidate, .. } if *candidate == cid => committed = true,
+            // Any `Dispatched` for this id blocks it, whatever came after it (defect 1): a
+            // `Committed` does not clear a dispatch, so an already-run candidate cannot run again.
             EventKind::Dispatched { candidate, .. } if *candidate == cid => dispatched = true,
             _ => {}
         }
@@ -974,8 +978,15 @@ mod tests {
         let task = TaskId(Hash::of(&[b"refusing-runner"]));
         let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
 
-        let err = run_with(&store, &task, Path::new("/work"), None, &argv, &RefusingRunner)
-            .expect_err("a refusing runner refuses");
+        let err = run_with(
+            &store,
+            &task,
+            Path::new("/work"),
+            None,
+            &argv,
+            &RefusingRunner,
+        )
+        .expect_err("a refusing runner refuses");
         assert!(matches!(err, ExecRefusal::NoRuntime));
         assert_eq!(
             store.by_task(&task).expect("by_task").len(),

@@ -231,9 +231,8 @@ fn record_ordinary_session(dir: &Path) -> PathBuf {
         "TodoWrite PostToolUse exits 0: {out:?}"
     );
 
-    // 5. A forecast for the test-run candidate, recorded by `tsr forecast` itself. The command the
-    //    hook will see is `RUST_BACKTRACE=1 tsr exec -- cargo test`; the inner command is
-    //    `cargo test`, which is what both the forecast and `tsr exec` digest.
+    // 5. A forecast for the test-run candidate, recorded by `tsr forecast` itself. It prints the
+    //    candidate id alone on stdout; the gated run names it with `--candidate <id>` (defect 3).
     let out = env.tsr(&[
         "forecast",
         "--kind",
@@ -250,10 +249,14 @@ fn record_ordinary_session(dir: &Path) -> PathBuf {
         "tsr forecast exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    let test_id = String::from_utf8(out.stdout).expect("utf8 id");
+    let test_id = test_id.trim().to_string();
+    assert_eq!(test_id.len(), 64, "tsr forecast prints the candidate id");
 
-    // 6. `RUST_BACKTRACE=1 tsr exec -- cargo test`: a test run whose command does not start with the
-    //    literal `cargo test`. The hook records the commitment; `tsr exec` records the dispatch.
-    let exec_cmd = "RUST_BACKTRACE=1 tsr exec -- cargo test";
+    // 6. `RUST_BACKTRACE=1 tsr exec --candidate <id> -- cargo test`: a test run whose command does not
+    //    start with the literal `cargo test`. The hook commits the named candidate; `tsr exec`
+    //    records the dispatch.
+    let exec_cmd = format!("RUST_BACKTRACE=1 tsr exec --candidate {test_id} -- cargo test");
     let exec_input = serde_json::json!({ "command": exec_cmd });
     let out = env.hook(
         "PreToolUse",
@@ -269,17 +272,16 @@ fn record_ordinary_session(dir: &Path) -> PathBuf {
         Some("run_approved_test"),
         "the hook's PreToolUse for {exec_cmd:?} proposes a run_approved_test, not a generate"
     );
-    let out = env.tsr(&["exec", "--", "cargo", "test"]);
+    let out = env.tsr(&["exec", "--candidate", &test_id, "--", "cargo", "test"]);
     assert!(
         out.status.success(),
-        "tsr exec -- cargo test exits 0: {}",
+        "tsr exec --candidate <id> -- cargo test exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let out = env.hook("PostToolUse", &posttooluse(session, "Bash", exec_input, 0));
     assert!(out.status.success(), "exec PostToolUse exits 0: {out:?}");
 
-    // 7. A `sh -c '…; …'` exec with its own forecast. The hook sees the command string; `tsr exec`
-    //    sees the argv. Both must digest `sh -c 'a; b'` identically, or the forecast is orphaned.
+    // 7. A `sh -c '…; …'` exec with its own forecast, named by id (defect 3).
     let inner = "sh -c 'a; b'";
     let out = env.tsr(&[
         "forecast",
@@ -297,14 +299,16 @@ fn record_ordinary_session(dir: &Path) -> PathBuf {
         "tsr forecast (sh -c) exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let sh_cmd = format!("tsr exec -- {inner}");
+    let sh_id = String::from_utf8(out.stdout).expect("utf8 id");
+    let sh_id = sh_id.trim().to_string();
+    let sh_cmd = format!("tsr exec --candidate {sh_id} -- {inner}");
     let sh_input = serde_json::json!({ "command": sh_cmd });
     let out = env.hook("PreToolUse", &pretooluse(session, "Bash", sh_input.clone()));
     assert!(out.status.success(), "sh -c PreToolUse exits 0: {out:?}");
-    let out = env.tsr(&["exec", "--", "sh", "-c", "a; b"]);
+    let out = env.tsr(&["exec", "--candidate", &sh_id, "--", "sh", "-c", "a; b"]);
     assert!(
         out.status.success(),
-        "tsr exec -- sh -c 'a; b' exits 0: {}",
+        "tsr exec --candidate <id> -- sh -c 'a; b' exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let out = env.hook("PostToolUse", &posttooluse(session, "Bash", sh_input, 0));
@@ -564,7 +568,13 @@ fn record_typed_spelling(
         "tsr forecast --args {forecast_args:?} exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    let id = String::from_utf8(out.stdout).expect("utf8 id");
+    let id = id.trim().to_string();
+    assert_eq!(id.len(), 64, "tsr forecast prints the candidate id");
 
+    // The gated run names the candidate (defect 3): the typed spelling carries `--candidate <id>`
+    // right after `tsr exec`, so the hook commits *this* candidate rather than minting a new one.
+    let bash_cmd = bash_cmd.replace("tsr exec --", &format!("tsr exec --candidate {id} --"));
     let input = serde_json::json!({ "command": bash_cmd });
     let out = hook_with_home(
         &env,
@@ -577,12 +587,12 @@ fn record_typed_spelling(
         "PreToolUse for {bash_cmd:?} exits 0: {out:?}"
     );
 
-    let mut exec_args = vec!["exec", "--"];
+    let mut exec_args = vec!["exec", "--candidate", &id, "--"];
     exec_args.extend_from_slice(exec_argv);
     let out = tsr_with_home(&env, &home, &exec_args);
     assert!(
         out.status.success(),
-        "tsr exec -- {exec_argv:?} exits 0: {}",
+        "tsr exec --candidate <id> -- {exec_argv:?} exits 0: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
@@ -806,4 +816,55 @@ fn a_wrapped_tsr_exec_is_still_one_candidate() {
         );
         assert_one_proposal_one_forecast_and_reconstructs(&trace, name);
     }
+}
+
+/// A gated run *without* `--candidate` (defect 3): the hook records the Bash call as an ordinary
+/// non-gated call, and `tsr exec` mints its own candidate with no forecast and says so on stderr.
+/// This is a separate session so the ordinary session above keeps B5 (every gated action has a
+/// forecast): the bare exec's dispatch is a gated action with no forecast by design.
+#[test]
+fn a_bare_exec_without_a_candidate_records_no_forecast() {
+    let dir = scratch("bare-exec");
+    let bin = fake_docker(&dir, 0);
+    let db = dir.join(".tsr/tsr.db");
+    let session = "bare-exec";
+    let env = Env {
+        cwd: &dir,
+        db: &db,
+        session,
+        bin: &bin,
+    };
+    let start = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "SessionStart",
+        "cwd": dir.to_str().expect("utf8 cwd"),
+    })
+    .to_string();
+    let out = env.hook("SessionStart", &start);
+    assert!(out.status.success(), "SessionStart exits 0: {out:?}");
+
+    let bare_cmd = "tsr exec -- cargo test";
+    let bare_input = serde_json::json!({ "command": bare_cmd });
+    let out = env.hook(
+        "PreToolUse",
+        &pretooluse(session, "Bash", bare_input.clone()),
+    );
+    assert!(out.status.success(), "bare PreToolUse exits 0: {out:?}");
+    let out = env.tsr(&["exec", "--", "cargo", "test"]);
+    assert!(
+        out.status.success(),
+        "tsr exec -- cargo test exits 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bare_stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        bare_stderr.contains("no forecast") && bare_stderr.contains("--candidate"),
+        "the bare exec says it has no forecast: {bare_stderr:?}"
+    );
+    let out = env.hook("PostToolUse", &posttooluse(session, "Bash", bare_input, 0));
+    assert!(out.status.success(), "bare PostToolUse exits 0: {out:?}");
+
+    let text = env.export(session);
+    let (_proposed, forecast) = count_proposed_and_forecast(&text);
+    assert_eq!(forecast, 0, "the bare exec records no forecast");
 }

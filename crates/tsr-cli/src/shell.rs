@@ -4,14 +4,15 @@
 //! The hook sees the *command string*; `tsr exec` sees the argv the shell produced from it. The
 //! hook no longer *evaluates* expansions (globs, `~`, `$VAR`) — it cannot, because the shell that
 //! runs the command is not the hook's shell. Instead it parses the command with shell grammar only
-//! and records, for the `tsr exec` simple command, a *pattern*: the argument words after `--`,
-//! quote-removed, redirections dropped, with each word the shell would expand marked as a wildcard.
-//! `tsr exec` then matches its argv against that pattern (see [`crate::hook::Pattern`]).
+//! and finds, for the `tsr exec` simple command, the argument words after `--`, quote-removed and
+//! with redirections dropped. Nothing is matched: the hook commits the candidate the command names
+//! with `--candidate <id>`.
 //!
 //! The grammar handled here:
 //! * quotes (`'…'`, `"…"`) and escapes (`\x`), including backslash-newline continuation;
 //! * `#` comments (a `#` at the start of a word, unquoted, runs to end of line);
 //! * here-documents: `<<`/`<<-` and their body, which is data, not commands;
+//! * here-strings: `<<<` and its single word, which has no body;
 //! * separators `;` `&&` `||` `|` `&` and newlines;
 //! * subshells `( … )` and groups `{ …; }` as whole tokens only — never splitting a word such as
 //!   `{}` or `HEAD@{1}`;
@@ -21,33 +22,16 @@
 //!
 //! Malformed input never panics: a trailing `env -u` or `nice -n` is just a plain word list.
 
-/// How a word behaves when matched against an argv.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WordKind {
-    /// No expansion: the word matches exactly this text.
-    Literal,
-    /// The shell would expand this word (unquoted glob, `~`, `$…`, `${…}`, command or arithmetic
-    /// substitution) and may split it into any number of argv words, including zero.
-    Wildcard,
-    /// The word is quoted and contains an expansion: it matches exactly one argv word.
-    QuotedWildcard,
-}
-
-/// One word of a simple command: its text with quotes removed, and how it matches an argv.
+/// One word of a simple command: its text with quotes removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Word {
     pub text: String,
-    pub kind: WordKind,
 }
 
-/// One simple command: its words (quotes removed, redirections dropped) and whether any word could
-/// not be evaluated.
+/// One simple command: its words (quotes removed, redirections dropped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
     pub words: Vec<Word>,
-    /// A word the parser could not evaluate (command/process substitution, arithmetic). It is kept
-    /// in `words` as a wildcard; the caller warns that the forecast may not match.
-    pub unevaluable: bool,
 }
 
 /// A parsed command string: the simple commands it contains, in order.
@@ -57,15 +41,13 @@ pub struct Parsed {
 }
 
 /// Parse a command string into simple commands with shell grammar only. No expansion is evaluated:
-/// a word the shell would expand is marked [`WordKind::Wildcard`] (or [`WordKind::QuotedWildcard`]
-/// when it is quoted), so the caller can match it against an argv.
+/// a word the shell would expand is kept as written, so the caller can find the `tsr exec` command
+/// and the candidate id it names.
 pub fn parse(cmd: &str) -> Parsed {
     let mut commands: Vec<SimpleCommand> = Vec::new();
     let mut words: Vec<Word> = Vec::new();
     let mut cur = String::new();
     let mut has_word = false;
-    let mut cur_kind = WordKind::Literal;
-    let mut unevaluable = false;
     let mut chars = cmd.chars().peekable();
     let mut in_single = false;
     let mut in_double = false;
@@ -79,7 +61,6 @@ pub fn parse(cmd: &str) -> Parsed {
             if std::mem::replace(&mut has_word, false) {
                 words.push(Word {
                     text: std::mem::take(&mut cur),
-                    kind: std::mem::replace(&mut cur_kind, WordKind::Literal),
                 });
             }
         };
@@ -90,21 +71,7 @@ pub fn parse(cmd: &str) -> Parsed {
             if !words.is_empty() {
                 commands.push(SimpleCommand {
                     words: std::mem::take(&mut words),
-                    unevaluable: std::mem::replace(&mut unevaluable, false),
                 });
-            }
-        };
-    }
-    // Mark the current word as expanded. A quoted expansion is `QuotedWildcard`; an unquoted one is
-    // `Wildcard`. An unquoted expansion always wins (it can split into many words).
-    macro_rules! mark_expansion {
-        ($quoted:expr) => {
-            if $quoted {
-                if cur_kind == WordKind::Literal {
-                    cur_kind = WordKind::QuotedWildcard;
-                }
-            } else {
-                cur_kind = WordKind::Wildcard;
             }
         };
     }
@@ -135,15 +102,10 @@ pub fn parse(cmd: &str) -> Parsed {
                     }
                 }
                 '$' => {
-                    mark_expansion!(true);
-                    if !consume_dollar(&mut chars, &mut cur) {
-                        unevaluable = true;
-                    }
+                    consume_dollar(&mut chars, &mut cur);
                 }
                 '`' => {
-                    mark_expansion!(true);
                     consume_backtick(&mut chars, &mut cur);
-                    unevaluable = true;
                 }
                 _ => cur.push(c),
             }
@@ -181,23 +143,17 @@ pub fn parse(cmd: &str) -> Parsed {
             '$' => {
                 has_word = true;
                 at_word_start = false;
-                mark_expansion!(false);
-                if !consume_dollar(&mut chars, &mut cur) {
-                    unevaluable = true;
-                }
+                consume_dollar(&mut chars, &mut cur);
             }
             '`' => {
                 has_word = true;
                 at_word_start = false;
-                mark_expansion!(false);
                 consume_backtick(&mut chars, &mut cur);
-                unevaluable = true;
             }
             '~' if at_word_start => {
-                // A leading `~` (or `~/…`) is a tilde expansion: a wildcard.
+                // A leading `~` (or `~/…`) is a tilde expansion; the hook keeps it as written.
                 has_word = true;
                 at_word_start = false;
-                mark_expansion!(false);
                 cur.push('~');
             }
             '#' if at_word_start => {
@@ -235,12 +191,13 @@ pub fn parse(cmd: &str) -> Parsed {
                 }
             }
             '<' | '>' if chars.peek() == Some(&'(') => {
-                // Process substitution `<(…)` / `>(…)`: one word, an expansion (it yields a path).
-                // It is not a redirection, so it must not be dropped as one.
+                // Process substitution `<(…)` / `>(…)`: one word (it yields a path). It is not a
+                // redirection, so it must not be dropped as one. Consume the opening `(` here:
+                // `consume_balanced_parens` starts *after* it and counts the closing `)`.
                 has_word = true;
                 at_word_start = false;
-                mark_expansion!(false);
                 cur.push(c);
+                chars.next();
                 consume_balanced_parens(&mut chars, &mut cur);
             }
             '<' | '>' => {
@@ -250,7 +207,6 @@ pub fn parse(cmd: &str) -> Parsed {
                 if has_word && !cur.is_empty() && cur.chars().all(|c| c.is_ascii_digit()) {
                     cur.clear();
                     has_word = false;
-                    cur_kind = WordKind::Literal;
                 } else {
                     flush_word!();
                 }
@@ -273,11 +229,8 @@ pub fn parse(cmd: &str) -> Parsed {
                 flush_command!();
             }
             '*' | '?' => {
-                // An unquoted glob metacharacter: the word is a pattern, not a literal. The hook
-                // does not expand it (r4: match the command, do not emulate the shell); it marks the
-                // word so the matcher treats it as a wildcard. A *quoted* `*`/`?` is a literal and
-                // is handled by the quoting arms above.
-                mark_expansion!(false);
+                // An unquoted glob metacharacter: the hook does not expand it (it cannot — the shell
+                // that runs the command is not the hook's shell), so it is kept as written.
                 cur.push(c);
                 has_word = true;
                 at_word_start = false;
@@ -293,14 +246,14 @@ pub fn parse(cmd: &str) -> Parsed {
     Parsed { commands }
 }
 
-/// Consume a `$…` sequence into `out`. Returns `false` when the word cannot be evaluated (command
-/// substitution `$(…)`, arithmetic `$((…))`), in which case the text is kept as written.
-fn consume_dollar(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) -> bool {
+/// Consume a `$…` sequence into `out`, keeping it as written. A command substitution `$(…)` or
+/// arithmetic `$((…))` is not evaluated (the hook cannot know the shell that will run the command),
+/// so only the `$` is consumed here and the rest is read as ordinary word characters.
+fn consume_dollar(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
     match chars.peek() {
         Some('(') => {
-            // `$(…)` or `$((…))`: keep as written, unevaluable.
+            // `$(…)` or `$((…))`: keep as written.
             out.push('$');
-            false
         }
         Some('{') => {
             chars.next();
@@ -311,7 +264,6 @@ fn consume_dollar(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mu
                     break;
                 }
             }
-            true
         }
         Some(c) if c.is_ascii_alphabetic() || *c == '_' => {
             out.push('$');
@@ -323,16 +275,13 @@ fn consume_dollar(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mu
                     break;
                 }
             }
-            true
         }
         Some(c) if c.is_ascii_digit() => {
             out.push('$');
             chars.next();
-            true
         }
         _ => {
             out.push('$');
-            true
         }
     }
 }
@@ -494,6 +443,14 @@ fn skip_redirection(
     if chars.peek() == Some(&op) {
         chars.next();
         if op == '<' {
+            // `<<<`: a here-string. It takes exactly one word and has **no** body, so it must not be
+            // read as a here-document (which would swallow the rest of the line, including a
+            // following `tsr exec`). Consume the third `<` and the one word, then return.
+            if chars.peek() == Some(&'<') {
+                chars.next();
+                skip_redirection_target(chars);
+                return;
+            }
             // `<<` / `<<-`: a here-document. Its body is data until the delimiter line, so record
             // the delimiter and let the main loop consume the body at the next newline.
             let strip_tabs = if chars.peek() == Some(&'-') {
@@ -529,6 +486,12 @@ fn skip_redirection(
         return;
     }
     // Skip whitespace, then the target word (quoted or bare).
+    skip_redirection_target(chars);
+}
+
+/// Skip whitespace and then one target word (quoted or bare) of a redirection or here-string. The
+/// word ends at whitespace, a separator or another redirection operator.
+fn skip_redirection_target(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
     while let Some(&c) = chars.peek() {
         if c.is_whitespace() {
             chars.next();

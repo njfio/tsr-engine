@@ -116,9 +116,9 @@ pub fn shell_words(cmd: &str) -> Vec<String> {
 }
 
 /// Parse a Bash command string with POSIX shell grammar only: split into simple commands on `;`,
-/// `&&`, `||`, `|`, `&` and newlines, remove redirections, and mark each word the shell would expand
-/// (glob, `~`, `$VAR`, `${VAR}`, command/process substitution) as a wildcard. No expansion is
-/// evaluated — the hook cannot know the shell that will run the command. See [`shell::parse`].
+/// `&&`, `||`, `|`, `&` and newlines, and remove redirections. No expansion is evaluated — the hook
+/// cannot know the shell that will run the command — so a word the shell would expand (glob, `~`,
+/// `$VAR`, `${VAR}`, command/process substitution) is kept as written. See [`shell::parse`].
 fn parse_command(cmd: &str) -> shell::Parsed {
     shell::parse(cmd)
 }
@@ -535,7 +535,8 @@ pub fn tsr_exec_candidate(cmd: &str) -> Option<CandidateId> {
         let rest = command_words_after_prefix(&c.words);
         // rest[0] is the `tsr` token, rest[1] is `exec`.
         let args = &rest[2..];
-        // Skip the `--candidate <id>` pair wherever it appears before `--`.
+        // Find the `--candidate <id>` pair (or the `--candidate=<id>` form) wherever it appears
+        // before `--`.
         let mut i = 0;
         while i < args.len() {
             if args[i].text == "--" {
@@ -550,6 +551,9 @@ pub fn tsr_exec_candidate(cmd: &str) -> Option<CandidateId> {
                     return Some(id);
                 }
                 return None;
+            }
+            if let Some(value) = args[i].text.strip_prefix("--candidate=") {
+                return Hash::from_hex(value).ok().map(CandidateId);
             }
             i += 1;
         }
@@ -570,9 +574,14 @@ pub fn tsr_exec_inner_argv(cmd: &str) -> Option<Vec<String>> {
         }
         let rest = command_words_after_prefix(&c.words);
         let mut inner = &rest[2..];
-        // Drop a leading `--candidate <id>` pair and the `--` separator.
+        // Drop a leading `--candidate <id>` pair (or `--candidate=<id>`) and the `--` separator.
         if inner.first().map(|w| w.text.as_str()) == Some("--candidate") {
             inner = &inner[2.min(inner.len())..];
+        } else if inner
+            .first()
+            .is_some_and(|w| w.text.starts_with("--candidate="))
+        {
+            inner = &inner[1..];
         }
         if inner.first().map(|w| w.text.as_str()) == Some("--") {
             inner = &inner[1..];
@@ -713,49 +722,73 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
         return Ok(Vec::new());
     }
     let task = payload.task();
-    let kind = action_for(
+    let mut kind = action_for(
         payload.tool_name.as_deref(),
         payload.bash_command().as_deref(),
     );
-    let source = source_for(kind);
+    let mut source = source_for(kind);
     let parents: Vec<EventId> = last_event(store, &task)?
         .map(|e| vec![e.id])
         .unwrap_or_default();
 
     // Identity is `(kind, args digest)` only — the same candidate `tsr forecast` minted for this
     // tool call, so a prior forecast's `Proposed` is recognised here.
-    let args = action_args(payload);
+    let mut args = action_args(payload);
 
     // (c) A `tsr exec --candidate <id> -- …` call names its candidate: the hook commits exactly that
     // id and records no new proposal. Nothing is matched — no pattern, no sidecar, no matcher.
+    //
+    // The named id is committed only if it is a candidate of *this* task that has a forecast and is
+    // neither committed-and-dispatched nor already dispatched (defect 1). Otherwise the call is
+    // recorded as an ordinary non-gated call and one line says why: committing an id the hook cannot
+    // vouch for would let an already-dispatched candidate run again.
     if let Some(cid) = payload
         .bash_command()
         .as_deref()
         .and_then(tsr_exec_candidate)
     {
-        let committed = Event::new(
-            task.clone(),
-            parents.clone(),
-            source,
-            EventKind::Committed {
-                candidate: cid,
-                decision: Decision::Selected {
-                    value: cid,
-                    utility: Utility {
-                        p_success: 0.5,
-                        value: 0.0,
-                        cost: 0.0,
-                        ev: 0.0,
+        match named_candidate_gate(store, &task, cid)? {
+            Ok(()) => {
+                let committed = Event::new(
+                    task,
+                    parents.clone(),
+                    source,
+                    EventKind::Committed {
+                        candidate: cid,
+                        decision: Decision::Selected {
+                            value: cid,
+                            utility: Utility {
+                                p_success: 0.5,
+                                value: 0.0,
+                                cost: 0.0,
+                                ev: 0.0,
+                            },
+                            propensity: 1.0,
+                            evidence: parents.clone(),
+                        },
                     },
-                    propensity: 1.0,
-                    evidence: parents.clone(),
-                },
-            },
-            now_rfc3339(),
-        );
-        let id = committed.id;
-        store.append(&committed)?;
-        return Ok(vec![id]);
+                    now_rfc3339(),
+                );
+                let id = committed.id;
+                store.append(&committed)?;
+                return Ok(vec![id]);
+            }
+            Err(reason) => {
+                eprintln!(
+                    "tsr: hook: not committing --candidate {}: {reason}; recording the Bash call as \
+                     an ordinary non-gated call",
+                    cid.0.to_hex()
+                );
+                // The fallback must be a *non-gated* call: re-deriving the kind from the inner
+                // command would mint the very candidate the gate just refused (a `tsr exec --candidate
+                // <id> -- cargo test` would otherwise commit the test candidate anyway). Record the
+                // model's own turn instead, keyed on the whole Bash command so its candidate differs
+                // from the named one.
+                kind = ActionKind::Generate;
+                source = source_for(kind);
+                args = payload.bash_command().unwrap_or_default();
+            }
+        }
     }
 
     let candidate = mint_candidate(kind, &args)?;
@@ -837,6 +870,41 @@ pub fn record_tool(store: &Store, payload: &HookPayload) -> anyhow::Result<Vec<E
     let seqs = store.append_all(&batch)?;
     debug_assert_eq!(seqs.len(), batch.len());
     Ok(batch.iter().map(|e| e.id).collect())
+}
+
+/// Whether the hook may commit the candidate `cid` a `tsr exec --candidate <id> -- …` call names.
+///
+/// `Ok(())` only when `cid` is a candidate of `task` (a `Proposed` for it exists), has a forecast (a
+/// `Forecast` for it exists), and has no `Dispatched` at all — neither committed-and-dispatched nor
+/// already dispatched (defect 1). `Err(reason)` names the first condition that fails, so the caller
+/// can print one line and record the call as an ordinary non-gated call instead.
+fn named_candidate_gate(
+    store: &Store,
+    task: &TaskId,
+    cid: CandidateId,
+) -> anyhow::Result<Result<(), String>> {
+    let events = store.by_task(task)?;
+    let mut proposed = false;
+    let mut forecast = false;
+    let mut dispatched = false;
+    for (_, e) in &events {
+        match &e.kind {
+            EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
+            EventKind::Forecast { candidate, .. } if *candidate == cid => forecast = true,
+            EventKind::Dispatched { candidate, .. } if *candidate == cid => dispatched = true,
+            _ => {}
+        }
+    }
+    if !proposed {
+        return Ok(Err("it is not a candidate of this task".to_string()));
+    }
+    if !forecast {
+        return Ok(Err("it has no forecast".to_string()));
+    }
+    if dispatched {
+        return Ok(Err("it is already dispatched".to_string()));
+    }
+    Ok(Ok(()))
 }
 
 /// Whether a `Proposed` for `cid` is pending: the newest `Proposed` for it comes after the newest
@@ -1290,7 +1358,10 @@ fn selftest_inner(
     // 4. The first run: the agent's Bash call is `tsr exec -- cargo test …`. The hook records the
     //    commitment only (the forecast is already on record); `tsr exec` records the dispatch and
     //    the execution in the real container; the matching PostToolUse reconciles nothing further.
-    let exec_cmd = format!("tsr exec --candidate {} -- {SELFTEST_TEST_CMD}", candidate.0.to_hex());
+    let exec_cmd = format!(
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        candidate.0.to_hex()
+    );
     let pre = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PreToolUse".to_string()),
@@ -1372,7 +1443,10 @@ fn selftest_inner(
         SELFTEST_TEST_CMD,
         0.6,
     )?;
-    let exec_cmd2 = format!("tsr exec --candidate {} -- {SELFTEST_TEST_CMD}", candidate2.0.to_hex());
+    let exec_cmd2 = format!(
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        candidate2.0.to_hex()
+    );
     let pre2 = HookPayload {
         session_id: Some(session.to_string()),
         hook_event_name: Some("PreToolUse".to_string()),
@@ -1455,6 +1529,19 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("scratch dir");
         let store = crate::store_path::open_store_at(&dir.join("tsr.db")).expect("open store");
         (store, dir)
+    }
+
+    /// The candidate ids of a task's `Committed` events, in sequence order.
+    fn committed_candidates(store: &Store, task: &TaskId) -> Vec<String> {
+        store
+            .by_task(task)
+            .expect("by_task")
+            .into_iter()
+            .filter_map(|(_, ev)| match &ev.kind {
+                EventKind::Committed { candidate, .. } => Some(candidate.0.to_hex()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The kind tags of a task's events, in sequence order.
@@ -1722,6 +1809,106 @@ mod tests {
                 "{cmd:?} names no candidate"
             );
         }
+    }
+
+    /// Defect 6: the hook reads `--candidate=<id>` as well as `--candidate <id>`, and a `<(…)`
+    /// process substitution before `tsr exec` does not hide the candidate.
+    #[test]
+    fn tsr_exec_candidate_reads_equals_form_and_survives_process_substitution() {
+        let id = "b".repeat(64);
+        for cmd in [
+            format!("tsr exec --candidate={id} -- cargo test"),
+            format!("tsr exec --candidate={id} -- diff <(a) <(b)"),
+            format!("cat <(echo hi) && tsr exec --candidate {id} -- cargo test"),
+            format!("tsr exec --candidate {id} -- diff <(echo a) <(echo b)"),
+        ] {
+            assert_eq!(
+                tsr_exec_candidate(&cmd).map(|c| c.0.to_hex()),
+                Some(id.clone()),
+                "{cmd:?} names the candidate"
+            );
+        }
+        assert!(
+            tsr_exec_candidate("tsr exec --candidate=nothex -- cargo test").is_none(),
+            "a bad --candidate=<id> names no candidate"
+        );
+    }
+
+    /// Defect 2: a here-string `<<< "hi"` before `tsr exec` takes one word and no body, so it does
+    /// not swallow the `tsr exec` command that follows it.
+    #[test]
+    fn here_string_does_not_swallow_the_following_tsr_exec() {
+        let id = "c".repeat(64);
+        let cmd = format!("cat <<< \"hi\" && tsr exec --candidate {id} -- cargo test");
+        assert_eq!(
+            tsr_exec_candidate(&cmd).map(|c| c.0.to_hex()),
+            Some(id.clone()),
+            "the here-string takes one word and the tsr exec is still seen"
+        );
+        // A here-document still consumes its body (the body is data, not commands).
+        let heredoc = format!("cat <<EOF\nhi\nEOF\ntsr exec --candidate {id} -- cargo test");
+        assert_eq!(
+            tsr_exec_candidate(&heredoc).map(|c| c.0.to_hex()),
+            Some(id.clone()),
+            "a here-document body is data and the tsr exec after it is seen"
+        );
+    }
+
+    /// Defect 1 (hook side): the hook commits a named candidate only if it belongs to this task, has
+    /// a forecast, and is not already dispatched. Otherwise it records the Bash call as an ordinary
+    /// non-gated call.
+    #[test]
+    fn hook_commits_a_named_candidate_only_when_it_is_forecast_and_not_dispatched() {
+        let (store, _dir) = fresh_store("named-gate");
+        let session = "named-gate";
+        let task = store_path::task_for_session(session);
+
+        // An id that is not a candidate of this task is not committed.
+        let unknown = "d".repeat(64);
+        let cmd = format!("tsr exec --candidate {unknown} -- cargo test");
+        record_tool(&store, &bash_payload(session, "PreToolUse", &cmd, None)).expect("pre");
+        assert!(
+            !committed_candidates(&store, &task).contains(&unknown),
+            "an unknown id is not committed"
+        );
+
+        // A candidate of this task with a forecast is committed.
+        let cid = record_forecast_for_action(
+            &store,
+            &task,
+            ActionKind::RunApprovedTest,
+            "cargo test",
+            0.5,
+            "operator",
+        )
+        .expect("forecast");
+        let cmd = format!("tsr exec --candidate {} -- cargo test", cid.0.to_hex());
+        record_tool(&store, &bash_payload(session, "PreToolUse", &cmd, None)).expect("pre");
+        assert!(
+            committed_candidates(&store, &task).contains(&cid.0.to_hex()),
+            "a forecast candidate of this task is committed"
+        );
+
+        // Once it is dispatched, the hook refuses to commit it again.
+        let dispatched = Event::new(
+            task,
+            vec![],
+            Source::Operator,
+            EventKind::Dispatched {
+                candidate: cid,
+                in_sandbox: true,
+            },
+            now_rfc3339(),
+        );
+        store.append(&dispatched).expect("dispatched");
+        let before = committed_candidates(&store, &task);
+        record_tool(&store, &bash_payload(session, "PreToolUse", &cmd, None)).expect("pre");
+        let after = committed_candidates(&store, &task);
+        assert_eq!(
+            after.iter().filter(|c| *c == &cid.0.to_hex()).count(),
+            before.iter().filter(|c| *c == &cid.0.to_hex()).count(),
+            "an already-dispatched candidate is not committed again"
+        );
     }
 
     /// A test run is recognised after leading `VAR=value` assignments, an `env` prefix, and inside a

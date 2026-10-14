@@ -66,10 +66,22 @@ esac
     bin
 }
 
-/// A `PATH` with the fake runtime's directory first and the real `PATH` after it.
+/// A `PATH` with the built `tsr` binary's directory first, then the fake runtime's directory, then
+/// the real `PATH`. The `tsr` directory must come first so the `bash -c` that runs the command
+/// string finds *this* build's `tsr`, not one installed on the host (defect 4: hermetic).
 fn path_with(bin: &Path) -> String {
     let real = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{}", bin.display(), real)
+    let tsr_dir = tsr_bin()
+        .parent()
+        .expect("the tsr binary has a parent directory")
+        .to_path_buf();
+    format!("{}:{}:{}", tsr_dir.display(), bin.display(), real)
+}
+
+/// Quote one argv word for `bash -c` with single quotes, so the shell hands `tsr exec` exactly this
+/// word (a `;`, a space or a `$` inside it stays literal).
+fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
 }
 
 /// The environment every `tsr` invocation in this test shares: the scratch store and the session.
@@ -253,8 +265,16 @@ fn one_spelling(dir: &Path, name: &str, inner: &str, argv: &[&str]) {
 
     let id = forecast(&env, inner, "0.9");
 
-    // The Bash command the agent runs: `tsr exec --candidate <id> -- <inner>`.
-    let command = format!("tsr exec --candidate {id} -- {inner}");
+    // The Bash command the agent runs: `tsr exec --candidate <id> -- <argv…>`. The argv is the
+    // shell's expansion of `inner`, which for several cases differs from the forecast's `--args`
+    // text (e.g. `cat <<< "hi"` forecasts `cat <<< "hi"` but runs `cat`): the run binds by id, not
+    // by text (defect 4).
+    let exec_argv = argv
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let command = format!("tsr exec --candidate {id} -- {exec_argv}");
     let input = serde_json::json!({ "command": command });
     let out = env.hook("PreToolUse", &pretooluse(&session, "Bash", input.clone()));
     assert!(
@@ -273,10 +293,7 @@ fn one_spelling(dir: &Path, name: &str, inner: &str, argv: &[&str]) {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let out = env.hook(
-        "PostToolUse",
-        &posttooluse(&session, "Bash", input, 0),
-    );
+    let out = env.hook("PostToolUse", &posttooluse(&session, "Bash", input, 0));
     assert!(
         out.status.success(),
         "{name}: PostToolUse exits 0: {}",
@@ -350,7 +367,11 @@ fn every_spelling_records_one_proposal_one_forecast_one_commit_one_dispatch() {
         ("herestring", "cat <<< \"hi\"", &["cat"]),
         ("bracket", "ls [ab].toml", &["ls", "[ab].toml"]),
         ("quoted-star", "echo '*'", &["echo", "*"]),
-        ("find-exec", "find . -exec echo {} \\;", &["find", ".", "-exec", "echo", "{}", ";"]),
+        (
+            "find-exec",
+            "find . -exec echo {} \\;",
+            &["find", ".", "-exec", "echo", "{}", ";"],
+        ),
     ];
     for (name, inner, argv) in cases {
         one_spelling(&dir, name, inner, argv);
@@ -464,14 +485,16 @@ fn unknown_or_dispatched_candidate_exits_2_and_runs_nothing() {
     );
 
     // Already dispatched: forecast, commit through the hook, dispatch once, then dispatch again.
-    let id = forecast(&env, "cargo test", "0.9");
-    let command = format!("tsr exec --candidate {id} -- cargo test");
+    // The command differs from the bare exec above so the forecast mints a *fresh* candidate (the
+    // bare exec's candidate is already dispatched).
+    let id = forecast(&env, "cargo build", "0.9");
+    let command = format!("tsr exec --candidate {id} -- cargo build");
     let input = serde_json::json!({ "command": command });
     let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input.clone()));
     assert!(out.status.success(), "PreToolUse exits 0: {out:?}");
-    let out = env.tsr(&["exec", "--candidate", &id, "--", "cargo", "test"]);
+    let out = env.tsr(&["exec", "--candidate", &id, "--", "cargo", "build"]);
     assert!(out.status.success(), "the first dispatch exits 0: {out:?}");
-    let out = env.tsr(&["exec", "--candidate", &id, "--", "cargo", "test"]);
+    let out = env.tsr(&["exec", "--candidate", &id, "--", "cargo", "build"]);
     assert_eq!(
         out.status.code(),
         Some(2),
@@ -521,7 +544,9 @@ fn exec_without_candidate_says_so_and_records_no_forecast() {
     assert_eq!(count(&ks, "dispatched"), 1, "the bare exec dispatches once");
 }
 
-/// No input panics the hook: 5,000 random strings through PreToolUse for a Bash command.
+/// No input panics the hook: random strings through PreToolUse for a Bash command. Bounded to
+/// finish in under 60 s (defect 4): each iteration spawns a `tsr hook` process, so the count is
+/// chosen to stay well inside the bound, and the whole loop is timed.
 #[test]
 fn no_random_command_panics_the_hook() {
     let dir = scratch("fuzz");
@@ -542,18 +567,34 @@ fn no_random_command_panics_the_hook() {
         state ^= state << 17;
         state
     };
-    let alphabet: Vec<char> = "abc tsr exec --candidate '\"\\;|&<>(){}[]*?$`~\n\t#!".chars().collect();
-    for i in 0..5_000 {
+    let alphabet: Vec<char> = "abc tsr exec --candidate '\"\\;|&<>(){}[]*?$`~\n\t#!"
+        .chars()
+        .collect();
+    let started = std::time::Instant::now();
+    for i in 0..500 {
         let len = (next() % 40) as usize;
         let command: String = (0..len)
             .map(|_| alphabet[(next() as usize) % alphabet.len()])
             .collect();
         let input = serde_json::json!({ "command": command });
         let out = env.hook("PreToolUse", &pretooluse(session, "Bash", input));
+        // The hook exits 0 on every input: a panic would be a non-zero status (101) and a Rust
+        // panic message on stderr.
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "iteration {i}: the hook exits 0 on {command:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert!(
-            out.status.success(),
+            !String::from_utf8_lossy(&out.stderr).contains("panicked"),
             "iteration {i}: the hook does not panic on {command:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "the fuzz loop finishes in under 60 s (took {elapsed:?})"
+    );
 }
