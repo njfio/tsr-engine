@@ -22,17 +22,21 @@ yet block actions, calibrate, decide or release (`README.md`).
   insert that names a missing parent; identity is enforced by hashing. `head_root()` is the one hash
   for the whole state.
 - `crates/tsr-cli` — the `tsr` binary (`hook`, `exec`, `forecast`, `task`, `policy check`, `review`,
-  `reflect`, `note`, `task reconcile`; `corpus`, `data`, `train`, `eval`, `model` exit 2) and
+  `reflect`, `note`, `task reconcile`, `train`; `corpus`, `data`, `eval`, `model` exit 2) and
   `tsr_cli::reconstruct`.
 - `crates/tsr-policy` (M1) — RATCHET profiles (TOML), the gate (`allow | deny | ask`), approvals,
   budgets. Only `tsr policy check` calls it; the hook does not.
 - `crates/tsr-ledger` (M2) — the Culmination ledger as folds over the log.
 - `crates/tsr-forecast` (M2) — named events, forecast resolution, Brier, log loss, reliability bins.
+- `crates/tsr-learn` (M4) — the dataset and split, the logistic head, the isotonic calibrator, bundles
+  and their verification, the controller-versus-generator report (`tsr train`).
 - `profiles/default.toml` — the default RATCHET profile (`docs/ratchet-profile.md`).
 - `fixtures/m0/` — M0's recorded sessions (frozen, below). `fixtures/m2/episodes/` — thirty synthetic
-  episodes written by `crates/tsr-cli/tests/m2_episodes.rs`.
+  episodes written by `crates/tsr-cli/tests/m2_episodes.rs`. `fixtures/m4/` — the synthetic M4 corpus
+  (regenerate with `TSR_REGEN_FIXTURES=1`).
 - `scripts/` — `m2-evidence.sh` (prints the text of `docs/m2-evidence.md` to stdout; needs
-  `origin/main` or `TSR_MAIN`) and the two store builders it uses.
+  `origin/main` or `TSR_MAIN`) and the two store builders it uses; `m4-evidence.sh` (prints the text
+  of `docs/m4-evidence.md`).
 - `specs/lanes/` — lane briefs; `specs/lanes/reviews/` — the independent reviews behind repair briefs.
 - `docs/` — the PRD, the profile format, the evidence pages.
 
