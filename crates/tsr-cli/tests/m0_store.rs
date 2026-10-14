@@ -257,7 +257,9 @@ fn exec_resolves_the_store_and_mounts_it_read_only_when_inside_the_workspace() {
     );
 
     // Case 2: run from a subdirectory. The store is still found by the ancestor walk (no second
-    // store), but it now lies outside the subdirectory workspace, so it is not mounted.
+    // store), but the workspace is the *current directory* (the subdirectory), so the store at the
+    // root lies outside it and is **not mounted at all** (r6 review defect 3). The argv is read to
+    // prove it: no read-only store mount, and the workspace mount is the subdirectory.
     let _ = std::fs::remove_file(&argv_log);
     let mut cmd = Command::new(tsr_bin());
     cmd.args(["exec", "--", "true"])
@@ -280,6 +282,277 @@ fn exec_resolves_the_store_and_mounts_it_read_only_when_inside_the_workspace() {
     assert!(
         !sub.join(".tsr/tsr.db").exists(),
         "no store was created in the subdirectory"
+    );
+    let argv = std::fs::read_to_string(&argv_log).expect("the fake runtime recorded its argv");
+    let sub_canon = std::fs::canonicalize(&sub).expect("canonicalize sub");
+    let ws_mount = format!("type=bind,src={d},dst={d}", d = sub_canon.display());
+    assert!(
+        argv.lines().any(|l| l == ws_mount),
+        "the workspace mount is the current directory (the subdirectory): want {ws_mount:?} in \
+         argv:\n{argv}"
+    );
+    assert!(
+        !argv.lines().any(|l| l.ends_with(",readonly")),
+        "a store outside the workspace is not mounted at all (defect 3): argv:\n{argv}"
+    );
+}
+
+/// A scratch base under the system temp dir with **no `.git` in any ancestor**, so a test can
+/// create its own work tree and control where [`work_tree_top`] stops. The base is removed first.
+fn scratch_worktree_base(name: &str) -> PathBuf {
+    let base = std::env::temp_dir().join("m0-store-worktree").join(name);
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).expect("scratch base");
+    let mut d: Option<&Path> = Some(&base);
+    while let Some(cur) = d {
+        assert!(
+            !cur.join(".git").exists(),
+            "scratch_worktree_base needs no ancestor .git, but {} has one",
+            cur.display()
+        );
+        d = cur.parent();
+    }
+    base
+}
+
+/// Defect 1 (r6b): a store in an ancestor **above** the work tree is never used. The work tree's
+/// top is where the store is created, and the unrelated ancestor store is left byte-identical.
+#[test]
+fn a_store_above_the_work_tree_is_never_used() {
+    let base = scratch_worktree_base("above-worktree");
+    // The unrelated ancestor store, above the work tree.
+    let ancestor_db = base.join(".tsr/tsr.db");
+    let seed = tsr_with_db(
+        &base,
+        &ancestor_db,
+        "ancestor-sess",
+        &["task", "open", "--name", "ancestor-task"],
+    );
+    assert!(
+        seed.status.success(),
+        "seed ancestor store: {:?}",
+        seed.status.code()
+    );
+    let before = std::fs::read(&ancestor_db).expect("read ancestor store");
+
+    // The work tree: `proj` contains `.git`; the command runs from `proj/a/b`.
+    let top = base.join("proj");
+    let sub = top.join("a/b");
+    std::fs::create_dir_all(&sub).expect("subdir");
+    std::fs::create_dir_all(top.join(".git")).expect(".git dir");
+
+    let out = tsr_in(&sub, &["task", "open", "--name", "proj-task"]);
+    assert!(
+        out.status.success(),
+        "task open from inside the work tree: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        top.join(".tsr/tsr.db").exists(),
+        "the store is created at the work tree's top"
+    );
+    assert!(
+        !sub.join(".tsr/tsr.db").exists(),
+        "no store is created in the subdirectory"
+    );
+    let after = std::fs::read(&ancestor_db).expect("re-read ancestor store");
+    assert_eq!(
+        before, after,
+        "the store above the work tree is never used and never written"
+    );
+}
+
+/// Defect 1 (r6b): two sibling projects under one parent keep separate stores. Neither uses the
+/// parent's store, and each project's store holds only its own task.
+#[test]
+fn two_sibling_projects_keep_separate_stores() {
+    let base = scratch_worktree_base("siblings");
+    // A store in the shared parent, above both work trees.
+    let parent_db = base.join(".tsr/tsr.db");
+    let seed = tsr_with_db(
+        &base,
+        &parent_db,
+        "parent-sess",
+        &["task", "open", "--name", "parent-task"],
+    );
+    assert!(
+        seed.status.success(),
+        "seed parent store: {:?}",
+        seed.status.code()
+    );
+    let parent_before = std::fs::read(&parent_db).expect("read parent store");
+
+    for proj in ["proj-a", "proj-b"] {
+        let top = base.join(proj);
+        std::fs::create_dir_all(top.join(".git")).expect(".git dir");
+        let out = tsr_in(&top, &["task", "open", "--name", &format!("{proj}-task")]);
+        assert!(
+            out.status.success(),
+            "task open in {proj}: stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            top.join(".tsr/tsr.db").exists(),
+            "{proj} gets its own store at its top"
+        );
+    }
+    assert_ne!(
+        std::fs::read(base.join("proj-a/.tsr/tsr.db")).expect("read a"),
+        std::fs::read(base.join("proj-b/.tsr/tsr.db")).expect("read b"),
+        "the two sibling projects have distinct stores"
+    );
+    assert_eq!(
+        std::fs::read(&parent_db).expect("re-read parent store"),
+        parent_before,
+        "the shared parent store is never used"
+    );
+}
+
+/// Defect 1 (r6b): from a subdirectory of a work tree, the top's store is used (no second store).
+#[test]
+fn from_a_subdirectory_of_a_work_tree_the_tops_store_is_used() {
+    let base = scratch_worktree_base("subdir-of-worktree");
+    let top = base.join("proj");
+    let sub = top.join("a/b/c");
+    std::fs::create_dir_all(&sub).expect("subdir");
+    std::fs::create_dir_all(top.join(".git")).expect(".git dir");
+
+    // Seed the store at the work tree's top.
+    let top_db = top.join(".tsr/tsr.db");
+    let open = tsr_with_db(
+        &top,
+        &top_db,
+        "top-sess",
+        &["task", "open", "--name", "top-task"],
+    );
+    assert!(
+        open.status.success(),
+        "task open at top: {:?}",
+        open.status.code()
+    );
+    std::fs::write(top.join(".tsr/session"), "top-sess").expect("write session file");
+
+    // From the subdirectory, a forecast must find the top's store and session.
+    let out = tsr_in(
+        &sub,
+        &[
+            "forecast",
+            "--kind",
+            "run_approved_test",
+            "--args",
+            "cargo test",
+            "--p",
+            "0.5",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "forecast from a subdirectory of the work tree: code={:?} stderr={}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(count_stores(&top), 1, "exactly one store exists");
+    assert!(
+        !sub.join(".tsr/tsr.db").exists(),
+        "no second store is created in the subdirectory"
+    );
+}
+
+/// Defect 1 (r6b, the documented limit): outside a work tree there is no walk, so a subdirectory
+/// gets its own store in the current directory.
+#[test]
+fn outside_a_work_tree_a_subdirectory_gets_its_own_store() {
+    let base = scratch_worktree_base("outside-worktree");
+    let sub = base.join("a/b");
+    std::fs::create_dir_all(&sub).expect("subdir");
+
+    let out = tsr_in(&sub, &["task", "open", "--name", "sub-task"]);
+    assert!(
+        out.status.success(),
+        "task open outside a work tree: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        sub.join(".tsr/tsr.db").exists(),
+        "outside a work tree the store is created in the current directory"
+    );
+    assert!(
+        !base.join(".tsr/tsr.db").exists(),
+        "no walk: the parent directory gets no store"
+    );
+}
+
+/// Defect 4 (r6 review): `RealRunner::run` must mount the **resolved** store path, not the
+/// workspace default. With `TSR_DB` pointing inside the workspace but away from `<ws>/.tsr`, the
+/// read-only mount must be `TSR_DB`'s parent. A mutant that passes `None` (the workspace default)
+/// mounts `<ws>/.tsr` instead and fails this test.
+#[test]
+fn exec_mounts_the_resolved_store_not_the_workspace_default() {
+    let root = scratch("exec-resolved-store");
+    let custom = root.join("custom");
+    std::fs::create_dir_all(&custom).expect("custom dir");
+
+    // A fake runtime whose `info` succeeds and whose `run` records its argv.
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).expect("bin");
+    let docker = bin.join("docker");
+    let argv_log = root.join("argv.log");
+    let script = format!(
+        "#!/bin/sh\ncase \"$1\" in\n  --version) exit 0 ;;\n  info) exit 0 ;;\n  run) printf '%s\\n' \"$@\" > {log}; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+        log = argv_log.display()
+    );
+    std::fs::write(&docker, script).expect("write fake docker");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fake docker");
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // The store is `TSR_DB=<root>/custom/tsr.db`, inside the workspace but not `<root>/.tsr`.
+    let db = custom.join("tsr.db");
+    let open = tsr_with_db(
+        &root,
+        &db,
+        "resolved-sess",
+        &["task", "open", "--name", "resolved-root"],
+    );
+    assert!(open.status.success(), "task open: {:?}", open.status.code());
+
+    let mut cmd = Command::new(tsr_bin());
+    cmd.args(["exec", "--", "true"])
+        .current_dir(&root)
+        .env("PATH", &path)
+        .env("TSR_DB", &db)
+        .env("TSR_SESSION", "resolved-sess");
+    let out = cmd.output().expect("run tsr exec");
+    assert!(
+        out.status.success(),
+        "exec with TSR_DB inside the workspace: code={:?} stderr={}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let argv = std::fs::read_to_string(&argv_log).expect("the fake runtime recorded its argv");
+    let root_canon = std::fs::canonicalize(&root).expect("canonicalize root");
+    let want_dir = root_canon.join("custom");
+    let want = format!("type=bind,src={d},dst={d},readonly", d = want_dir.display());
+    assert!(
+        argv.lines().any(|l| l == want),
+        "the resolved store's directory is mounted read-only: want {want:?} in argv:\n{argv}"
+    );
+    let default_dir = root_canon.join(".tsr");
+    let default_mount = format!(
+        "type=bind,src={d},dst={d},readonly",
+        d = default_dir.display()
+    );
+    assert!(
+        !argv.lines().any(|l| l == default_mount),
+        "the workspace default store is not mounted when TSR_DB names another store: argv:\n{argv}"
     );
 }
 

@@ -142,8 +142,16 @@ const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 ///
 /// The store's directory is mounted **read-only** over the same path whenever it lies inside the
 /// workspace, so a command inside the sandbox cannot rewrite the event log or the session file
-/// (repair item 3, PRD §B10). The store directory is `TSR_DB`'s parent if set, else
-/// `<workspace>/.tsr`; a store outside the workspace is not mounted at all.
+/// (repair item 3, PRD §B10). The store directory is `TSR_DB`'s parent if set, else the resolved
+/// store's parent (the work tree's top, or the current directory outside one — r6b); a store
+/// outside the workspace is not mounted at all.
+///
+/// **`tsr exec` from a subdirectory (r6 review defect 3).** The workspace is the *current
+/// directory* (`main.rs` passes `current_dir()`), not the work tree's top. So a store resolved at
+/// the work tree's top lies *outside* that workspace and is **not mounted at all** — the container
+/// cannot reach it, which is not weaker than mounting it read-only. The read-only store mount only
+/// appears when the store's directory lies inside the workspace (e.g. `tsr exec` run from the work
+/// tree's top, or `TSR_DB` pointing inside the current directory).
 pub fn container_argv(rt: Runtime, workspace: &Path, argv: &[String]) -> Vec<String> {
     container_argv_with_store(rt, workspace, argv, None)
 }
@@ -197,9 +205,10 @@ pub fn container_argv_with_store(
 
 /// The store's directory when it lies inside `workspace`, else `None`.
 ///
-/// The store file is `TSR_DB` if set, else `<workspace>/.tsr/tsr.db`; the directory mounted is its
-/// parent. A store whose directory *is* the workspace is refused by the caller (exit 2) — mounting
-/// the workspace read-only over itself would contradict the writable workspace mount.
+/// The store file is `TSR_DB` if set, else the resolved store path (r6b: the work tree's top, or
+/// the current directory outside one); the directory mounted is its parent. A store whose directory
+/// *is* the workspace is refused by the caller (exit 2) — mounting the workspace read-only over
+/// itself would contradict the writable workspace mount.
 pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Option<PathBuf> {
     let ws = crate::store_path::resolve_workspace(workspace);
     let db = match store {
@@ -408,12 +417,23 @@ pub fn run(
 
 /// Whether the store file's parent is the workspace itself (`TSR_DB=<workspace>/tsr.db`), which
 /// cannot be mounted read-only over the writable workspace mount.
+///
+/// The store path is derived from the **given** workspace, never from the process's current
+/// directory (r6 review defect 5): an in-process caller that passes `/work` must be judged against
+/// `/work`, not against wherever the process happens to be. `TSR_DB` is still honoured (it is the
+/// store the caller will open), but a relative `TSR_DB` resolves against `workspace`.
 pub fn store_dir_is_workspace(workspace: &Path) -> bool {
     let ws = crate::store_path::resolve_workspace(workspace);
-    let db = crate::store_path::db_path();
+    let db = crate::store_path::db_path_for(&ws);
+    store_dir_is_workspace_with(&ws, &db)
+}
+
+/// [`store_dir_is_workspace`] against an explicit store path, so the rule can be tested without
+/// mutating the process environment (r6 review defect 5).
+fn store_dir_is_workspace_with(ws: &Path, db: &Path) -> bool {
     // Resolve the store path the same way `store_dir_inside_workspace` does (review (5)): otherwise
-    // `TSR_DB=tsr.db` would not be refused. `db_path` walks ancestors when `TSR_DB` is unset.
-    let db = crate::store_path::resolve_store_path(&db, &ws);
+    // `TSR_DB=tsr.db` would not be refused.
+    let db = crate::store_path::resolve_store_path(db, ws);
     db.parent().map(|d| d == ws).unwrap_or(false)
 }
 
@@ -422,11 +442,12 @@ pub fn store_dir_is_workspace(workspace: &Path) -> bool {
 ///
 /// It sits *beside the store* — the store's parent directory, named after the store file — so two
 /// `tsr exec` processes that share a store share a lock, and two that do not cannot contend. The
-/// path is derived the same way [`store_dir_is_workspace`] derives the store path, so a relative
-/// `TSR_DB` resolves against the workspace.
+/// path is derived from the **given** workspace (r6 review defect 5), so a relative `TSR_DB`
+/// resolves against the workspace and an in-process caller that passes `/work` locks beside
+/// `/work`'s store, not beside the process's own.
 pub fn exec_lock_path(workspace: &Path) -> PathBuf {
     let ws = crate::store_path::resolve_workspace(workspace);
-    let db = crate::store_path::db_path();
+    let db = crate::store_path::db_path_for(&ws);
     let db = crate::store_path::resolve_store_path(&db, &ws);
     let name = db
         .file_name()
@@ -957,5 +978,65 @@ mod tests {
             0,
             "a refusal records nothing"
         );
+    }
+
+    /// A scratch directory under the system temp dir with no `.git` in any ancestor, so the
+    /// discovery walk is not bounded by the workspace's own work tree.
+    fn scratch_outside_worktree(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join("exec-unit").join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let mut d: Option<&std::path::Path> = Some(&dir);
+        while let Some(cur) = d {
+            assert!(
+                !cur.join(".git").exists(),
+                "scratch_outside_worktree needs no ancestor .git, but {} has one",
+                cur.display()
+            );
+            d = cur.parent();
+        }
+        dir
+    }
+
+    /// Defect 5 (r6 review): `exec_lock_path` and `store_dir_is_workspace` derive the store from
+    /// the **given** workspace, not the process's current directory. With `TSR_DB` unset and the
+    /// given workspace a work tree's top, the lock sits beside that workspace's store.
+    #[test]
+    fn exec_lock_path_uses_the_given_workspace_not_the_process_cwd() {
+        // The process cwd is the workspace root (a different work tree); the given `ws` is a
+        // scratch work tree. The lock must follow `ws`.
+        let ws = scratch_outside_worktree("lock-ws");
+        std::fs::create_dir_all(ws.join(".git")).expect(".git dir");
+        let lock = exec_lock_path(&ws);
+        let ws_canon = crate::store_path::resolve_workspace(&ws);
+        assert_eq!(
+            lock,
+            ws_canon.join(".tsr/tsr.db.exec.lock"),
+            "the lock is beside the given workspace's store, not the process cwd's"
+        );
+        assert!(
+            !store_dir_is_workspace(&ws),
+            "the store's directory is `<ws>/.tsr`, not the workspace itself"
+        );
+    }
+
+    /// Defect 5: `store_dir_is_workspace` judges the **given** workspace. A workspace whose store
+    /// directory *is* the workspace (the store file sits directly in it) is refused.
+    #[test]
+    fn store_dir_is_workspace_uses_the_given_workspace() {
+        let ws = scratch_outside_worktree("store-is-ws");
+        let ws_canon = crate::store_path::resolve_workspace(&ws);
+        // `TSR_DB` is unset here, so the store is `<ws>/.tsr/tsr.db` — not the workspace itself.
+        assert!(!store_dir_is_workspace(&ws));
+        // A store file directly in the workspace *is* the workspace's directory: refused.
+        assert!(store_dir_is_workspace_with(
+            &ws_canon,
+            &ws_canon.join("tsr.db")
+        ));
+        // A store in a subdirectory is not the workspace itself.
+        assert!(!store_dir_is_workspace_with(
+            &ws_canon,
+            &ws_canon.join(".tsr/tsr.db")
+        ));
     }
 }

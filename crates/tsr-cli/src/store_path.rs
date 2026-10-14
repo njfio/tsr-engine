@@ -1,8 +1,10 @@
 //! Where the store lives and how a task is named.
 //!
-//! The store is one SQLite file. Its path comes from `TSR_DB` when set, else `.tsr/tsr.db` under
-//! the current directory. A task id is content-addressed from the Claude Code `session_id`, so the
-//! same session always names the same task and a different session never collides with it.
+//! The store is one SQLite file. Its path comes from `TSR_DB` when set, else the discovery rule in
+//! [`db_path`] (the nearest `.tsr/tsr.db` from the current directory up to the git work tree's top,
+//! else one created at that top; outside a work tree, the current directory only). A task id is
+//! content-addressed from the Claude Code `session_id`, so the same session always names the same
+//! task and a different session never collides with it.
 
 use std::path::{Path, PathBuf};
 use tsr_domain::{Hash, TaskId};
@@ -11,12 +13,19 @@ use tsr_store::Store;
 /// The default store path, relative to the working directory.
 pub const DEFAULT_DB: &str = ".tsr/tsr.db";
 
-/// The store path: `TSR_DB` if set, else the nearest `.tsr/tsr.db` in the current directory or one
-/// of its ancestors, else `<cwd>/.tsr/tsr.db`.
+/// The store path: `TSR_DB` if set, else the store discovery rule below.
 ///
-/// The ancestor walk is what makes `tsr forecast` / `tsr exec` run from a subdirectory find the
-/// store the session was opened in, instead of creating a second store there. The session file and
-/// the exec lock follow the store's directory, so they are found by the same walk.
+/// **Operator decision (r6b): discovery never leaves the project.** With `TSR_DB` unset:
+/// - if the current directory is inside a git work tree (a directory containing `.git`, file or
+///   directory), search for `.tsr/tsr.db` from the current directory up to and including that work
+///   tree's top, and create `.tsr/tsr.db` at the top when none is found;
+/// - outside a git work tree, use `.tsr/tsr.db` in the current directory only (no walk).
+///
+/// The walk is what makes `tsr forecast` / `tsr exec` run from a subdirectory find the store the
+/// session was opened in, instead of creating a second store there. It is bounded by the work tree
+/// so an unrelated ancestor store (`~/.tsr/tsr.db`, `/tmp/.tsr/tsr.db`) is never used silently: two
+/// projects under one parent keep separate stores. The session file and the exec lock follow the
+/// store's directory, so they are found by the same rule.
 pub fn db_path() -> PathBuf {
     match std::env::var_os("TSR_DB") {
         Some(p) if !p.is_empty() => PathBuf::from(p),
@@ -24,21 +33,62 @@ pub fn db_path() -> PathBuf {
     }
 }
 
-/// The nearest `.tsr/tsr.db` in the current directory or an ancestor, else `<cwd>/.tsr/tsr.db`.
+/// The store path for an explicit starting directory, instead of the process's current directory.
 ///
-/// The walk stops at the filesystem root; when no store exists anywhere up to the root, the store
-/// is created in the current directory (the caller's `open_store` creates the parent).
+/// `TSR_DB` is honoured exactly as in [`db_path`]; with it unset, discovery walks from `start`
+/// (r6 review defect 5: an in-process caller that passes a workspace must be judged against that
+/// workspace, not against wherever the process happens to be).
+pub fn db_path_for(start: &Path) -> PathBuf {
+    match std::env::var_os("TSR_DB") {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => discover_db_path_from(start),
+    }
+}
+
+/// The nearest `.tsr/tsr.db` from the current directory up to the work tree's top, else
+/// `<top>/.tsr/tsr.db` (the work tree's top, or the current directory outside a work tree).
+///
+/// The walk stops at the work tree's top (the highest ancestor containing `.git`); when no store
+/// exists anywhere up to it, the store is created at the top (the caller's `open_store` creates the
+/// parent). Outside a git work tree there is no walk: the store is `<cwd>/.tsr/tsr.db`.
 fn discover_db_path() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut dir: Option<&Path> = Some(&cwd);
+    discover_db_path_from(&cwd)
+}
+
+/// [`discover_db_path`] from an explicit starting directory (r6 review defect 5).
+fn discover_db_path_from(cwd: &Path) -> PathBuf {
+    let top = work_tree_top(cwd);
+    let mut dir: Option<&Path> = Some(cwd);
     while let Some(d) = dir {
         let candidate = d.join(DEFAULT_DB);
         if candidate.is_file() {
             return candidate;
         }
+        if d == top {
+            break;
+        }
         dir = d.parent();
     }
-    cwd.join(DEFAULT_DB)
+    top.join(DEFAULT_DB)
+}
+
+/// The top of the git work tree containing `dir`: the highest ancestor of `dir` (including `dir`)
+/// that contains a `.git` entry (a directory or a file, as a linked work tree or submodule has).
+///
+/// When no ancestor contains `.git`, `dir` itself is returned, so the caller's walk is a single
+/// step and the store is created in the current directory (the documented limit outside a work
+/// tree).
+fn work_tree_top(dir: &Path) -> PathBuf {
+    let mut top: Option<PathBuf> = None;
+    let mut cur: Option<&Path> = Some(dir);
+    while let Some(d) = cur {
+        if d.join(".git").exists() {
+            top = Some(d.to_path_buf());
+        }
+        cur = d.parent();
+    }
+    top.unwrap_or_else(|| dir.to_path_buf())
 }
 
 /// Resolve a store path to an absolute, symlink-resolved path, so two spellings of the same store
@@ -144,9 +194,10 @@ pub const SESSION_DIR: &str = ".tsr";
 /// agree on *which task a session is* without either guessing.
 pub const SESSION_FILE: &str = "session";
 
-/// The directory that holds the session file: the store's directory (`TSR_DB`'s parent, else
-/// `<cwd>/.tsr`). The session belongs to the store, so a store at a custom path keeps its session
-/// file beside it — which is also what makes the tests hermetic.
+/// The directory that holds the session file: the store's directory (`TSR_DB`'s parent, else the
+/// resolved store's parent — the work tree's top, or the current directory outside one). The
+/// session belongs to the store, so a store at a custom path keeps its session file beside it —
+/// which is also what makes the tests hermetic.
 pub fn session_dir() -> PathBuf {
     let db = db_path();
     match db.parent() {
@@ -190,7 +241,8 @@ fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 /// The session the hook last recorded, if any: `TSR_SESSION` first, then the session file in the
-/// store's directory (or its nearest ancestor, so a tool run from a subdirectory still finds it).
+/// store's directory (or its nearest ancestor up to the work tree's top, so a tool run from a
+/// subdirectory still finds it — but an unrelated ancestor above the work tree is never used).
 pub fn current_session() -> Option<String> {
     if let Some(s) = std::env::var_os(SESSION_ENV) {
         let s = s.to_string_lossy().into_owned();
@@ -199,6 +251,9 @@ pub fn current_session() -> Option<String> {
         }
     }
     let start = session_dir();
+    // Bound the walk by the same work tree the store discovery uses, so a session file above the
+    // work tree (e.g. `~/.tsr/session`) is never read.
+    let top = work_tree_top(&start);
     let mut dir: Option<&Path> = Some(&start);
     while let Some(d) = dir {
         if let Ok(text) = std::fs::read_to_string(session_file_in(d)) {
@@ -206,6 +261,9 @@ pub fn current_session() -> Option<String> {
             if !text.is_empty() {
                 return Some(text);
             }
+        }
+        if d == top {
+            break;
         }
         dir = d.parent();
     }
@@ -218,7 +276,8 @@ pub fn current_session() -> Option<String> {
 /// derives from the payload's `session_id`. The id comes from, in order:
 /// 1. an explicit `--task <id>` (handled by the caller, which never reaches here);
 /// 2. `TSR_SESSION`;
-/// 3. the `.tsr/session` file in the current directory or its nearest ancestor.
+/// 3. the `.tsr/session` file in the store's directory or its nearest ancestor up to the work
+///    tree's top.
 ///
 /// There is no "latest task" and no `hash("default")` fallback: those are exactly the ambiguity that
 /// let a `--task`-less forecast land in another session's task when two sessions were open. When no
@@ -333,6 +392,56 @@ mod tests {
             resolve_workspace(&link),
             std::fs::canonicalize(&real).expect("canonicalize real")
         );
+    }
+
+    /// A scratch directory under the system temp dir, with no `.git` in any ancestor, so
+    /// [`work_tree_top`]'s walk is not bounded by the workspace's own work tree.
+    fn scratch_outside_worktree(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("store-path-unit").join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let mut d: Option<&Path> = Some(&dir);
+        while let Some(cur) = d {
+            assert!(
+                !cur.join(".git").exists(),
+                "scratch_outside_worktree needs no ancestor .git, but {} has one",
+                cur.display()
+            );
+            d = cur.parent();
+        }
+        dir
+    }
+
+    /// The work tree's top is the highest ancestor containing `.git` (a directory or a file).
+    #[test]
+    fn work_tree_top_is_the_highest_ancestor_with_git() {
+        let root = scratch_outside_worktree("work-tree-top");
+        let top = root.join("proj");
+        let sub = top.join("a/b");
+        std::fs::create_dir_all(&sub).expect("subdir");
+        std::fs::create_dir_all(top.join(".git")).expect(".git dir");
+        assert_eq!(work_tree_top(&sub), top, "the top is the .git directory");
+        assert_eq!(work_tree_top(&top), top, "the top is itself a work tree");
+    }
+
+    /// A `.git` **file** (a linked work tree or submodule) also marks the top.
+    #[test]
+    fn work_tree_top_accepts_a_git_file() {
+        let root = scratch_outside_worktree("work-tree-gitfile");
+        let top = root.join("proj");
+        let sub = top.join("a");
+        std::fs::create_dir_all(&sub).expect("subdir");
+        std::fs::write(top.join(".git"), "gitdir: /elsewhere\n").expect(".git file");
+        assert_eq!(work_tree_top(&sub), top);
+    }
+
+    /// Outside a work tree there is no walk: the top is the directory itself.
+    #[test]
+    fn work_tree_top_outside_a_work_tree_is_the_directory() {
+        let root = scratch_outside_worktree("work-tree-none");
+        let sub = root.join("a/b");
+        std::fs::create_dir_all(&sub).expect("subdir");
+        assert_eq!(work_tree_top(&sub), sub);
     }
 
     /// A `..` after a symlink pops the symlink's **target**, not the link name (review item 8):
