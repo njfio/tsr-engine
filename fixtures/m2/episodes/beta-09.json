@@ -296,7 +296,7 @@
             "task_close_days": 7
           },
           "source": "operator",
-          "raw": 0.4221536740646143,
+          "raw": 0.42215367406461435,
           "calibrated": null,
           "support": {
             "episodes": 10
@@ -395,7 +395,7 @@
               },
               {
                 "forecast": "fdbe101500a836479f3fd0037ea9ce49df76364820b8e96ca88daba7187df79c",
-                "residual": 0.4221536740646143
+                "residual": 0.42215367406461435
               }
             ],
             "contrast": {
