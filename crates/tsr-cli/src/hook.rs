@@ -1240,6 +1240,11 @@ pub fn record_forecast_for_action(
 ///
 /// The candidate is not re-minted: the id names a `Proposed` already on record. The forecast is
 /// appended at the state version the next event will occupy, exactly as the `--kind/--args` path.
+///
+/// The id must name a candidate that was **proposed in this task**; an id that was never proposed is
+/// refused (the caller exits 2, naming it) and nothing is recorded. A candidate that has already run
+/// is allowed: the forecast re-arms it (the r5c rule), so the check is "was it ever proposed", not
+/// "is it still pending".
 pub fn record_forecast_for_candidate(
     store: &Store,
     task: &TaskId,
@@ -1247,8 +1252,32 @@ pub fn record_forecast_for_candidate(
     p: f64,
     source: &str,
 ) -> anyhow::Result<CandidateId> {
+    if !candidate_was_proposed(store, task, cid)? {
+        return Err(anyhow::Error::new(NotProposedCandidate(cid)));
+    }
     append_forecast(store, task, cid, p, source)?;
     Ok(cid)
+}
+
+/// The error `tsr forecast --event <id>` returns when `id` was never proposed in the task. The CLI
+/// maps it to exit 2 and prints the id, so the caller can tell a bad id from a store failure.
+#[derive(Debug)]
+pub struct NotProposedCandidate(pub CandidateId);
+
+impl std::fmt::Display for NotProposedCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "candidate {} was not proposed in this task", self.0)
+    }
+}
+
+impl std::error::Error for NotProposedCandidate {}
+
+/// Whether `cid` was ever `Proposed` in `task` (regardless of whether it has since run).
+fn candidate_was_proposed(store: &Store, task: &TaskId, cid: CandidateId) -> anyhow::Result<bool> {
+    let events = store.by_task(task)?;
+    Ok(events
+        .iter()
+        .any(|(_, e)| matches!(&e.kind, EventKind::Proposed { candidate } if candidate.id == cid)))
 }
 
 /// The M0 self-test harness: drive realistic Claude Code hook payloads through the hook and write

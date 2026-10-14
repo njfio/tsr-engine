@@ -11,12 +11,34 @@ use tsr_store::Store;
 /// The default store path, relative to the working directory.
 pub const DEFAULT_DB: &str = ".tsr/tsr.db";
 
-/// The store path: `TSR_DB` if set, else [`DEFAULT_DB`].
+/// The store path: `TSR_DB` if set, else the nearest `.tsr/tsr.db` in the current directory or one
+/// of its ancestors, else `<cwd>/.tsr/tsr.db`.
+///
+/// The ancestor walk is what makes `tsr forecast` / `tsr exec` run from a subdirectory find the
+/// store the session was opened in, instead of creating a second store there. The session file and
+/// the exec lock follow the store's directory, so they are found by the same walk.
 pub fn db_path() -> PathBuf {
     match std::env::var_os("TSR_DB") {
         Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => PathBuf::from(DEFAULT_DB),
+        _ => discover_db_path(),
     }
+}
+
+/// The nearest `.tsr/tsr.db` in the current directory or an ancestor, else `<cwd>/.tsr/tsr.db`.
+///
+/// The walk stops at the filesystem root; when no store exists anywhere up to the root, the store
+/// is created in the current directory (the caller's `open_store` creates the parent).
+fn discover_db_path() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut dir: Option<&Path> = Some(&cwd);
+    while let Some(d) = dir {
+        let candidate = d.join(DEFAULT_DB);
+        if candidate.is_file() {
+            return candidate;
+        }
+        dir = d.parent();
+    }
+    cwd.join(DEFAULT_DB)
 }
 
 /// Resolve a store path to an absolute, symlink-resolved path, so two spellings of the same store

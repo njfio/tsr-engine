@@ -433,6 +433,12 @@ fn run_forecast(
             println!("{id}");
             ExitCode::SUCCESS
         }
+        Err(e) if e.downcast_ref::<hook::NotProposedCandidate>().is_some() => {
+            // `--event <id>` named a candidate that was never proposed in this task: exit 2, naming
+            // it, and record nothing (the r5c rule allows a candidate that has already run).
+            eprintln!("tsr: {e}");
+            ExitCode::from(2)
+        }
         Err(e) => {
             eprintln!("tsr: forecast failed: {e}");
             ExitCode::from(1)

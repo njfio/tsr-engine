@@ -42,8 +42,10 @@ pub fn open(store: &Store, name: &str, workspace: &str, intent: &str) -> anyhow:
 /// The status of a task: its event count and last event.
 pub fn status(store: &Store, task: &TaskId) -> anyhow::Result<(usize, Option<Event>)> {
     let events = store.by_task(task)?;
+    // The task's *own* event count, not the store-wide highest sequence number: `latest_seq` is the
+    // largest seq in the whole store, so it over-counts as soon as a second task exists.
+    let count = events.len();
     let last = events.into_iter().next_back().map(|(_, e)| e);
-    let count = store.latest_seq(task)?.unwrap_or(0) as usize;
     Ok((count, last))
 }
 

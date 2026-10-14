@@ -204,10 +204,9 @@ pub fn store_dir_inside_workspace(workspace: &Path, store: Option<&Path>) -> Opt
     let ws = crate::store_path::resolve_workspace(workspace);
     let db = match store {
         Some(p) => p.to_path_buf(),
-        None => match std::env::var_os("TSR_DB") {
-            Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => ws.join(crate::store_path::DEFAULT_DB),
-        },
+        // No store injected: the workspace's own default. The production runner passes the resolved
+        // store explicitly (see `RealRunner::run`), so this branch is the unit-test contract.
+        None => ws.join(crate::store_path::DEFAULT_DB),
     };
     // Resolve the store path once (relative → workspace, `.`/`..` normalised, longest existing
     // ancestor canonicalised so symlinks resolve) before comparing it with the workspace. Comparing
@@ -286,13 +285,17 @@ impl Runner for RealRunner {
     }
 
     fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal> {
+        // The store is wherever `db_path` resolves it (nearest `.tsr/tsr.db` in the cwd or an
+        // ancestor, else the cwd's own). Pass it explicitly so the read-only mount follows the
+        // resolved path, not the workspace default.
+        let store = crate::store_path::db_path();
         // Create the store's directory before the mount, so a read-only bind mount of a
         // not-yet-existing directory cannot fail the container start (repair item 3).
-        if let Some(dir) = store_dir_inside_workspace(workspace, None) {
+        if let Some(dir) = store_dir_inside_workspace(workspace, Some(&store)) {
             std::fs::create_dir_all(&dir)
                 .map_err(|e| ExecRefusal::StartFailed(format!("cannot create store dir: {e}")))?;
         }
-        let args = container_argv(self.runtime, workspace, argv);
+        let args = container_argv_with_store(self.runtime, workspace, argv, Some(&store));
         let out = Command::new(&args[0])
             .args(&args[1..])
             .output()
@@ -407,12 +410,9 @@ pub fn run(
 /// cannot be mounted read-only over the writable workspace mount.
 pub fn store_dir_is_workspace(workspace: &Path) -> bool {
     let ws = crate::store_path::resolve_workspace(workspace);
-    let db = match std::env::var_os("TSR_DB") {
-        Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => ws.join(crate::store_path::DEFAULT_DB),
-    };
+    let db = crate::store_path::db_path();
     // Resolve the store path the same way `store_dir_inside_workspace` does (review (5)): otherwise
-    // `TSR_DB=tsr.db` would not be refused.
+    // `TSR_DB=tsr.db` would not be refused. `db_path` walks ancestors when `TSR_DB` is unset.
     let db = crate::store_path::resolve_store_path(&db, &ws);
     db.parent().map(|d| d == ws).unwrap_or(false)
 }
@@ -426,10 +426,7 @@ pub fn store_dir_is_workspace(workspace: &Path) -> bool {
 /// `TSR_DB` resolves against the workspace.
 pub fn exec_lock_path(workspace: &Path) -> PathBuf {
     let ws = crate::store_path::resolve_workspace(workspace);
-    let db = match std::env::var_os("TSR_DB") {
-        Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => ws.join(crate::store_path::DEFAULT_DB),
-    };
+    let db = crate::store_path::db_path();
     let db = crate::store_path::resolve_store_path(&db, &ws);
     let name = db
         .file_name()
