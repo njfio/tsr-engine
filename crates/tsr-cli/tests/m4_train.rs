@@ -4487,3 +4487,45 @@ fn l2_a_trailing_slash_writes_the_report_beside_the_bundle() {
     let (code, _o, err) = run(&["train", "verify", b.to_str().unwrap()]);
     assert_eq!(code, 0, "L2: the bundle still verifies:\n{err}");
 }
+
+/// L4: a missing `--events`, `--tasks` or `--labels` file is refused with exit 2 naming its path,
+/// not as "missing from the dataset directory" -- the caller named the file, no dataset directory
+/// is involved. On 215ef11 a missing `--events` file read
+/// `events.jsonl: the file is missing from the dataset directory <its parent>`.
+#[test]
+fn l4_a_missing_input_file_is_named_by_its_path() {
+    let dir = temp_dir("l4-missing-input");
+    let (ev, tk, lb) = regenerate(&dir);
+    let missing = dir.join("absent").join("nowhere.jsonl");
+    for flag in ["--events", "--tasks", "--labels"] {
+        let pick = |f: &str, real: &Path| -> String {
+            if f == flag {
+                missing.to_str().unwrap().to_string()
+            } else {
+                real.to_str().unwrap().to_string()
+            }
+        };
+        let out = dir.join(format!("ds{flag}"));
+        let (code, o, err) = run(&[
+            "train",
+            "dataset",
+            "--events",
+            &pick("--events", &ev),
+            "--tasks",
+            &pick("--tasks", &tk),
+            "--labels",
+            &pick("--labels", &lb),
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 2, "L4: a missing {flag} file exits 2:\n{o}\n{err}");
+        assert!(
+            err.contains(missing.to_str().unwrap()),
+            "L4: the refusal for a missing {flag} file names its path:\n{err}"
+        );
+        assert!(
+            !err.contains("dataset directory"),
+            "L4: a missing {flag} file is not \"missing from the dataset directory\":\n{err}"
+        );
+    }
+}

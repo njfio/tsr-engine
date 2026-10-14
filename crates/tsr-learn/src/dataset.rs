@@ -660,10 +660,8 @@ where
             .map_err(|_| LearnError::Invalid(format!("{name}: the file is not valid UTF-8")))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(LearnError::Invalid(format!(
-                "{name}: the file is missing from the dataset directory {}",
-                path.parent()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default()
+                "{name}: the file {} is missing",
+                path.display()
             )))
         }
         Err(e) => return Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),
@@ -719,10 +717,8 @@ pub fn read_events_records(path: &Path) -> Result<Vec<(i64, tsr_domain::Event)>,
             .map_err(|_| LearnError::Invalid(format!("{name}: the file is not valid UTF-8")))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(LearnError::Invalid(format!(
-                "{name}: the file is missing from the dataset directory {}",
-                path.parent()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default()
+                "{name}: the file {} is missing",
+                path.display()
             )))
         }
         Err(e) => return Err(LearnError::Invalid(format!("{name}: cannot read: {e}"))),

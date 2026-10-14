@@ -78,7 +78,8 @@ pub struct Paired {
     pub mean: Option<f64>,
     /// The 90% interval, or `None` when there are fewer than two lineage clusters.
     pub interval: Option<(f64, f64)>,
-    /// True when the interval spans zero.
+    /// True when the interval spans zero, or when there is no interval (an empty pair or fewer
+    /// than two lineage clusters): nothing was concluded.
     pub inconclusive: bool,
     /// The number of lineage clusters.
     pub clusters: u32,
@@ -517,7 +518,8 @@ pub fn report(bundle: &Bundle, dataset: &Dataset, seed: u64) -> Report {
 /// The paired difference with a 90% cluster-bootstrap interval over lineage.
 ///
 /// `diffs` is `(lineage, difference)` per task. With fewer than two lineage clusters the interval
-/// is `None` (`interval n/a`). The interval is INCONCLUSIVE when it spans zero.
+/// is `None` (`interval n/a`). The interval is INCONCLUSIVE when it spans zero; a pair without an
+/// interval carries `inconclusive: true` (the text prints no verdict for it).
 pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
     let tasks = diffs.len() as u32;
     if diffs.is_empty() {
@@ -525,7 +527,7 @@ pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
             tasks: 0,
             mean: None,
             interval: None,
-            inconclusive: false,
+            inconclusive: true,
             clusters: 0,
         };
     }
@@ -542,7 +544,7 @@ pub fn paired_difference(diffs: &[(String, f64)], seed: u64) -> Paired {
             tasks,
             mean: Some(mean),
             interval: None,
-            inconclusive: false,
+            inconclusive: true,
             clusters: n_clusters,
         };
     }
@@ -650,7 +652,7 @@ pub fn render_report(r: &Report, json: bool) -> String {
             out.push_str(&format!(
                 "  floor={} {} {brier}\n",
                 p.floor,
-                proxy("coverage", p.coverage as f64),
+                Proxy::new("coverage", p.coverage.to_string()),
             ));
         }
     }
@@ -1555,5 +1557,81 @@ mod tests {
             ci < cl && cl < ge && ge < op,
             "F13: forecasters print in name order:\n{text2}"
         );
+    }
+
+    /// L4 (final review): a pair with no interval -- empty, or a single lineage cluster -- carries
+    /// `"inconclusive": true` in the JSON, never `false`: nothing was concluded. The text is
+    /// unchanged (`interval n/a`, no verdict). On 215ef11 both carried `"inconclusive": false`.
+    #[test]
+    fn l4_a_pair_without_an_interval_is_inconclusive_in_the_json() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        // Empty: no held-out labelled rows.
+        let empty = report(&b, &dataset(&b, Vec::new()), 7);
+        // One lineage cluster.
+        let rows: Vec<Row> = (0..10u64)
+            .map(|i| row(&b, "calibrated", "l0", 1.0, i % 2 == 0, 0.5, i))
+            .collect();
+        let single = report(&b, &dataset(&b, rows), 7);
+        for (what, r) in [
+            ("an empty pair", &empty),
+            ("a single-cluster pair", &single),
+        ] {
+            assert!(r.paired.interval.is_none(), "{what} has no interval");
+            let json = render_report(r, true);
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                v["paired"]["inconclusive"],
+                serde_json::Value::Bool(true),
+                "L4: {what} is inconclusive in the JSON:\n{json}"
+            );
+            let text = render_report(r, false);
+            let line = text
+                .lines()
+                .find(|l| l.trim_start().starts_with("all "))
+                .expect("an `all` paired line");
+            assert!(
+                line.ends_with("interval n/a"),
+                "L4: {what} prints `interval n/a` and no verdict:\n{line}"
+            );
+        }
+    }
+
+    /// L4 (final review): the floor sweep's coverage is a row count and prints as an integer
+    /// (`coverage=59`), not `coverage=59.000000`.
+    #[test]
+    fn l4_floor_sweep_coverage_prints_as_an_integer() {
+        let b = bundle_for(&["calibrated"], &["calibrated"]);
+        let rows: Vec<Row> = (0..12u64)
+            .map(|i| {
+                let mut r = row(
+                    &b,
+                    "calibrated",
+                    &format!("l{}", i % 3),
+                    1.0,
+                    i % 2 == 0,
+                    0.5,
+                    i,
+                );
+                r.side = Side::Calibrate;
+                r
+            })
+            .collect();
+        let r = report(&b, &dataset(&b, rows), 7);
+        let text = render_report(&r, false);
+        let coverages: Vec<&str> = text
+            .split_whitespace()
+            .filter_map(|w| w.strip_prefix("coverage="))
+            .collect();
+        assert!(
+            !coverages.is_empty(),
+            "the floor sweep prints coverage:\n{text}"
+        );
+        for c in coverages {
+            assert!(
+                c.parse::<u32>().is_ok(),
+                "L4: coverage prints as an integer, not {c:?}:\n{text}"
+            );
+        }
+        assert!(text.contains("floor=0 coverage=12 "), "{text}");
     }
 }
