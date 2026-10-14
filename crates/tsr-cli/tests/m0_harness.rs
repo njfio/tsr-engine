@@ -651,6 +651,11 @@ fn a_second_run_of_the_same_command_commits_without_a_second_proposal() {
 const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "parser"];
 /// The command string the forecast and the hook payload name for a run.
 const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
+/// The second run's argv: a *different* command, so it mints a distinct candidate. A second run of
+/// the same command would name the first (already dispatched) candidate, which defect 1 refuses.
+const SELFTEST_TEST_ARGV2: [&str; 5] = ["cargo", "test", "--offline", "-p", "lexer"];
+/// The command string the forecast and the hook payload name for the second run.
+const SELFTEST_TEST_CMD2: &str = "cargo test --offline -p lexer";
 
 /// A `PreToolUse` payload for a tool call, as a parsed [`HookPayload`].
 fn pre(session: &str, tool: &str, input: serde_json::Value) -> HookPayload {
@@ -758,18 +763,20 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
     )
     .expect("record edit");
 
-    // 6. A forecast before the second gated action, then the second run the same way.
+    // 6. A forecast before the second gated action, then the second run the same way. The second
+    //    run names a *different* command, so it mints a distinct candidate: a second run of the
+    //    first command would name the first (already dispatched) candidate, which defect 1 refuses.
     let candidate2 = hook::record_forecast_for_action(
         &store,
         &task,
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD,
+        SELFTEST_TEST_CMD2,
         0.6,
         "generator",
     )
     .expect("record second forecast");
     let exec_cmd2 = format!(
-        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD2}",
         candidate2.0.to_hex()
     );
     hook::record_tool(
@@ -777,16 +784,17 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
         &pre(session, "Bash", serde_json::json!({ "command": exec_cmd2 })),
     )
     .expect("record second exec pre");
+    let argv2: Vec<String> = SELFTEST_TEST_ARGV2.iter().map(|s| s.to_string()).collect();
     exec::run_with(
         &store,
         &task,
         &workspace,
         Some(candidate2),
-        &argv,
+        &argv2,
         &exec::FakeRunner::new(0, "test result: ok"),
     )
     .expect("second fake exec run");
-    hook::record_post_tool(&store, &post_bash(session, &exec_cmd, 0))
+    hook::record_post_tool(&store, &post_bash(session, &exec_cmd2, 0))
         .expect("record second exec post");
 
     // 7. A stop.

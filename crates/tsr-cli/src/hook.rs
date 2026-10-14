@@ -1216,6 +1216,11 @@ pub const SELFTEST_RECORDED_AT: &str = "2026-01-01T00:00:00Z";
 const SELFTEST_TEST_ARGV: [&str; 5] = ["cargo", "test", "--offline", "-p", "parser"];
 /// The full command string the forecast and the hook payload name for the first run.
 const SELFTEST_TEST_CMD: &str = "cargo test --offline -p parser";
+/// The second run's argv: a *different* command, so it mints a distinct candidate. A second run of
+/// the same command would name the first (already dispatched) candidate, which defect 1 refuses.
+const SELFTEST_TEST_ARGV2: [&str; 5] = ["cargo", "test", "--offline", "-p", "lexer"];
+/// The full command string the forecast and the hook payload name for the second run.
+const SELFTEST_TEST_CMD2: &str = "cargo test --offline -p lexer";
 
 /// Send the hook what Claude Code sends around a `tsr forecast …` Bash call: the PreToolUse before
 /// it, or the PostToolUse after it with a Bash tool response as Claude Code shapes it (stdout,
@@ -1418,20 +1423,22 @@ fn selftest_inner(
     };
     record_tool(&store, &edit)?;
 
-    // 6. A forecast before the second gated action, then the second run the same way.
+    // 6. A forecast before the second gated action, then the second run the same way. The second
+    //    run names a *different* command, so it mints a distinct candidate: a second run of the
+    //    first command would name the first (already dispatched) candidate, which defect 1 refuses.
     forecast_call_hooks(
         &store,
         session,
         "PreToolUse",
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD,
+        SELFTEST_TEST_CMD2,
         0.6,
     )?;
     let candidate2 = record_forecast_for_action(
         &store,
         &task,
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD,
+        SELFTEST_TEST_CMD2,
         0.6,
         "generator",
     )?;
@@ -1440,11 +1447,11 @@ fn selftest_inner(
         session,
         "PostToolUse",
         ActionKind::RunApprovedTest,
-        SELFTEST_TEST_CMD,
+        SELFTEST_TEST_CMD2,
         0.6,
     )?;
     let exec_cmd2 = format!(
-        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD2}",
         candidate2.0.to_hex()
     );
     let pre2 = HookPayload {
@@ -1455,7 +1462,8 @@ fn selftest_inner(
         ..Default::default()
     };
     record_tool(&store, &pre2)?;
-    crate::exec::run(&store, &task, &workspace, Some(candidate2), &argv)
+    let argv2: Vec<String> = SELFTEST_TEST_ARGV2.iter().map(|s| s.to_string()).collect();
+    crate::exec::run(&store, &task, &workspace, Some(candidate2), &argv2)
         .map_err(|e| anyhow::anyhow!("selftest exec refused: {e}"))?;
     ensure_last_run_executed(&store, &task)?;
     let post2 = HookPayload {
