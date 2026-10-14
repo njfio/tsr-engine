@@ -21,6 +21,8 @@ tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
 tsr-policy = { path = "../tsr-policy" }
 tsr-learn = { path = "../tsr-learn" }
+tsr-ledger = { path = "../tsr-ledger" }
+tsr-forecast = { path = "../tsr-forecast" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
@@ -29,6 +31,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 toml = { workspace = true }
+tsr-forecast = { path = "../tsr-forecast" }
 
 [lints]
 workspace = true

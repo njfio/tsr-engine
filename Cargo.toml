@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/tsr-domain", "crates/tsr-store", "crates/tsr-cli", "crates/tsr-policy", "crates/tsr-learn"]
+members = [
+    "crates/tsr-domain",
+    "crates/tsr-store",
+    "crates/tsr-cli",
+    "crates/tsr-policy",
+    "crates/tsr-forecast",
+    "crates/tsr-ledger",
+    "crates/tsr-learn",
+]
 
 [workspace.package]
 version = "0.0.1"
