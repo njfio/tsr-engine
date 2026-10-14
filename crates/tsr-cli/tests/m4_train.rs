@@ -4449,3 +4449,41 @@ fn m4_dataset_refuses_a_non_empty_out() {
         "M4: dataset into an empty directory is accepted:\n{out}\n{err}"
     );
 }
+
+/// L2: `report <bundle>/` (a trailing slash) writes the report beside the bundle as
+/// `<bundle>.report.json` and `<bundle>.report.txt`, exactly as `report <bundle>` does. On 215ef11
+/// it wrote hidden `.report.json` and `.report.txt` inside the bundle.
+#[test]
+fn l2_a_trailing_slash_writes_the_report_beside_the_bundle() {
+    let dir = temp_dir("l2-trailing-slash");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let with_slash = format!("{}/", b.display());
+    let (code, out, err) = run(&[
+        "train",
+        "report",
+        &with_slash,
+        "--dataset",
+        ds.to_str().unwrap(),
+        "--seed",
+        "7",
+    ]);
+    assert_eq!(code, 0, "L2: report <bundle>/ runs:\n{out}\n{err}");
+    for ext in ["json", "txt"] {
+        let beside = dir.join("models").join(format!("m4.report.{ext}"));
+        assert!(
+            beside.is_file(),
+            "L2: the report is written beside the bundle as {}",
+            beside.display()
+        );
+        let inside = b.join(format!(".report.{ext}"));
+        assert!(
+            !inside.exists(),
+            "L2: no report is written inside the bundle ({})",
+            inside.display()
+        );
+    }
+    // The bundle still verifies: nothing was added to it.
+    let (code, _o, err) = run(&["train", "verify", b.to_str().unwrap()]);
+    assert_eq!(code, 0, "L2: the bundle still verifies:\n{err}");
+}

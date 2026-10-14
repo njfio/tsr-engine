@@ -612,8 +612,11 @@ fn run_verify(bundle: &Path, rebuild: Option<&Path>) -> std::process::ExitCode {
 }
 
 /// The report path beside the bundle: `<bundle>.report.<ext>`.
+///
+/// L2: `components().as_path()` drops a trailing `/` (and `/.`), so `report models/x/` writes
+/// `models/x.report.<ext>` beside the bundle, not a hidden `.report.<ext>` inside it.
 fn report_path(bundle: &Path, ext: &str) -> std::path::PathBuf {
-    let mut s = bundle.as_os_str().to_os_string();
+    let mut s = bundle.components().as_path().as_os_str().to_os_string();
     s.push(format!(".report.{ext}"));
     std::path::PathBuf::from(s)
 }
