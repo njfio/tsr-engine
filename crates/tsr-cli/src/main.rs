@@ -76,6 +76,11 @@ enum Cmd {
     },
     /// Run a command in the sealed sibling sandbox and reconcile the result (M0, B4).
     Exec {
+        /// The candidate this run is bound to: a 64-hex id of the session task's candidate that has
+        /// a forecast and is not yet dispatched. Without it, `tsr exec` mints its own candidate with
+        /// no forecast and says so on stderr.
+        #[arg(long)]
+        candidate: Option<String>,
         #[arg(trailing_var_arg = true)]
         argv: Vec<String>,
     },
@@ -243,7 +248,7 @@ fn main() -> ExitCode {
             out,
             update_frozen_fixture,
         } => run_hook(&stage, selftest, out.as_deref(), update_frozen_fixture),
-        Cmd::Exec { argv } => run_exec(&argv),
+        Cmd::Exec { candidate, argv } => run_exec(candidate.as_deref(), &argv),
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
@@ -475,7 +480,7 @@ fn run_hook(
     }
 }
 
-fn run_exec(argv: &[String]) -> ExitCode {
+fn run_exec(candidate: Option<&str>, argv: &[String]) -> ExitCode {
     let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     // Refuse a store whose directory *is* the workspace **before** the store is opened: opening it
     // would create an empty `tsr.db` in the workspace, which the refusal must not leave behind
@@ -500,7 +505,17 @@ fn run_exec(argv: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match exec::run(&store, &task, &workspace, argv) {
+    let candidate = match candidate {
+        Some(s) => match hook::parse_candidate_id(s) {
+            Some(c) => Some(c),
+            None => {
+                eprintln!("tsr: --candidate must be a 64-hex candidate id");
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
+    match exec::run(&store, &task, &workspace, candidate, argv) {
         Ok(outcome) => ExitCode::from(outcome.exit_code.clamp(0, 255) as u8),
         Err(exec::ExecRefusal::NoRuntime) => {
             eprintln!(
@@ -516,6 +531,10 @@ fn run_exec(argv: &[String]) -> ExitCode {
         }
         Err(exec::ExecRefusal::StoreIsWorkspace) => {
             eprintln!("tsr: TSR_DB must not be the workspace itself");
+            ExitCode::from(2)
+        }
+        Err(exec::ExecRefusal::UnknownCandidate(reason)) => {
+            eprintln!("tsr: {reason}");
             ExitCode::from(2)
         }
     }

@@ -384,6 +384,7 @@ pub fn run(
     store: &Store,
     task: &TaskId,
     workspace: &Path,
+    candidate: Option<CandidateId>,
     argv: &[String],
 ) -> Result<ExecOutcome, ExecRefusal> {
     // A store whose directory *is* the workspace cannot be mounted read-only over itself: refuse
@@ -394,7 +395,7 @@ pub fn run(
     // The refusal is decided here, before `run_with` records anything: no runtime → exit 3 and an
     // untouched log.
     let runner = RealRunner::detect()?;
-    run_with(store, task, workspace, argv, &runner)
+    run_with(store, task, workspace, candidate, argv, &runner)
 }
 
 /// Whether the store file's parent is the workspace itself (`TSR_DB=<workspace>/tsr.db`), which
@@ -422,6 +423,7 @@ pub fn run_with(
     store: &Store,
     task: &TaskId,
     workspace: &Path,
+    candidate: Option<CandidateId>,
     argv: &[String],
     runner: &dyn Runner,
 ) -> Result<ExecOutcome, ExecRefusal> {
@@ -429,19 +431,21 @@ pub fn run_with(
     runner.available()?;
 
     // Record the dispatch only once the runner is known to be able to run.
-    let (matched, n_matches) = pending_matching(store, task, argv);
-    let cid = match matched {
-        // Exactly one pending candidate's pattern matches this argv: dispatch it, do not mint a
-        // second. The hook committed it a moment ago for the same command.
-        Some(cid) => cid,
+    let cid = match candidate {
+        // (b) The agent named the candidate: it must be a candidate of this task that has a forecast
+        // and is not yet dispatched. An unknown, unforecast or already-dispatched id is refused with
+        // exit 2 and nothing is recorded or run.
+        Some(cid) => {
+            check_named_candidate(store, task, cid)?;
+            cid
+        }
+        // (d) No `--candidate`: mint a candidate with no forecast and say so on stderr. The log is
+        // honest about it, and reconstruct may reject it — that is the intended signal.
         None => {
-            if n_matches == 0 {
-                eprintln!("tsr: exec: no pending candidate matches this argv; minting a fresh one");
-            } else {
-                eprintln!(
-                    "tsr: exec: {n_matches} pending candidates match this argv; minting a fresh one"
-                );
-            }
+            eprintln!(
+                "tsr: exec: no --candidate given; this run has no forecast (the candidate is minted \
+                 here and reconstruct may reject it)"
+            );
             let candidate = mint_candidate(argv)?;
             let cid = candidate.id;
             let proposed = append(
@@ -545,6 +549,10 @@ pub enum ExecRefusal {
     /// read-only over the writable workspace mount. Refused with exit 2, nothing recorded.
     #[error("TSR_DB must not be the workspace itself: refusing to mount the workspace read-only")]
     StoreIsWorkspace,
+    /// `--candidate <id>` named a candidate that is not a candidate of this task, has no forecast,
+    /// or is already dispatched. Refused with exit 2, nothing recorded and nothing run.
+    #[error("{0}")]
+    UnknownCandidate(String),
 }
 
 /// The candidate id an argv would produce: the same identity the hook mints for the equivalent
@@ -565,60 +573,61 @@ fn mint_candidate(argv: &[String]) -> Result<Candidate, ExecRefusal> {
     .map_err(|_| ExecRefusal::NoRuntime)
 }
 
-/// The pending candidates of `kind` in `task`: those whose newest `Proposed`/`Committed` comes after
-/// their newest `Dispatched` (or which have no `Dispatched`). The occurrence walk is the same as
-/// [`pending_commitment`], but it keeps every pending id rather than the last one, so the caller can
-/// test each against the argv.
-fn pending_candidates(store: &Store, task: &TaskId, kind: ActionKind) -> Vec<CandidateId> {
-    let events = match store.by_task(task) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-    let mut pending: Vec<CandidateId> = Vec::new();
+/// Check that `cid` is a candidate of `task` that has a forecast and is not yet dispatched, and
+/// refuse with exit 2 naming the reason otherwise (operator decision (b)).
+///
+/// "Has a forecast" means a `Forecast { candidate: cid }` event exists for it. "Not yet dispatched"
+/// means no `Dispatched { candidate: cid }` follows the newest `Committed` for it — the same
+/// per-occurrence rule [`pending_commitment`] uses, so a re-committed candidate is dispatchable
+/// again.
+fn check_named_candidate(
+    store: &Store,
+    task: &TaskId,
+    cid: CandidateId,
+) -> Result<(), ExecRefusal> {
+    let events = store
+        .by_task(task)
+        .map_err(|e| ExecRefusal::UnknownCandidate(format!("cannot read the log: {e}")))?;
+    let hex = cid.0.to_hex();
+
+    let mut proposed = false;
+    let mut forecast = false;
+    let mut committed = false;
+    let mut dispatched = false;
     for (_, e) in &events {
         match &e.kind {
-            EventKind::Proposed { candidate } => {
-                if candidate.kind == kind && !pending.contains(&candidate.id) {
-                    pending.push(candidate.id);
-                }
+            EventKind::Proposed { candidate } if candidate.id == cid => proposed = true,
+            EventKind::Forecast { candidate, .. } if *candidate == cid => forecast = true,
+            EventKind::Committed { candidate, .. } if *candidate == cid => {
+                committed = true;
+                dispatched = false;
             }
-            EventKind::Committed { candidate, .. } => {
-                if pending.contains(candidate) {
-                    continue;
-                }
-                if let Some(c) = events.iter().find_map(|(_, p)| match &p.kind {
-                    EventKind::Proposed { candidate: p } if p.id == *candidate => Some(p),
-                    _ => None,
-                }) {
-                    if c.kind == kind && !pending.contains(candidate) {
-                        pending.push(*candidate);
-                    }
-                }
-            }
-            EventKind::Dispatched { candidate, .. } => {
-                pending.retain(|p| p != candidate);
-            }
+            EventKind::Dispatched { candidate, .. } if *candidate == cid => dispatched = true,
             _ => {}
         }
     }
-    pending
-}
 
-/// The pending `RunApprovedTest` candidate whose recorded pattern matches `argv`, if exactly one
-/// does. Returns the matching id and the number of matches, so the caller can report why it minted a
-/// fresh candidate when the count is not one.
-fn pending_matching(store: &Store, task: &TaskId, argv: &[String]) -> (Option<CandidateId>, usize) {
-    let patterns = crate::hook::load_patterns();
-    let mut matches: Vec<CandidateId> = Vec::new();
-    for cid in pending_candidates(store, task, ActionKind::RunApprovedTest) {
-        if let Some(pat) = patterns.get(&cid.0.to_hex()) {
-            if crate::hook::Pattern::parse(pat).matches(argv) {
-                matches.push(cid);
-            }
-        }
+    if !proposed {
+        return Err(ExecRefusal::UnknownCandidate(format!(
+            "--candidate {hex} is not a candidate of this task"
+        )));
     }
-    let n = matches.len();
-    (if n == 1 { Some(matches[0]) } else { None }, n)
+    if !forecast {
+        return Err(ExecRefusal::UnknownCandidate(format!(
+            "--candidate {hex} has no forecast"
+        )));
+    }
+    if !committed {
+        return Err(ExecRefusal::UnknownCandidate(format!(
+            "--candidate {hex} has not been committed"
+        )));
+    }
+    if dispatched {
+        return Err(ExecRefusal::UnknownCandidate(format!(
+            "--candidate {hex} is already dispatched"
+        )));
+    }
+    Ok(())
 }
 
 /// The candidate of the most recent `Committed` for `(kind, args_digest)` that has no `Dispatched`
@@ -887,7 +896,7 @@ mod tests {
             .collect();
         let fake = FakeRunner::new(0, b"ok\n".to_vec());
 
-        let outcome = run_with(&store, &task, Path::new("/work"), &argv, &fake)
+        let outcome = run_with(&store, &task, Path::new("/work"), None, &argv, &fake)
             .expect("a fake runner never refuses");
 
         assert_eq!(outcome.exit_code, 0);
@@ -925,7 +934,7 @@ mod tests {
         let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
         let fake = FakeRunner::failing_to_start("boom");
 
-        let err = run_with(&store, &task, Path::new("/work"), &argv, &fake)
+        let err = run_with(&store, &task, Path::new("/work"), None, &argv, &fake)
             .expect_err("a start failure refuses with exit 3");
         assert!(matches!(err, ExecRefusal::StartFailed(_)));
         let has_unresolved = store
@@ -965,7 +974,7 @@ mod tests {
         let task = TaskId(Hash::of(&[b"refusing-runner"]));
         let argv: Vec<String> = ["cargo", "test"].iter().map(|s| s.to_string()).collect();
 
-        let err = run_with(&store, &task, Path::new("/work"), &argv, &RefusingRunner)
+        let err = run_with(&store, &task, Path::new("/work"), None, &argv, &RefusingRunner)
             .expect_err("a refusing runner refuses");
         assert!(matches!(err, ExecRefusal::NoRuntime));
         assert_eq!(

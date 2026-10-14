@@ -704,7 +704,7 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
     }
 
     // 3. A forecast before the first gated action.
-    hook::record_forecast_for_action(
+    let candidate = hook::record_forecast_for_action(
         &store,
         &task,
         ActionKind::RunApprovedTest,
@@ -714,10 +714,13 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
     )
     .expect("record forecast");
 
-    // 4. The first run: the agent's Bash call is `tsr exec -- cargo test …`. The hook records the
-    //    commitment; `tsr exec` records the dispatch and the execution; the PostToolUse reconciles
-    //    nothing further.
-    let exec_cmd = format!("tsr exec -- {SELFTEST_TEST_CMD}");
+    // 4. The first run: the agent's Bash call is `tsr exec --candidate <id> -- cargo test …`. The
+    //    hook records the commitment; `tsr exec` records the dispatch and the execution; the
+    //    PostToolUse reconciles nothing further.
+    let exec_cmd = format!(
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        candidate.0.to_hex()
+    );
     let argv: Vec<String> = SELFTEST_TEST_ARGV.iter().map(|s| s.to_string()).collect();
     hook::record_tool(
         &store,
@@ -728,6 +731,7 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
         &store,
         &task,
         &workspace,
+        Some(candidate),
         &argv,
         &exec::FakeRunner::new(0, "test result: ok"),
     )
@@ -755,7 +759,7 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
     .expect("record edit");
 
     // 6. A forecast before the second gated action, then the second run the same way.
-    hook::record_forecast_for_action(
+    let candidate2 = hook::record_forecast_for_action(
         &store,
         &task,
         ActionKind::RunApprovedTest,
@@ -764,15 +768,20 @@ fn replay_selftest(name: &str) -> (Store, TaskId, PathBuf) {
         "generator",
     )
     .expect("record second forecast");
+    let exec_cmd2 = format!(
+        "tsr exec --candidate {} -- {SELFTEST_TEST_CMD}",
+        candidate2.0.to_hex()
+    );
     hook::record_tool(
         &store,
-        &pre(session, "Bash", serde_json::json!({ "command": exec_cmd })),
+        &pre(session, "Bash", serde_json::json!({ "command": exec_cmd2 })),
     )
     .expect("record second exec pre");
     exec::run_with(
         &store,
         &task,
         &workspace,
+        Some(candidate2),
         &argv,
         &exec::FakeRunner::new(0, "test result: ok"),
     )
