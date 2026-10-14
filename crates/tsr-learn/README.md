@@ -58,7 +58,7 @@ Builds the dataset, its split and its manifests from the log.
 - `--calibrate <f>` / `--holdout <f>` (default `0.25` each) — the calibrate and held-out shares of
   the tasks.
 - `--seed <n>` (default `0`) — the split seed.
-- `--out <dir>` — the dataset directory.
+- `--out <dir>` — the dataset directory, new or empty: a dataset is written once, as a bundle is.
 
 Writes `rows.jsonl`, `split.json`, `data-manifest.json`, `features.json`, `events.jsonl` and
 `tasks.jsonl` into `<dir>`. A row's id is `tsr_domain::Hash::of` over the commitment's event id,
@@ -99,6 +99,7 @@ refuses; the evidence doc's "dataset input rules" section runs every one:
   naming the file and line; a duplicate task id names the file, the line and the first line.
 - `--by` must be `time` or `repo`; a share that leaves a side empty is refused naming the side.
 - A `--store` that does not start with the SQLite header is refused naming the store.
+- A non-empty `--out` is refused naming it, before any input is read.
 
 A `--store` with a valid SQLite header but a corrupt body is **not** refused with exit 2: it exits
 1 (`cannot open store <db>: sqlite: file is not a database`). That and the other current

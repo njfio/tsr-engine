@@ -4347,3 +4347,105 @@ fn h1_a_manifest_field_edit_is_refused_naming_manifest_toml() {
         }
     }
 }
+
+/// M4: `dataset` refuses a non-empty `--out` with exit 2 naming it, as `fit` does, and leaves the
+/// directory as it was. On 215ef11 `dataset --by repo --seed 3` over an existing dataset exited 0,
+/// mixed the two splits' holdout-access lines and kept stray files. An empty directory is accepted.
+#[test]
+fn m4_dataset_refuses_a_non_empty_out() {
+    let dir = temp_dir("m4-dataset-non-empty-out");
+    let ds = build_dataset(&dir, "7");
+    let (ev, tk, lb) = regenerate(&dir);
+    let dataset_into = |out: &Path, seed: &str| {
+        run(&[
+            "train",
+            "dataset",
+            "--events",
+            ev.to_str().unwrap(),
+            "--tasks",
+            tk.to_str().unwrap(),
+            "--labels",
+            lb.to_str().unwrap(),
+            "--by",
+            "repo",
+            "--calibrate",
+            "0.2",
+            "--holdout",
+            "0.2",
+            "--seed",
+            seed,
+            "--out",
+            out.to_str().unwrap(),
+        ])
+    };
+
+    // Over an existing dataset: refused, and nothing in it changes.
+    let before: Vec<(String, Vec<u8>)> = {
+        let mut v: Vec<(String, Vec<u8>)> = std::fs::read_dir(&ds)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let (code, out, err) = dataset_into(&ds, "3");
+    assert_eq!(
+        code, 2,
+        "M4: dataset over an existing dataset must exit 2:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains(ds.to_str().unwrap()) && err.contains("not empty"),
+        "M4: the refusal names the non-empty --out:\n{err}"
+    );
+    let after: Vec<(String, Vec<u8>)> = {
+        let mut v: Vec<(String, Vec<u8>)> = std::fs::read_dir(&ds)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    assert!(
+        before == after,
+        "M4: a refused dataset leaves the existing directory unchanged"
+    );
+
+    // A directory holding one stray file: refused too.
+    let stray = dir.join("stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    std::fs::write(stray.join("notes.txt"), "keep me\n").unwrap();
+    let (code, out, err) = dataset_into(&stray, "3");
+    assert_eq!(
+        code, 2,
+        "M4: dataset into a directory with a stray file must exit 2:\n{out}\n{err}"
+    );
+    assert!(
+        err.contains(stray.to_str().unwrap()),
+        "M4: the refusal names the --out:\n{err}"
+    );
+    assert!(
+        !stray.join("rows.jsonl").exists(),
+        "M4: nothing is written into a refused --out"
+    );
+
+    // An existing empty directory is accepted.
+    let empty = dir.join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let (code, out, err) = dataset_into(&empty, "3");
+    assert_eq!(
+        code, 0,
+        "M4: dataset into an empty directory is accepted:\n{out}\n{err}"
+    );
+}

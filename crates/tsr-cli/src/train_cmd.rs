@@ -49,7 +49,7 @@ pub enum TrainCmd {
         /// The split seed.
         #[arg(long, default_value_t = 0)]
         seed: u64,
-        /// The output directory for the dataset.
+        /// The output directory for the dataset: new or empty (a dataset is written once).
         #[arg(long)]
         out: PathBuf,
     },
@@ -391,6 +391,17 @@ fn run_dataset(
     // is bad input -- exit 2 naming the path, before anything is written.
     if let Some(code) = refuse_holdout_access_that_is_not_a_file(out) {
         return code;
+    }
+    // M4: a dataset is written once, as a bundle is (`fit` refuses a non-empty `--out` too).
+    // Writing over an existing dataset would mix two splits' `holdout-access.jsonl` lines and keep
+    // stray files, so a non-empty `--out` is refused naming it, before any input is read.
+    if std::fs::read_dir(out).is_ok_and(|mut entries| entries.next().is_some()) {
+        eprintln!(
+            "tsr: --out {} exists and is not empty; a dataset is written once, into a new or \
+             empty directory",
+            out.display()
+        );
+        return std::process::ExitCode::from(2);
     }
     // D2/D6: a `--store` that is missing, a directory or not a sqlite file is bad input -- exit 2
     // naming the store, before anything is created.
