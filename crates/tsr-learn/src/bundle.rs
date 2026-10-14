@@ -889,18 +889,33 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
                 "bundle file {name:?} is missing or unreadable: {e}"
             ))
         })?;
-        let found = file_digest(&bytes);
+        content_digests.push((name.to_string(), file_digest(&bytes)));
+    }
+    // H1: a stored digest that disagrees with its file is either an edited content file or an
+    // edited `[content_digests]` entry. The id covers every content file's digest, so when the
+    // files as they are recompute to the stored id, they are the files the bundle was written with
+    // and the manifest entry is what changed: the refusal then blames manifest.toml, not the file.
+    let files_match_id = bundle_id(&content_digests, &manifest).to_hex() == manifest.id;
+    for (name, found) in &content_digests {
         let expected = manifest
             .content_digests
-            .get(*name)
+            .get(name.as_str())
             .expect("presence checked above");
         if &found.to_hex() != expected {
-            return Err(LearnError::Invalid(format!(
-                "bundle file {name:?} has digest {}, expected {expected}",
-                found.to_hex()
-            )));
+            return Err(LearnError::Invalid(if files_match_id {
+                format!(
+                    "manifest.toml: content_digests records {name:?} = {expected}, a digest the \
+                     file does not have (it has {}); the files match the bundle id, so the \
+                     manifest entry was edited",
+                    found.to_hex()
+                )
+            } else {
+                format!(
+                    "bundle file {name:?} has digest {}, but manifest.toml records {expected}",
+                    found.to_hex()
+                )
+            }));
         }
-        content_digests.push((name.to_string(), found));
     }
 
     // F9/B3 (d): a bundle content file that fails to parse is named in the error, rather than a bare
@@ -921,10 +936,12 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
 
     let id = bundle_id(&content_digests, &manifest);
     if manifest.id != id.to_hex() {
-        return Err(LearnError::Invalid(format!(
-            "bundle id {} does not match the recomputed id {}",
-            manifest.id,
-            id.to_hex()
+        return Err(LearnError::Invalid(id_mismatch(
+            &manifest,
+            &id,
+            &spec,
+            &split,
+            &support_file,
         )));
     }
 
@@ -967,6 +984,65 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
         support_index: support_file.index,
         population: support_file.population,
     })
+}
+
+/// H1: the refusal for a manifest whose stored id is not the id its fields and the content digests
+/// recompute to. It names manifest.toml and, where a content file records the same value (the seed
+/// and split digest in split.json, the schema in features.json, the floor in support.json), the
+/// field that disagrees with it. A stored id that differs while the fields recompute to the id the
+/// calibrator names is an edited `id`. The data, training and source roots are recorded in no
+/// content file, so an edit to one of them is reported as one of the three.
+fn id_mismatch(
+    manifest: &Manifest,
+    id: &Hash,
+    spec: &FeatureSpec,
+    split: &SplitManifest,
+    support: &SupportFile,
+) -> String {
+    let mut fields: Vec<String> = Vec::new();
+    if manifest.seed != split.seed {
+        fields.push(format!(
+            "`seed` is {} but split.json records {}",
+            manifest.seed, split.seed
+        ));
+    }
+    if manifest.split_digest != split.digest.to_hex() {
+        fields.push(format!(
+            "`split_digest` is {} but split.json records {}",
+            manifest.split_digest,
+            split.digest.to_hex()
+        ));
+    }
+    if manifest.feature_schema != spec.version {
+        fields.push(format!(
+            "`feature_schema` is {:?} but features.json records {:?}",
+            manifest.feature_schema, spec.version
+        ));
+    }
+    if manifest.support_floor != support.floor {
+        fields.push(format!(
+            "`support_floor` is {} but support.json records {}",
+            manifest.support_floor, support.floor
+        ));
+    }
+    let id_hex = id.to_hex();
+    let detail = if !fields.is_empty() {
+        fields.join("; ")
+    } else if manifest.calibrator == format!("{} {}", &id_hex[..12], manifest.feature_schema) {
+        format!(
+            "the `id` field was edited: the fields recompute to the id the calibrator names ({})",
+            &id_hex[..12]
+        )
+    } else {
+        "`data_manifest`, `training_root` or `source_root` was edited (no content file records \
+         them, so the field cannot be named), or `id` together with `calibrator`"
+            .to_string()
+    };
+    format!(
+        "manifest.toml: bundle id {} does not match the id {id_hex} recomputed from its fields \
+         and the content digests; {detail}",
+        manifest.id
+    )
 }
 
 /// Verify a bundle: run the one loader every command runs, then optionally rebuild.

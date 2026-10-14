@@ -122,10 +122,14 @@ and seed give the same id.
 
 Recomputes every digest and checks the manifest. Exits 0, or 2 naming the file: a one-byte edit
 of `head.json` is refused naming `head.json` and both digests, and a manifest `state` other than
-`draft` is refused naming `manifest.toml`. With `--rebuild <dataset-dir>` it retrains and
-compares ids. The manifest's `code_commit` is recorded provenance, not a verified property:
-`verify` prints it labelled `code_commit (recorded, not verified)=<value>` and accepts any value
-(edited to `deadbeef`, it exits 0 and prints that value).
+`draft` is refused naming `manifest.toml`. An edit to a manifest field the id covers is refused
+naming `manifest.toml` and the field where it can tell (`seed`, `split_digest`, `feature_schema`
+and `support_floor` against the content file that records them, `id` against the calibrator), or
+else the three roots it could be (`data_manifest`, `training_root`, `source_root`); an edited
+`[content_digests]` entry is refused as `manifest.toml` recording a digest the file does not
+have. With `--rebuild <dataset-dir>` it retrains and compares ids. The manifest's `code_commit` is recorded provenance, not a verified
+property: `verify` prints it labelled `code_commit (recorded, not verified)=<value>` and accepts
+any value (edited to `deadbeef`, it exits 0 and prints that value).
 
 ### `tsr train report`
 

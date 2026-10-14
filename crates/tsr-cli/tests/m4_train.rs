@@ -4232,3 +4232,118 @@ fn r5b7_an_empty_standardize_vector_is_refused_naming_the_field() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Final review (r6 at 215ef11): H1, M4, L2 and L4. Each test below fails on 215ef11.
+// ---------------------------------------------------------------------------
+
+/// Flip the last hex digit of a `key = "<hex>"` manifest line, keeping the line canonical.
+fn flip_last_hex(line: &str) -> String {
+    let (head, tail) = line.rsplit_once('"').expect("a quoted value");
+    let mut head = head.to_string();
+    let last = head.pop().expect("a non-empty value");
+    head.push(if last == '0' { '1' } else { '0' });
+    format!("{head}\"{tail}")
+}
+
+/// H1: an edit to any manifest.toml field the bundle id covers is refused with exit 2 naming
+/// `manifest.toml`, and naming the field where a content file records it (or listing the fields
+/// it could be). An edited `[content_digests]` entry is blamed on manifest.toml -- it records a
+/// digest the file does not have -- not on the untouched content file. On 215ef11 every field edit
+/// printed `bundle id X does not match the recomputed id Y`, naming no file, and the digest edit
+/// blamed head.json.
+#[test]
+fn h1_a_manifest_field_edit_is_refused_naming_manifest_toml() {
+    let dir = temp_dir("h1-manifest-fields");
+    let ds = build_dataset(&dir, "7");
+    let b = fit_bundle(&dir, &ds);
+    let text = std::fs::read_to_string(b.join("manifest.toml")).unwrap();
+    let line = |prefix: &str| -> String {
+        text.lines()
+            .find(|l| l.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no `{prefix}` line in:\n{text}"))
+            .to_string()
+    };
+    // (what was edited, the old line, the new line, what the refusal must name besides
+    // manifest.toml).
+    let mut cases: Vec<(&str, String, String, Vec<&str>)> = Vec::new();
+    let seed = line("seed = ");
+    cases.push((
+        "seed",
+        seed.clone(),
+        seed.replace("= 7", "= 8"),
+        vec!["`seed`", "split.json"],
+    ));
+    let floor = line("support_floor = ");
+    cases.push((
+        "support_floor",
+        floor.clone(),
+        floor.replace("= 30", "= 31"),
+        vec!["`support_floor`", "support.json"],
+    ));
+    let schema = line("feature_schema = ");
+    cases.push((
+        "feature_schema",
+        schema.clone(),
+        schema.replace("features@v1", "features@v2"),
+        vec!["`feature_schema`", "features.json"],
+    ));
+    let split = line("split_digest = ");
+    cases.push((
+        "split_digest",
+        split.clone(),
+        flip_last_hex(&split),
+        vec!["`split_digest`", "split.json"],
+    ));
+    for field in ["data_manifest", "training_root", "source_root"] {
+        let l = line(&format!("{field} = "));
+        cases.push((
+            field,
+            l.clone(),
+            flip_last_hex(&l),
+            vec!["`data_manifest`", "`training_root`", "`source_root`"],
+        ));
+    }
+    let id = line("id = ");
+    cases.push(("id", id.clone(), flip_last_hex(&id), vec!["`id`"]));
+    let digest = line("\"head.json\" = ");
+    cases.push((
+        "content_digests",
+        digest.clone(),
+        flip_last_hex(&digest),
+        vec![
+            "content_digests",
+            "head.json",
+            "a digest the file does not have",
+        ],
+    ));
+
+    for (what, old, new, names) in cases {
+        let copy = dir.join(format!("edit-{what}"));
+        copy_dir(&b, &copy);
+        let edited = text.replacen(&old, &new, 1);
+        assert_ne!(edited, text, "H1: the {what} edit took effect");
+        std::fs::write(copy.join("manifest.toml"), &edited).unwrap();
+        let (code, out, err) = run(&["train", "verify", copy.to_str().unwrap()]);
+        assert_eq!(
+            code, 2,
+            "H1: verify with {what} edited must exit 2:\n{out}\n{err}"
+        );
+        assert!(
+            err.contains("manifest.toml"),
+            "H1: the refusal for an edited {what} must name manifest.toml:\n{err}"
+        );
+        for n in names {
+            assert!(
+                err.contains(n),
+                "H1: the refusal for an edited {what} must name {n}:\n{err}"
+            );
+        }
+        if what == "content_digests" {
+            assert!(
+                !err.contains("bundle file \"head.json\" has digest"),
+                "H1: an edited content_digests entry must not blame the untouched head.json:\n{err}"
+            );
+        }
+    }
+}
