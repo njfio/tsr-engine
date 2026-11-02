@@ -14,13 +14,15 @@ class WantingPresentation(unittest.TestCase):
   for branch in ('propose','reconsider'):
    with self.subTest(branch=branch):
     text=self.body(branch)['messages'][0]['content']
-    self.assertIn('corrective evidence or observed success is not required',text)
+    self.assertIn('does not need a defect, corrective evidence or observed success',text)
     self.assertIn('distinct from asserting an empirical fact',text)
     self.assertIn('independent review',text)
-    self.assertIn('No novelty',text)
+    self.assertIn('no novelty, activity, relationship or preferred design is required, and none is ruled out',text)
+    self.assertIn('none is preferred',text)
  def test_retention_and_component_authority_remain_separate(self):
   text=self.body('propose')['messages'][0]['content']
   self.assertIn('both artifact and meaning',text);self.assertIn('keeping the artifact alone does not preclude',text)
+  self.assertIn('{retain:reason, development_declined:reason}',text)
   self.assertIn('explicit dependency and separate reviews',text);self.assertIn('executes only with authorization',text)
   advisory=self.body('reconsider')['messages'][0]['content'];self.assertIn('no execution',advisory)
  def test_reviewer_permits_supported_facts_but_rejects_fabrication(self):

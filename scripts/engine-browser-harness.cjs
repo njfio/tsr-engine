@@ -12,11 +12,14 @@ function readLocal(name, limit) {
   for (const part of name.split('/')) { p=path.join(p,part); if(fs.lstatSync(p).isSymbolicLink()) throw Error('symlink boundary'); }
   const b=fs.readFileSync(p); if(b.length>limit) throw Error('file bound'); return b;
 }
+// v2: 64 ordered actions so a mapped trace can reach a criterion-relevant state
+// (v1 allowed 12: one start click plus at most six keys, too short to resolve play).
+const MAX_ACTIONS=64;
 function validate(c) {
   if(!plain(c)||Object.keys(c).sort().join()!=='actions,assets,checks,entry,version'||c.version!=='browser-probe@v1') throw Error('probe contract');
   if(!Array.isArray(c.assets)||c.assets.length<1||c.assets.length>8||new Set(c.assets).size!==c.assets.length||!c.assets.includes(c.entry)||!c.entry.endsWith('.html')) throw Error('asset scope');
   for(const n of c.assets) if(!validPath(n)||! /\.(html|css|js)$/.test(n)) throw Error('asset path');
-  if(!Array.isArray(c.actions)||c.actions.length>12||!Array.isArray(c.checks)||!c.checks.length||c.checks.length>8) throw Error('probe bounds');
+  if(!Array.isArray(c.actions)||c.actions.length>MAX_ACTIONS||!Array.isArray(c.checks)||!c.checks.length||c.checks.length>8) throw Error('probe bounds');
   for(const a of c.actions) {
     if(!plain(a)||Object.keys(a).sort().join()!=='kind,value') throw Error('action shape');
     if(a.kind==='wait') {if(!Number.isInteger(a.value)||a.value<0||a.value>1000)throw Error('wait bound');}

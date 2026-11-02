@@ -34,6 +34,7 @@ jobs:
         run: >-
           python3 -m unittest
           scripts.test_engine_wanting_presentation
+          scripts.test_engine_development_decision
           scripts.test_engine_deliberation_restart
           scripts.test_engine_criterion_consistency
           scripts.test_engine_criterion_reassessment

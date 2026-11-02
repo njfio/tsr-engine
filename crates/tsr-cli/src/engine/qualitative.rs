@@ -586,7 +586,7 @@ impl Engine {
         q["feedback_limit"] = json!("No action or information-return adapter is configured here; initial context is not empirical return.");
         q["response_contract"]["admission"] = json!("Meaning proposals use submit; ordinary possibilities use submit-possibility. Both require independent review; neither grants execution.");
         q["response_contract"]["relational_fields"]["proposal"]["aspiration"] = json!("bounded wanted condition; may retain the prior condition verbatim while relationship changes");
-        q["instructions"] = json!("Distinguish a useful possibility from changed wanting. A reviewed relationship may develop while retaining its wanted condition. Unchanged meaning or abstention is legitimate; never manufacture novelty. Reviews must assess parent contribution, uncertainty and support, not just field changes. Initial context is not empirical return. No execution authority.");
+        q["instructions"] = json!("Distinguish a useful possibility from changed wanting. A reviewed relationship may develop while retaining its wanted condition. Unchanged meaning, development and abstention are equally legitimate; propose what the context supports, without manufacturing or suppressing novelty. Reviews must assess parent contribution, uncertainty and support, not just field changes. Initial context is not empirical return. No execution authority.");
         self.add_retrieval_context(&mut q)?;
         self.add_information_expectation(&mut q)?;
         Ok(q)

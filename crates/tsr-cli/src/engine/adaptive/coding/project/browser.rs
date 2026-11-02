@@ -13,6 +13,31 @@ pub const HARNESS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../scripts/engine-browser-harness.cjs"
 ));
+/// The previous protected harness, byte for byte. Projects admitted with it keep
+/// validating under its own 12-action bound; new projects receive `HARNESS`.
+pub const LEGACY_HARNESS_V1: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../scripts/engine-browser-harness-v1.cjs"
+));
+/// Ordered probe actions the current harness accepts. Twelve (one start click and
+/// at most six keys) could not reach a criterion-relevant game state, so every
+/// mapped observation returned Unknown and no Contrast or success could form.
+pub const MAX_PROBE_ACTIONS: usize = 64;
+pub const LEGACY_V1_MAX_PROBE_ACTIONS: usize = 12;
+/// Recorded browser report bytes. A 64-action report with eight readouts fits; the
+/// previous 4000-byte record only fit the 12-action harness.
+pub const STDOUT_BYTES: usize = 32000;
+/// Sealed runner capture bound for a browser case (above `STDOUT_BYTES` plus newline).
+pub const OUTPUT_BOUND: usize = 32768;
+fn probe_action_bound(harness: &str) -> Option<usize> {
+    if harness == HARNESS {
+        Some(MAX_PROBE_ACTIONS)
+    } else if harness == LEGACY_HARNESS_V1 {
+        Some(LEGACY_V1_MAX_PROBE_ACTIONS)
+    } else {
+        None
+    }
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Probe {
@@ -43,14 +68,13 @@ pub(super) fn validate(spec: &ProjectSpec) -> Result<()> {
             && spec.supporting_spans.is_empty(),
         "browser profile cannot mix execution modes"
     );
-    ensure!(
-        spec.probe_entry == "browser-harness.cjs"
-            && spec
-                .protected
-                .get(&spec.probe_entry)
-                .is_some_and(|s| s == HARNESS),
-        "exact protected browser harness required"
-    );
+    let action_bound = (spec.probe_entry == "browser-harness.cjs")
+        .then(|| spec.protected.get(&spec.probe_entry))
+        .flatten()
+        .and_then(|s| probe_action_bound(s));
+    let Some(action_bound) = action_bound else {
+        anyhow::bail!("exact protected browser harness required");
+    };
     ensure!(spec.timeout_ms <= 180000, "browser deadline bound");
     let expected: BTreeSet<_> = spec.editable.keys().cloned().collect();
     for case in &spec.cases {
@@ -78,7 +102,7 @@ pub(super) fn validate(spec: &ProjectSpec) -> Result<()> {
             "browser asset inventory"
         );
         ensure!(
-            probe.actions.len() <= 12 && (1..=8).contains(&probe.checks.len()),
+            probe.actions.len() <= action_bound && (1..=8).contains(&probe.checks.len()),
             "browser action/check bound"
         );
         for a in probe.actions {
@@ -134,7 +158,7 @@ pub(crate) fn classify(run: &RunResult, expected: &BTreeSet<String>) -> Verdict 
             && d.stderr_complete
     }) || !matches!(run.exit, 0 | 1)
         || !run.stderr.is_empty()
-        || run.stdout.len() > 4001
+        || run.stdout.len() > STDOUT_BYTES + 1
     {
         return Verdict::Unavailable;
     }
@@ -147,7 +171,7 @@ pub(crate) fn classify(run: &RunResult, expected: &BTreeSet<String>) -> Verdict 
         || v.files
             .values()
             .any(|h| h.len() != 64 || !h.bytes().all(|c| c.is_ascii_hexdigit()))
-        || v.observations.len() > 22
+        || v.observations.len() > MAX_PROBE_ACTIONS + 8 + 2
         || v.errors.len() > 8
         || v.errors.iter().any(|e| e.len() > 64)
         || v.errors.len() != v.error_count.min(8) as usize
@@ -257,6 +281,58 @@ pub(super) mod tests {
             .insert("private.txt".into(), "not exportable".into());
         assert!(bad.validate().is_err());
         Ok(())
+    }
+    fn with_actions(harness: &str, keys: usize) -> ProjectSpec {
+        let mut s = spec();
+        let mut actions = vec![json!({"kind":"click","value":"#start"})];
+        actions.extend((0..keys).map(|_| json!({"kind":"key","value":"ArrowUp"})));
+        let probe = json!({"version":"browser-probe@v1","assets":["index.html","app.js"],"entry":"index.html","actions":actions,"checks":[{"selector":"#start","text":"Start"}]});
+        s.protected
+            .insert("browser-harness.cjs".into(), harness.into());
+        s.protected.insert("probe.json".into(), probe.to_string());
+        s
+    }
+    #[test]
+    fn probe_action_bound_follows_the_admitted_harness() -> Result<()> {
+        assert_ne!(HARNESS, LEGACY_HARNESS_V1);
+        // Current harness: a trace long enough to reach a criterion-relevant state.
+        with_actions(HARNESS, MAX_PROBE_ACTIONS - 1).validate()?;
+        assert!(with_actions(HARNESS, MAX_PROBE_ACTIONS).validate().is_err());
+        // Projects admitted with the previous harness keep its exact bound.
+        with_actions(LEGACY_HARNESS_V1, LEGACY_V1_MAX_PROBE_ACTIONS - 1).validate()?;
+        assert!(with_actions(LEGACY_HARNESS_V1, LEGACY_V1_MAX_PROBE_ACTIONS)
+            .validate()
+            .is_err());
+        let mut altered = LEGACY_HARNESS_V1.to_string();
+        altered.push(' ');
+        assert!(with_actions(&altered, 1).validate().is_err());
+        Ok(())
+    }
+    #[test]
+    fn long_trace_report_is_classified_not_unavailable() {
+        let expected = BTreeSet::from(["index.html".into()]);
+        let mut observations = vec![
+            json!({"kind":"render","sha256":"b".repeat(64)}),
+            json!({"kind":"click","value":"#start"}),
+        ];
+        observations
+            .extend((0..MAX_PROBE_ACTIONS - 1).map(|_| json!({"kind":"key","value":"ArrowUp"})));
+        observations.extend((0..8).map(|n| json!({"kind":"text","selector":format!("#readout-{n}"),"text":"x".repeat(200),"met":true,"abbreviated":false,"original_length":200})));
+        observations.push(json!({"kind":"render","sha256":"c".repeat(64)}));
+        let value = json!({"version":"browser-observation@v1","passed":true,"files":{"index.html":"a".repeat(64)},"observations":observations,"errors":[],"error_count":0});
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert!(bytes.len() > 4001 && bytes.len() <= STDOUT_BYTES);
+        let mut r = RunResult::from_output(0, &bytes, b"", 1);
+        r.execution = Some(tsr_corpus::ExecutionDiagnostics {
+            version: 1,
+            termination: "runtime_exit".into(),
+            runtime_exit: Some(0),
+            runtime_signal: None,
+            stdout_complete: true,
+            stderr_complete: true,
+            worker: "authored fixture".into(),
+        });
+        assert_eq!(classify(&r, &expected), Verdict::Passed);
     }
     #[test]
     fn classify_is_not_exit_zero_or_console_truth() {

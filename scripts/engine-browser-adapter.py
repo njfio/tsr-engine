@@ -21,7 +21,8 @@ def pins():
     return {**base.pins(),**{n:d.file_sha(Path(__file__).with_name(n)) for n in ('engine-browser-deliberation.py','engine-criterion-return.py','engine-browser-expansion.py','engine-browser-desire.py','engine-pursuit-reflection.py','engine-feedback-policy.py','engine-proposal-references.py','engine-browser-session.py','engine-browser-assessment.py','engine-pair-clock.py','engine-browser-ordinary.py','engine-browser-transient.py','engine-browser-predispatch.py','engine-browser-response-recovery.py','engine-objective-continuation.py','engine-browser-adapter.py','engine-browser-project.py','engine-browser-harness.cjs')}}
 def supported_harness(text):
     if not isinstance(text,str):return False
-    return text==Path(__file__).with_name('engine-browser-harness.cjs').read_text() or hashlib.sha256(text.encode()).hexdigest()=='b4e0204756fcb497a4993bf5e8d4039ccdbfb872d92d13f9e493f4b53e3129dc'
+    # Current harness, the previous exact harness (12 actions) kept for admitted projects, or an older pinned one.
+    return any(text==Path(__file__).with_name(n).read_text() for n in ('engine-browser-harness.cjs','engine-browser-harness-v1.cjs')) or hashlib.sha256(text.encode()).hexdigest()=='b4e0204756fcb497a4993bf5e8d4039ccdbfb872d92d13f9e493f4b53e3129dc'
 
 def validate_feedback_events(events,parents):
     allowed={p['requirement'] for p in parents}
@@ -409,21 +410,55 @@ class Adapter(recovery.Recovery,base.Adapter):
     def wire_context(self,request,context):
         return load('browser_proposal_references','engine-proposal-references.py').project(context,request)
     def proposal_body(self,view,context):
-        system='Consider the current wants, relationships, possibilities and supplied experience for this public browser project; decide what, if anything, to propose. Use choice_summary for currently available proposal forms and their prerequisites; it is not approval or a ranking. Retaining the current project, proposing justified artifact changes, or proposing supported meaning/relationship development are equally valid. A deliberation envelope can include optional development alongside an artifact edit or retention, with explicit dependency and separate reviews. A new identity requires its separate basis and independent review path; no particular option is required. For provisional wanting, a coherent connection to current contributors is the basis, with fulfillment unknown; corrective evidence or observed success is not required. Generating a possible wanting is distinct from asserting an empirical fact or attributing a preference to the user. Positive feedback alone does not request a change, but an explicit creation or improvement request is an active goal, including when phrased as a question. Open design choices are delegated work, not inherently missing information. Passing checks are not satisfaction of a renewed goal. No novelty, activity, relationship or preferred design is required. Use the exact user words, current source and attributed observations. Distinguish delivered evidence from the evidence you rely on; cite relevant observation/source identities in your rationale when useful, state uncertainty, and do not treat citations or reasons as proof of causal learning or player satisfaction. Consider alternatives and return 1..4 distinct candidates allowed by the supplied response contracts, or a justified abstention; do not mix executable and advisory candidates in an alternatives batch; use the deliberation envelope for separate components. You may instead inspect an admitted source window. Initial designs can be untested and need no prior player feedback. The controller previews proposals, obtains independent review, and executes only with authorization; never claim these later steps happened already. Exact edits use old_text/new_text. A complete incremental edit is allowed; never return partial JSON or unfinished code. Preserve protected checks, runtime, permissions and acceptance. Use {retain:reason} when both artifact and meaning should remain unchanged under the current conditions; keeping the artifact alone does not preclude optional development through deliberation; this ends this checkpoint, not future separately admitted input. Use {abstain:reason} for inability or declining further work; this stops the scheduled session. Neither creates user acceptance. Return only the supplied JSON contract.'
+        # One shared text for every arm and branch: the paired comparison requires identical
+        # system messages. Each limit is stated once, in the ground rules, not attached to
+        # each mention of development, so no option reads as the cautious default.
+        references=load('browser_proposal_references','engine-proposal-references.py')
+        self.offered_development=references.development_forms(context.get('choice_summary') if isinstance(context,dict) else None)
+        system=('Consider the current wants, relationships, possibilities and supplied experience for this public browser project, and decide what to propose. '
+            'choice_summary lists the proposal forms available now and their prerequisites; it is not approval or a ranking. '
+            'Three kinds of choice are open and none is preferred: keep the artifact, change the artifact, or develop meaning (a relationship, a meaning development, or provisional wanting). '
+            'Artifact and meaning are decided separately: a deliberation envelope pairs one artifact choice (an edit or retention) with one development choice (an advisory proposal or null), with explicit dependency and separate reviews; keeping the artifact alone does not preclude development. '
+            'Provisional wanting needs only a coherent connection to current contributors; it does not need a defect, corrective evidence or observed success, and its fulfillment stays unknown. '
+            'Ground rules for every choice: use the exact user words, current source and attributed observations; state uncertainty and distinguish delivered evidence from the evidence you rely on, citing observation/source identities when useful; '
+            'unknown is not unmet; generating a possible wanting is distinct from asserting an empirical fact or attributing a preference to the user; citations and reasons are not proof of causal learning or player satisfaction; no novelty, activity, relationship or preferred design is required, and none is ruled out. '
+            'Positive feedback alone does not request a change, but an explicit creation or improvement request is an active goal, including when phrased as a question. Open design choices are delegated work, not inherently missing information. Passing checks are not satisfaction of a renewed goal. Initial designs can be untested and need no prior player feedback. '
+            'Consider alternatives and return 1..4 distinct candidates allowed by the supplied response contracts; do not mix executable and advisory candidates in an alternatives batch; use the deliberation envelope for one of each. You may instead inspect an admitted source window. '
+            'Exact edits use old_text/new_text. A complete incremental edit is allowed; never return partial JSON or unfinished code. Preserve protected checks, runtime, permissions and acceptance. '
+            'The controller previews proposals, obtains independent review, and executes only with authorization; never claim these later steps happened already. '
+            'To keep both artifact and meaning unchanged, return {retain:reason, development_declined:reason} whenever choice_summary lists any development form: development_declined names the development forms you considered and why none is worth proposing now. When choice_summary lists no development form, return {retain:reason}. '
+            'Retention ends this checkpoint, not future separately admitted input. Use {abstain:reason} for inability or declining further work; this stops the scheduled session. Neither creates user acceptance. Return only the supplied JSON contract.')
         if view['branch']=='reconsider':system+=' This is advisory reconsideration: a new relationship, revision, same-identity development or provisional/supported wanting may be proposed. Prior lineage is context, not a required target. Artifact intent may only retain here; no execution. Abstention remains valid.'
         return self.body(system,context)
+    def check_retention_reason(self,value):
+        if not isinstance(value['retain'],str) or not value['retain'].strip() or len(value['retain'].encode())>self.narrative_limit:raise ValueError('retention reason required within response capacity')
     def check_proposal_shape(self,value):
-        if isinstance(value,dict) and set(value)=={'retain'}:
-            if not isinstance(value['retain'],str) or not value['retain'].strip() or len(value['retain'].encode())>self.narrative_limit:raise ValueError('retention reason required within response capacity')
+        helper=load('browser_proposal_shape','engine-project-output.py')
+        offered=getattr(self,'offered_development',[])
+        if isinstance(value,dict) and set(value) in ({'retain'},{'retain','development_declined'}):
+            self.check_retention_reason(value)
+            if 'development_declined' in value:
+                x=value['development_declined']
+                if not isinstance(x,str):helper.fail('$.development_declined','string_required',expected_type='string')
+                references=load('browser_proposal_references','engine-proposal-references.py')
+                room=self.narrative_limit-len((value['retain']+references.DECLINED_PREFIX).encode())
+                if not x.strip() or len(x.encode())>room:helper.fail('$.development_declined','text_bound',nonblank=True,max_utf8_bytes=max(0,room))
+            elif offered:
+                # Retention is a decision about development too, at the same cost as proposing it.
+                helper.fail('$','required_field',required_fields=['development_declined','retain'])
             return
         if isinstance(value,dict) and set(value)=={'inspect'}:return
         if isinstance(value,dict) and set(value)=={'deliberation'}:
             parts=load('deliberation_shape','engine-browser-deliberation.py').shape(value)
+            if offered and parts['development'] is None and isinstance(parts['artifact'],dict) and set(parts['artifact'])=={'retain'}:
+                # Retaining both through the envelope must not skip the development decision.
+                helper.fail('$.deliberation.development','object_required',expected_type='object',valid_locations=['$.retain','$.development_declined'])
             for name in ('artifact','development'):
                 item=parts[name]
-                if item is not None:self.check_proposal_shape(item if set(item)=={'retain'} else {'alternatives':[item]})
+                if item is None:continue
+                if set(item)=={'retain'}:self.check_retention_reason(item)
+                else:self.check_proposal_shape({'alternatives':[item]})
             return
-        helper=load('browser_proposal_shape','engine-project-output.py')
         helper.proposal_shape(value,text_limit=self.narrative_limit)
         if isinstance(value,dict) and set(value)=={'alternatives'} and isinstance(value['alternatives'],list) and len(value['alternatives'])==1:
             item=value['alternatives'][0]
@@ -576,7 +611,8 @@ class Adapter(recovery.Recovery,base.Adapter):
                 elif name!='artifact':raise ValueError('development must be advisory or null')
             return {'deliberation':{**responses,'artifact_dependency':parts['artifact_dependency'],'guard':helper.guard(request)}},bases
         if isinstance(value,dict) and set(value)=={'retain'}:
-            self.check_proposal_shape(value)
+            # Already expanded: a stated development decision is folded into this reason.
+            self.check_retention_reason(value)
             if view['branch'] not in ('propose','reconsider'):raise ValueError('retention only during deliberation')
             return value,{}
         if isinstance(value,dict) and set(value)=={'inspect'}:
