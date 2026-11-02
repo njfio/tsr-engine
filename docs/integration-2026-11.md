@@ -130,3 +130,14 @@ mutation and the exact guidance-rejection assertion. Production runtime checks
 are unchanged. This failure remains retained; a fresh CI run verifies the patch.
 The corrected exact UI case passed locally (1/1, 2.929 seconds), with independent
 fixture review and no production edits.
+
+Post-merge run 41478333818 on fc111207 failed one oracle-table test because its
+parallel rows still opened the shared default SQLite store. This is a fixture
+isolation defect, not an accepted engine failure. Both native CLI invocations
+now bind TSR_DB to the row's existing scratch directory. All five oracle-table
+cases pass locally (8.29 seconds); assertions and production locking are unchanged.
+The failure is retained and the follow-up requires normal reviewed CI/merge.
+The same race was confirmed by independent review in the two parallel tamper
+layout fixtures. Those two CLI bindings now also use their own scratch stores.
+Both tamper cases pass (95.37 seconds). Total code change: four test-only env
+bindings across two files; no production edits or altered assertions.

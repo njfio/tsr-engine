@@ -9638,6 +9638,18 @@
       "source_sha256": "ea4ff8bb47e4b77ad2f72c3642e0bdeb420366ac5b04486bb961f6c345b4abef",
       "integration_sha256": "ef5ef4a68b19317a2a658267db40440c80e5bffc2ea9c837b5ec1272d592626b",
       "reason": "Isolate each D4/R1 CLI test store; preserve all assertions and production locking."
+    },
+    {
+      "path": "crates/tsr-cli/tests/d3_oracle_table.rs",
+      "source_sha256": "af92e099fa1c59cd5b6cd42c27edc1cc1a2ae9328b0b9707e65d7ba72b6047b4",
+      "integration_sha256": "a518a3944e04b82e0558ba4195f2a971a26d3e7e487e85f14faa3d9db1715306",
+      "reason": "Isolate parallel oracle-table rows using their existing scratch stores; assertions and production locking unchanged."
+    },
+    {
+      "path": "crates/tsr-cli/tests/d3_tamper.rs",
+      "source_sha256": "241b19ba9e44de6fb70acfc2b3a7835f50e0fed9732593c3b1a75cb88defffa0",
+      "integration_sha256": "ecb18e1bae9d392c1ef822dbe081fea6ad03e788abf7ec2ccf6fd3b329496949",
+      "reason": "Isolate parallel tamper layout fixtures using existing scratch stores; assertions and production locking unchanged."
     }
   ]
 }
