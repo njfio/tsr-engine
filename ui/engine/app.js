@@ -3,13 +3,13 @@ const h=React.createElement;
 const read=(key,fallback='')=>{try{return localStorage.getItem(key)||fallback;}catch{return fallback;}};
 const save=(key,value)=>{try{localStorage.setItem(key,value);}catch{}};
 function App(){
- const initial=read('tsr.project','pond-courier');
- const [id,I]=React.useState(initial),[boot,B]=React.useState(null),[data,D]=React.useState(null),[draft,T]=React.useState(read('tsr.draft.'+initial)),[busy,Q]=React.useState(false),[error,E]=React.useState(''),[loadError,L]=React.useState(''),[notice,U]=React.useState(''),[tab,V]=React.useState('conversation'),[newTask,N]=React.useState(false),[recovery,R]=React.useState(false);
+ const initial=read('tsr.project','new');
+ const [id,I]=React.useState(initial),[boot,B]=React.useState(null),[data,D]=React.useState(null),[draft,T]=React.useState(read('tsr.draft.'+initial)),[busy,Q]=React.useState(false),[error,E]=React.useState(''),[loadError,L]=React.useState(''),[notice,U]=React.useState(''),[tab,V]=React.useState('conversation'),[newTask,N]=React.useState(initial==='new'),[recovery,R]=React.useState(false);
  const [decision,Decision]=React.useState(null);
  React.useEffect(()=>{if(boot?.budget?.budget_mode==='unlimited'&&!boot?.budget?.stopped){R(false);Decision(null);}},[boot?.budget?.budget_mode,boot?.budget?.stopped]);
  const selected=React.useRef(id),loading=React.useRef(new Set()),submitting=React.useRef(false);selected.current=id;
  async function request(path,body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),body?120000:30000);try{const r=await fetch(path,{...(body?{method:'POST',headers:{'Content-Type':'application/json','X-TSR-CSRF':boot.csrf},body:JSON.stringify(body)}:{}),signal:controller.signal});const v=await r.json();if(!r.ok)throw Error(v.error||'Request failed');return v;}finally{clearTimeout(timer);}}
- async function refresh(){if(loading.current.has(id))return;loading.current.add(id);try{const b=await request('/api/bootstrap');if(selected.current!==id)return;B(b);if(!b.projects.some(p=>p.id===id)&&b.projects.length){pick(b.projects[0].id);return;}const d=await request('/api/project/'+id);if(selected.current===id){D(d);L('');}}catch(e){if(selected.current===id)L('Connection interrupted. Retrying automatically; your draft is safe. '+e.message);}finally{loading.current.delete(id);}}
+ async function refresh(){if(loading.current.has(id))return;loading.current.add(id);try{const b=await request('/api/bootstrap');if(selected.current!==id)return;B(b);if(!b.projects.length){if(id!=='new'){const nextDraft=read('tsr.draft.new',read('tsr.draft.'+id));save('tsr.draft.new',nextDraft);save('tsr.project','new');I('new');T(nextDraft);}N(true);D(null);L('');return;}if(!b.projects.some(p=>p.id===id)&&b.projects.length){pick(b.projects[0].id);return;}const d=await request('/api/project/'+id);if(selected.current===id){D(d);L('');}}catch(e){if(selected.current===id)L('Connection interrupted. Retrying automatically; your draft is safe. '+e.message);}finally{loading.current.delete(id);}}
  React.useEffect(()=>{D(null);refresh();const timer=setInterval(refresh,5000);return()=>clearInterval(timer);},[id]);
  function type(value){T(value);save('tsr.draft.'+(newTask?'new':id),value);}
  function pick(next){R(false);V('conversation');I(next);save('tsr.project',next);T(read('tsr.draft.'+next));N(false);E('');U('');}

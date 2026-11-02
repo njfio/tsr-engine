@@ -46,7 +46,8 @@ Mapping and stage preparation were assisted. See
 ## Integration-only changes
 
 - Studio no longer seeds genuine historical user messages or private projects on
-  fresh installation. Existing local project histories remain untouched.
+  fresh installation. Existing local project histories remain untouched. Empty
+  startup and stale selections preserve drafts and show the new-project flow.
 - New-project initialization uses the same browser scope, protected harness,
   controls and probe from public source instead of reading a historical game's
   private scope file. This initializes state; it grants no paid execution rights.
@@ -66,14 +67,37 @@ as executable authority for a new installation.
 
 ## Verification status
 
-Integration verification is in progress. Initial focused Python execution passed
-51 tests with 38 explicit native opt-ins skipped. Those opt-ins and historical
-archive-dependent tests are not silently counted as passing. The initial full Rust
-run exposed local loopback-permission failures; affected checks will be rerun with
-the required local test permissions. Initial UI tests exposed private fixture
-dependencies; those failures are retained locally and are being corrected with
-authored fixtures. Final results and CI links will be recorded before merge.
+Local integration verification completed:
 
+- Rust workspace: initial run reported 1,138 passes, eight environment-dependent
+  failures and 13 ignored tests. The five loopback failures and three container
+  failures all passed in affected-target reruns with required permissions:
+  10 reviewer tests, one exec-status test and 14 harness tests. Counts overlap the
+  initial run; they are not added as distinct tests. Failures remain recorded.
+- Focused Python contract/recovery: 51 passed, 38 explicit native opt-ins skipped.
+- Selected native/browser opt-ins: four passed, including recursive provisional
+  identity, interrupted component admission, edit-plus-development, and an
+  independent artifact after development-review abstention. Transport is authored;
+  two cases execute the existing isolated browser runtime. No provider calls.
+- Portable UI: 88 passed, four preserved-history opt-ins skipped. Two targeted
+  history/concurrency checks also passed (overlapping suite coverage).
+- Fresh-install HTTP tests pass. Actual networkless Chromium fixture checks
+  cover empty startup, no nonexistent historical-project request, polling/reload
+  draft preservation, stale-selection recovery preserving both drafts, and no
+  JavaScript/load errors. These are authored fixtures, not live model evidence.
+- Rustfmt and diff whitespace checks pass. Frozen M0 sources/fixtures remain
+  byte-identical. No fresh Clippy or exhaustive security-proof claim is made.
+
+The initial UI failure revealed a hidden dependency on a real game; authored
+fixtures now provide the intended native state and explicit queued-input
+concurrency condition. A fresh-install directory omission and stale-selection
+frontend issue were caught and corrected before merge. No test assertion was
+weakened to accept a failing engine result.
+
+Independent integration and focused security reviews passed. The PR is
+[GitHub #7](https://github.com/njfio/tsr-engine/pull/7); its latest-commit checks
+must pass before merge. Sanitized local verification hashes are recorded in
+`integration-verification.json`. Raw logs remain local, not published.
 Historical raw-run Python audits (for example M3 failure-contract and fixed12
 archive regressions) require their preserved local archives. They are not part of
 the portable authored CI subset. No historical assertion or frozen fixture is

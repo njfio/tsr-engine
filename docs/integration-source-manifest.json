@@ -9598,6 +9598,12 @@
       "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
+      "path": "ui/engine/app.js",
+      "source_sha256": "8049571106bdecc9374a4525ef66a38db9d6d685bc3066854908fbc08a336a8a",
+      "integration_sha256": "f2b8be0de66d6fbfdd7eb1b74cdd3b90b5b1522f1bb35d378318794a01df0029",
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
       "path": "ui/engine/decisions.py",
       "source_sha256": "33d1e5b8c32d43ccf3b8637314846179155d36948f336b335374c468fab96afb",
       "integration_sha256": "13b2826c897a57aaef00254b249c440e2c954ba1761723a274c9e04c2de54ede",

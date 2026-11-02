@@ -1,0 +1,19 @@
+{
+  "version": "sanitized-local-verification@v1",
+  "logs_are_local_only": true,
+  "log_sha256": {
+    "cargo-test.log": "7fcaddf8b4f51c0b9d3eee178451a80465f8552c1190ce9aa52d3d1581c830b4",
+    "rust-loopback-rerun.log": "5a86ef9a6935e95c728f0b79edafac0056842a204f7ec28161f2d546737d3731",
+    "rust-runtime-rerun.log": "cf208494486f0ae898b84828c1556d35d09d86fd19f60d630c5b6d98154b58e7",
+    "python-focused.log": "edd7f8f17aeb005cce8af12cb56a809aff5593d1f29940924fcd0aac16abfa91",
+    "ui-tests-final.log": "82d723c15da990dc529ac9f15a8fecaf32b334c4f4b42c9e1d2a7ec8bb4342e7",
+    "native-browser-targeted.log": "56025d2b0d6939573a13eba75901b3c65ea9f58d58dfad91acc13c639e89b361",
+    "fresh-store-fixed.log": "33dab0360ed760ab08328ab9adedca29a546dc77f18ab70a41e15c0ca392bc18",
+    "fresh-browser-final.json": "bf8af073078df8645343d7e267682ec2beaa0e2122a1eb9ea21214633796c7bc",
+    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "provider_calls": 0,
+  "frozen_m0_unchanged": true,
+  "original_history_preserved_locally": true,
+  "limits": "Authored and targeted checks; see report for overlapping counts, skipped historical data, initial failures and CI gate."
+}
