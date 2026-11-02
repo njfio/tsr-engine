@@ -115,6 +115,22 @@ class RetentionDecision(unittest.TestCase):
         self.assertEqual(detail['code'], 'required_field')
         self.assertEqual(detail['required_fields'], ['development_declined', 'retain'])
 
+    def test_settled_bare_retention_receives_one_bounded_correction_naming_the_field(self):
+        import tempfile
+        with self.assertRaises(ValueError) as caught:
+            adapter(['provisional_preference']).check_proposal_shape({'retain': 'Keep it'})
+        with tempfile.TemporaryDirectory() as d:
+            budget = correction.Budget(Path(d) / 'corrections.jsonl', {'version': 'browser-project-cycle-adapter@v7'}, allowance=1)
+            settled = {'receipt': {'status': 'settled', 'usd': 0.001}}
+            feedback = budget.feedback('proposal', 'a' * 64, settled, 'request-1', native_diagnostic=caught.exception.diagnostic)
+            self.assertEqual(feedback['code'], '$: required_field')
+            self.assertEqual(feedback['native_structure']['required_fields'], ['development_declined', 'retain'])
+            corrected = budget.body({'messages': [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': '{}'}]}, feedback)
+            self.assertIn('development_declined', corrected['messages'][-1]['content'])
+            # One allowance means one correction; a second bare retention is a terminal stop.
+            with self.assertRaisesRegex(ValueError, 'exhausted'):
+                budget.feedback('proposal', 'a' * 64, settled, 'request-2', native_diagnostic=caught.exception.diagnostic)
+
     def test_stated_decision_is_accepted_and_plain_retention_still_works_without_development(self):
         a = adapter(['provisional_preference'])
         a.check_proposal_shape({'retain': 'Keep it', 'development_declined': 'Considered provisional wanting; nothing new connects'})
