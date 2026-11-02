@@ -108,6 +108,24 @@ class Mapping(unittest.TestCase):
         self.assertTrue(out['six'].startswith('Row 6'))
         self.assertTrue(out['sized'].startswith('Crossed'))
 
+    @unittest.skipUnless(os.getenv('TSR_LOCAL_CHROMIUM') == '1', 'local Chromium opt-in; not the sealed runtime')
+    def test_long_trace_with_eight_readouts_fits_the_report_bound(self):
+        # Eight long readouts after 32 keys: over v1's 4000-byte report, within the current bound.
+        files = {'index.html': ''.join('<p id="r%d">%s</p>' % (i, 'x' * 250) for i in range(8)) + '<button id="start">Start</button>'}
+        actions = [{'kind': 'click', 'value': '#start'}]
+        for i in range(32):
+            actions += ([{'kind': 'wait', 'value': 10}] if i else []) + [{'kind': 'key', 'value': 'ArrowUp'}]
+        probe = {'version': 'browser-probe@v1', 'assets': ['index.html'], 'entry': 'index.html', 'actions': actions,
+                 'checks': [{'selector': '#r%d' % i, 'text': 'x'} for i in range(8)]}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'index.html').write_text(files['index.html'])
+            script = ("const {chromium}=require('playwright');const h=require(%s);"
+                      "(async()=>{const r=await h.run(%s,chromium,{containerOnly:true});console.log(Buffer.byteLength(JSON.stringify(r)))})()"
+                      % (json.dumps(str(ROOT / 'scripts/engine-browser-harness.cjs')), json.dumps(probe)))
+            size = int(subprocess.run(['node', '-e', script], cwd=d, check=True, capture_output=True, text=True, timeout=120).stdout)
+        self.assertGreater(size, 4000)
+        self.assertLessEqual(size, 32000)
+
 
 if __name__ == '__main__':
     unittest.main()

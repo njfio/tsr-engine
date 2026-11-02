@@ -22,7 +22,9 @@ Repairs:
 
 - **Higher action bound.** `scripts/engine-browser-harness.cjs` and
   `browser.rs` now accept 64 actions (`MAX_PROBE_ACTIONS`). The recorded report
-  bound rose to match (`STDOUT_BYTES`, `OUTPUT_BOUND`).
+  bound rose to match: the harness's own report limit (`MAX_REPORT_BYTES`) and
+  the native record (`STDOUT_BYTES`, `OUTPUT_BOUND`) are all 32000 bytes or more,
+  and a test keeps the two sides equal.
 - **Earlier projects keep working.** The previous harness is preserved byte for
   byte as `scripts/engine-browser-harness-v1.cjs`. Projects admitted with it keep
   validating under its own 12-action bound, in Rust (`LEGACY_HARNESS_V1`) and in

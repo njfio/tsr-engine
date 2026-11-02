@@ -15,6 +15,8 @@ function readLocal(name, limit) {
 // v2: 64 ordered actions so a mapped trace can reach a criterion-relevant state
 // (v1 allowed 12: one start click plus at most six keys, too short to resolve play).
 const MAX_ACTIONS=64;
+// Report bytes; equals STDOUT_BYTES in browser.rs (v1: 4000, which a long trace with readouts exceeds).
+const MAX_REPORT_BYTES=32000;
 function validate(c) {
   if(!plain(c)||Object.keys(c).sort().join()!=='actions,assets,checks,entry,version'||c.version!=='browser-probe@v1') throw Error('probe contract');
   if(!Array.isArray(c.assets)||c.assets.length<1||c.assets.length>8||new Set(c.assets).size!==c.assets.length||!c.assets.includes(c.entry)||!c.entry.endsWith('.html')) throw Error('asset scope');
@@ -73,7 +75,7 @@ if(require.main===module) (async()=>{
     const c=validate(JSON.parse(readLocal(process.argv[2],8192)));
     const {chromium}=require('/opt/tsr/node_modules/playwright');
     const result=await run(c,chromium,{containerOnly:process.argv[3]==='--container-only'});const text=JSON.stringify(result);
-    if(Buffer.byteLength(text)>4000)throw Error('observation bound');
+    if(Buffer.byteLength(text)>MAX_REPORT_BYTES)throw Error('observation bound');
     process.stdout.write(text+'\n');process.exitCode=result.passed?0:1;
   }catch(e){process.stderr.write('browser harness unavailable or failed: '+String(e.message).slice(0,256)+'\n');process.exitCode=2;}
 })();

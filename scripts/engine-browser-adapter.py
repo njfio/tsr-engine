@@ -18,7 +18,7 @@ clock=load('paired_clock','engine-pair-clock.py')
 feedback_policy=load('browser_feedback_policy','engine-feedback-policy.py')
 VERSION='browser-project-cycle-adapter@v7'
 def pins():
-    return {**base.pins(),**{n:d.file_sha(Path(__file__).with_name(n)) for n in ('engine-browser-deliberation.py','engine-criterion-return.py','engine-browser-expansion.py','engine-browser-desire.py','engine-pursuit-reflection.py','engine-feedback-policy.py','engine-proposal-references.py','engine-browser-session.py','engine-browser-assessment.py','engine-pair-clock.py','engine-browser-ordinary.py','engine-browser-transient.py','engine-browser-predispatch.py','engine-browser-response-recovery.py','engine-objective-continuation.py','engine-browser-adapter.py','engine-browser-project.py','engine-browser-harness.cjs')}}
+    return {**base.pins(),**{n:d.file_sha(Path(__file__).with_name(n)) for n in ('engine-browser-deliberation.py','engine-criterion-return.py','engine-browser-expansion.py','engine-browser-desire.py','engine-pursuit-reflection.py','engine-feedback-policy.py','engine-proposal-references.py','engine-browser-harness-v1.cjs','engine-browser-session.py','engine-browser-assessment.py','engine-pair-clock.py','engine-browser-ordinary.py','engine-browser-transient.py','engine-browser-predispatch.py','engine-browser-response-recovery.py','engine-objective-continuation.py','engine-browser-adapter.py','engine-browser-project.py','engine-browser-harness.cjs')}}
 def supported_harness(text):
     if not isinstance(text,str):return False
     # Current harness, the previous exact harness (12 actions) kept for admitted projects, or an older pinned one.
@@ -181,7 +181,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         if view['branch']=='reconsider':
             context['advisory_reconsideration']=view['reconsideration']
             for key in ('edits_or_abstention','existing','edit_layout'):context['response_contracts'].pop(key,None)
-            context['response_envelope']={'instruction':'Return {alternatives:[one advisory candidate]}, {deliberation:{artifact:{retain:reason},development:one advisory candidate or null,artifact_dependency:independent|requires_development}}, {retain:reason}, or {abstain:reason}. No edit, verification execution or inspection in this dedicated reconsideration. Prior lineage is context, not a mandatory target. Independent review is required. Retention does not imply fulfillment or acceptance.','max_alternatives':1}
+            context['response_envelope']={'instruction':'Return {alternatives:[one advisory candidate]}, {deliberation:{artifact:{retain:reason},development:one advisory candidate,artifact_dependency:independent|requires_development}}, {retain:reason,development_declined:reason} (development_declined names the development forms in choice_summary you considered and why none is worth proposing now), or {abstain:reason}. No edit, verification execution or inspection in this dedicated reconsideration. Prior lineage is context, not a mandatory target. Independent review is required. Retention does not imply fulfillment or acceptance.','max_alternatives':1}
 
         load('browser_pursuit_reflection','engine-pursuit-reflection.py').project(self,request,context)
         load('browser_criterion_return','engine-criterion-return.py').project(self,request,context)

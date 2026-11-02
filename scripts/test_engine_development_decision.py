@@ -224,6 +224,26 @@ class ObservationCoverage(unittest.TestCase):
         self.assertIn('const MAX_ACTIONS=%d;' % coverage.HARNESS_MAX_ACTIONS, text)
         self.assertIn('c.actions.length>12', (HERE / 'engine-browser-harness-v1.cjs').read_text())
 
+    def test_harness_and_native_bounds_agree(self):
+        import re
+        harness = (HERE / 'engine-browser-harness.cjs').read_text()
+        rust = (ROOT / 'crates/tsr-cli/src/engine/adaptive/coding/project/browser.rs').read_text()
+        native = {k: int(v) for k, v in re.findall(r'pub const (MAX_PROBE_ACTIONS|STDOUT_BYTES): usize = (\d+);', rust)}
+        self.assertEqual(int(re.search(r'const MAX_ACTIONS=(\d+);', harness).group(1)), native['MAX_PROBE_ACTIONS'])
+        # The harness refuses to print a report larger than the native record keeps.
+        self.assertEqual(int(re.search(r'const MAX_REPORT_BYTES=(\d+);', harness).group(1)), native['STDOUT_BYTES'])
+        self.assertNotIn('>4000', harness)
+        self.assertIn('>4000', (HERE / 'engine-browser-harness-v1.cjs').read_text())
+
+    def test_no_proposal_envelope_offers_bare_retention_beside_development(self):
+        import re
+        for name in ('engine-browser-adapter.py', 'engine-browser-project.py'):
+            text = (HERE / name).read_text()
+            for match in re.finditer(r"\{retain:reason\}", text):
+                window = text[max(0, match.start() - 120):match.start() + 160]
+                self.assertTrue('development_declined' in window or 'only when' in window or 'no development form' in window,
+                                name + ': ' + window)
+
     def test_declarations_must_be_complete(self):
         for bad in ({}, {'crossing': {'min_inputs': 0, 'basis': 'x'}}, {'crossing': {'min_inputs': 3, 'basis': ' '}},
                     {'crossing': {'min_inputs': 3}}):
