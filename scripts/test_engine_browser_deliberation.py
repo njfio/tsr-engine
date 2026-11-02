@@ -30,9 +30,17 @@ class BrowserDeliberation(BrowserDesire):
  def test_no_development_retains_without_invented_identity(self):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
-   out=original(body,timeout);out['value']={'deliberation':{'artifact':{'retain':'Authored no new meaning'},'development':None,'artifact_dependency':'independent'}};return out
+   out=original(body,timeout);out['value']={'retain':'Authored no new meaning','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'};return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertEqual(result['status'],'proposal_retention');self.assertEqual(self.ledger.status()['calls'],1)
+ def test_bare_retention_while_development_is_offered_is_not_accepted(self):
+  a,ca=self.configure();original=self.transport
+  def transport(body,timeout):
+   out=original(body,timeout);out['value']={'retain':'Authored bare retention without a development decision'};return out
+  a.injected_transport=transport
+  try:result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
+  except Exception as error:result={'status':'raised','error':str(error)}
+  self.assertNotEqual(result['status'],'proposal_retention')
  def test_same_identity_component_preserves_exact_admitted_delta(self):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
@@ -72,7 +80,7 @@ class BrowserDeliberation(BrowserDesire):
    nonlocal proposed,reviews
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
    if 'criteria' not in data:
-    if proposed:out['value']={'retain':'Authored fresh choice after artifact rejection'}
+    if proposed:out['value']={'retain':'Authored fresh choice after artifact rejection','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
     else:
      proposed=True;out['value']={'deliberation':{'artifact':out['value']['alternatives'][0],'development':{'provisional_preference':{'parents':['p0'],'meaning':'Authored future orientation','rationale':'Uncertain possibility without success claim'}},'artifact_dependency':'independent'}}
    else:
@@ -146,7 +154,7 @@ class BrowserDeliberation(BrowserDesire):
     generated+=1
     if generated==1:out['value']={'deliberation':{'artifact':out['value']['alternatives'][0],'development':{'provisional_preference':{'parents':['p0'],'meaning':'Authored recoverable orientation','rationale':'Uncertain generated wanting, no empirical claim'}},'artifact_dependency':'independent'}}
     else:
-     self.assertTrue(data['browser_returns']);out['value']={'retain':'Authored next choice consumes the returned control observations; not player fulfillment'}
+     self.assertTrue(data['browser_returns']);out['value']={'retain':'Authored next choice consumes the returned control observations; not player fulfillment','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertEqual(result['status'],'proposal_retention');self.assertEqual(self.c.cli('project','status')['execution_status'],'passed');self.assertEqual(self.ledger.status()['execution_groups'],1);self.assertEqual(self.ledger.status()['calls'],4)
@@ -162,7 +170,7 @@ class BrowserDeliberation(BrowserDesire):
     generated+=1
     if generated==1:out['value']={'deliberation':{'artifact':out['value']['alternatives'][0],'development':{'provisional_preference':{'parents':['p0'],'meaning':'Authored recoverable orientation','rationale':'Uncertain generated wanting, not observed fulfillment'}},'artifact_dependency':'independent'}}
     else:
-     self.assertTrue(data['browser_returns']);out['value']={'retain':'Authored stop after independently reviewed artifact return'}
+     self.assertTrue(data['browser_returns']);out['value']={'retain':'Authored stop after independently reviewed artifact return','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    else:
     reviews+=1
     if reviews==1:
@@ -192,7 +200,7 @@ class BrowserDeliberation(BrowserDesire):
    elif 'advisory_reconsideration' in data:
     considered.append(data);self.assertIn('provisional_preference',data['choice_summary']['forms']);self.assertNotIn('edit',data['choice_summary']['forms'])
     out['value']={'deliberation':{'artifact':{'retain':'Authored unchanged tested artifact'},'development':{'provisional_preference':{'parents':['p0'],'meaning':'Authored recoverable orientation after bounded observations','rationale':'An uncertain possibility; observed controls do not establish enjoyment'}},'artifact_dependency':'independent'}}
-   else:out['value']={'retain':'Authored no more changes'}
+   else:out['value']={'retain':'Authored no more changes','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertTrue(considered);self.assertEqual(result['status'],'proposal_retention');self.assertTrue(result['development']['advance']['preference_admitted']);self.assertEqual(self.c.cli('project','status')['execution_status'],'passed');self.assertEqual(self.ledger.status()['execution_groups'],1)
@@ -206,7 +214,7 @@ class BrowserDeliberation(BrowserDesire):
    elif 'advisory_reconsideration' in data:
     considered.append(data);self.assertIn('provisional_preference',data['choice_summary']['forms']);self.assertNotIn('edit',data['choice_summary']['forms'])
     out['value']={'alternatives':[{'provisional_preference':{'parents':['p0'],'meaning':'Authored recoverable orientation after bounded observations','rationale':'An uncertain possibility; observed controls do not establish enjoyment'}}]}
-   else:out['value']={'retain':'Authored no more changes'}
+   else:out['value']={'retain':'Authored no more changes','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport
   def hook(phase,name):
@@ -225,14 +233,14 @@ class BrowserDeliberation(BrowserDesire):
     considered.append(data);self.assertIn('provisional_preference',data['choice_summary']['forms']);self.assertNotIn('edit',data['choice_summary']['forms'])
     development=self.relation(data);development['relational']['aspiration']='Authored new possibility after bounded return, not a prior-lineage revision'
     out['value']={'deliberation':{'artifact':{'retain':'Authored unchanged tested artifact'},'development':development,'artifact_dependency':'independent'}}
-   else:out['value']={'retain':'Authored no more changes'}
+   else:out['value']={'retain':'Authored no more changes','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertTrue(considered);self.assertEqual(result['status'],'proposal_retention');self.assertTrue(result['development']['advance']['qualitative_admitted']);self.assertEqual(len(self.c.request()['coding']['relational']['history']),2);self.assertEqual(self.c.cli('project','status')['execution_status'],'passed');self.assertEqual(self.ledger.status()['execution_groups'],1)
  def test_compound_terminal_intent_recovers_without_model_or_effect(self):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
-   out=original(body,timeout);out['value']={'deliberation':{'artifact':{'retain':'Authored complete'},'development':None,'artifact_dependency':'independent'}};return out
+   out=original(body,timeout);out['value']={'retain':'Authored complete','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'};return out
   a.injected_transport=transport
   def hook(phase,name):
    if phase=='after_intent' and name=='terminal':raise RuntimeError('authored terminal interruption')

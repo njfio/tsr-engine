@@ -15,7 +15,7 @@ class BrowserExpansion(BrowserDesire):
      child=children[0]
      self.assertIn(child['id'],data['public_meaning_references']['eligible_contributors'])
      out['value']={'alternatives':[{'public_desire':{'identity':child['id'],'revises':None,'parents':child['parents']+[child['id']],'meaning':'Authored recoverable exploration wanting, with fulfillment unknown and both obligations preserved.','change':'development','basis':{'kind':'unknown'}}}]}
-    else:out['value']={'retain':'Authored retention after independently reviewed child meaning; not empirical fulfillment.'}
+    else:out['value']={'retain':'Authored retention after independently reviewed child meaning; not empirical fulfillment.','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport
   result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
@@ -58,7 +58,7 @@ class BrowserExpansion(BrowserDesire):
      self.assertEqual(data['generated_preferences'][0]['fulfillment'],'unknown')
      self.assertEqual(len(data['parents']),3)
      self.assertEqual(data['generated_preference_statuses'][0]['status'],'open')
-     out['value']={'retain':'Authored choice retains source while keeping the derived contributor available; no fulfillment claim.'}
+     out['value']={'retain':'Authored choice retains source while keeping the derived contributor available; no fulfillment claim.','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
     else:out['value']={'alternatives':[{'contrast_preference':{'aspiration':'r0','contrast':'c0'}}]}
    return out
   a.injected_transport=transport
@@ -87,7 +87,7 @@ class BrowserExpansion(BrowserDesire):
   a,ca=self.configure_expansion();original=self.transport;native=a.native
   def transport(body,timeout):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
-   if 'criteria' not in data:out['value']={'retain':'Authored retain after exact recovery'} if data.get('generated_preferences') else {'alternatives':[{'contrast_preference':{'aspiration':'r0','contrast':'c0'}}]}
+   if 'criteria' not in data:out['value']={'retain':'Authored retain after exact recovery','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'} if data.get('generated_preferences') else {'alternatives':[{'contrast_preference':{'aspiration':'r0','contrast':'c0'}}]}
    return out
   a.injected_transport=transport
   def fail(kind,value):

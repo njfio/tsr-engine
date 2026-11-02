@@ -13,7 +13,7 @@ class BrowserProvisional(BrowserDesire):
     if len(generated)<2:
      parent=next((p for p in data['parents'] if 'original_contributors' in p),data['parents'][0])
      out['value']={'alternatives':[{'provisional_preference':{'parents':[parent['id']],'meaning':'Authored wanting for '+('recoverable interaction' if not generated else 'revisitable recovery choices'),'rationale':'Authored generated hypothesis from the named contributor; fulfillment remains unknown, with no user testimony or new permission.'}}]}
-    else:out['value']={'retain':'Authored retention after optional generated wanting; no fulfillment claim.'}
+    else:out['value']={'retain':'Authored retention after optional generated wanting; no fulfillment claim.','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport
   result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()

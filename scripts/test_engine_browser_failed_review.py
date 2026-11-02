@@ -85,7 +85,7 @@ class NativeRecovery(BrowserAdapter):
    if len(self.sent)==3 and self.mode=='reject':
     v['value']['verdict']='reject'
     for f in v['value']['findings'].values():f['finding']='not_met'
-   if len(self.sent)>3:v['value']={'retain':'Authored retained choice after exact criticism; no player satisfaction claim'}
+   if len(self.sent)>3:v['value']={'retain':'Authored retained choice after exact criticism; no player satisfaction claim','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return v
   self.wire=wire
   adapter=m.ordinary.Adapter(self.root/'adapter',self.a,self.c,self.ledger,wire)

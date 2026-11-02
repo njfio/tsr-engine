@@ -18,7 +18,7 @@ class BrowserDesire(BrowserAdapter):
    if 'criteria' not in data:
     if data['parents'][0].get('revision'):
      self.assertIn('Start control',data['acceptance_parents'][0]['meaning']);self.assertTrue(data['public_desire_history'])
-     out['value']={'retain':'Authored retained current source after reviewed meaning; not fulfillment.'}
+     out['value']={'retain':'Authored retained current source after reviewed meaning; not fulfillment.','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
     else:out['value']=self.proposal(data)
    return out
   a.injected_transport=transport
@@ -47,7 +47,7 @@ class BrowserDesire(BrowserAdapter):
   a,ca=self.configure(events);original=self.transport
   def transport(body,timeout):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
-   if 'criteria' not in data:out['value']={'retain':'Authored retained'} if data['parents'][0].get('revision') else self.proposal(data)
+   if 'criteria' not in data:out['value']={'retain':'Authored retained','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'} if data['parents'][0].get('revision') else self.proposal(data)
    return out
   a.injected_transport=transport;m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   before=self.c.request()['coding']['relational']['inputs']['public_desires']['history']
@@ -65,7 +65,7 @@ class BrowserDesire(BrowserAdapter):
     out['value']['verdict']='reject';out['value']['findings']['parent_fidelity']['finding']='not_met'
     out['value']['findings']['parent_fidelity']['explanation']='Authored rejection; choose freely next.'
    else:
-    generated+=1;out['value']=self.proposal(data) if generated==1 else {'retain':'Authored keep original meaning after critique'}
+    generated+=1;out['value']=self.proposal(data) if generated==1 else {'retain':'Authored keep original meaning after critique','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertEqual(result['status'],'proposal_retention');self.assertNotIn('public_desires',self.c.request()['coding']['relational']['inputs'])
@@ -74,7 +74,7 @@ class BrowserDesire(BrowserAdapter):
   a,ca=self.configure();original=self.transport;original_native=a.native
   def transport(body,timeout):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
-   if 'criteria' not in data:out['value']={'retain':'Authored retained after recovery'} if data['parents'][0].get('revision') else self.proposal(data)
+   if 'criteria' not in data:out['value']={'retain':'Authored retained after recovery','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'} if data['parents'][0].get('revision') else self.proposal(data)
    return out
   a.injected_transport=transport
   def interrupt(kind,value):
@@ -114,7 +114,7 @@ class BrowserDesire(BrowserAdapter):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
-   if 'criteria' not in data:out['value']={'retain':'Authored retained'} if data['parents'][0].get('revision') else self.proposal(data)
+   if 'criteria' not in data:out['value']={'retain':'Authored retained','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'} if data['parents'][0].get('revision') else self.proposal(data)
    return out
   a.injected_transport=transport
   def hook(phase,name):
@@ -146,7 +146,7 @@ class BrowserDesire(BrowserAdapter):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
    if 'criteria' not in data:
     history=data['public_desire_history']
-    if len(history)>=2:out['value']={'retain':'Authored retain after second development'}
+    if len(history)>=2:out['value']={'retain':'Authored retain after second development','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
     else:
      out['value']=self.proposal(data)
      if history:out['value']['alternatives'][0]['public_desire']['meaning']='Start control remains usable and understandable before interaction, with clear keyboard affordance; this authored check does not measure player satisfaction.'
@@ -165,7 +165,7 @@ class BrowserDesire(BrowserAdapter):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
    if 'criteria' not in data:
     if not data['parents'][0].get('revision'):out['value']=self.proposal(data)
-    elif data['browser_returns']:out['value']={'retain':'Authored observed protected browser return; no claim of player satisfaction'}
+    elif data['browser_returns']:out['value']={'retain':'Authored observed protected browser return; no claim of player satisfaction','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
    return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertEqual(result['status'],'proposal_retention');self.assertEqual(self.ledger.status()['execution_groups'],1)
@@ -201,7 +201,7 @@ class BrowserDesire(BrowserAdapter):
   def transport(body,timeout):
    out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
    if 'criteria' not in data:
-    if len(data['public_desire_history'])>1:out['value']={'retain':'Authored successor retention'}
+    if len(data['public_desire_history'])>1:out['value']={'retain':'Authored successor retention','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'}
     else:
      out['value']=self.proposal(data);out['value']['alternatives'][0]['public_desire']['meaning']='Start control stays usable and understandable, with an explicit keyboard affordance; authored hypothesis, not player satisfaction.'
    return out
