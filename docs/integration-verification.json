@@ -13,7 +13,10 @@
     "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "ci-failed.log": "3a57ea37a696036073dcd3736ef987a2b30adae727d3955ef043b48c93421c0f",
     "ci-repaired-failed.log": "19b8209c9fb7591c7d43a2d34edbc752e134d114e751bfea5cf7dadfe4a92fa8",
-    "ci-ui-failed.log": "4317ad31803c09b137be7d2347ec4e4fab9ce7388e4db68fd540648c300ba962"
+    "ci-ui-failed.log": "4317ad31803c09b137be7d2347ec4e4fab9ce7388e4db68fd540648c300ba962",
+    "ci-main-failed.log": "c3b90c165861f9e4d3c12cda4c881c1dabeec0fa9642866aee8fa34805fd28b6",
+    "oracle-isolation.log": "fa1cf79898d267f82467b5fd316f09c1be20f82ef4f6a27d5fac505d32c38c53",
+    "tamper-isolation.log": "e0cf8f487e1cdb4722ebc527d21466e0d2277c21bd9b8254423d5e403f860bfc"
   },
   "provider_calls": 0,
   "frozen_m0_unchanged": true,

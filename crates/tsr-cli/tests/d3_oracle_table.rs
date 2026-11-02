@@ -137,6 +137,7 @@ fn fixture(name: &str) -> Fixture {
     );
 
     let mine = Command::new(tsr_bin())
+        .env("TSR_DB", scratch.join("events.sqlite"))
         .env("TSR_M3_RUNTIME", "docker")
         .env(
             "TSR_M3_IMAGE",
@@ -228,6 +229,7 @@ fn run_row(fx: &Fixture, edit: serde_json::Value) -> String {
     let out = fx.scratch.join("out");
     let _ = fs::remove_dir_all(&out);
     let run = Command::new(tsr_bin())
+        .env("TSR_DB", fx.scratch.join("events.sqlite"))
         .env("TSR_M3_RUNTIME", "docker")
         .env(
             "TSR_M3_IMAGE",
