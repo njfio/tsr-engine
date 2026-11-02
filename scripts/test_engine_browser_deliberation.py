@@ -240,7 +240,10 @@ class BrowserDeliberation(BrowserDesire):
  def test_compound_terminal_intent_recovers_without_model_or_effect(self):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
-   out=original(body,timeout);out['value']={'retain':'Authored complete','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'};return out
+   # A compound terminal: artifact retained beside an independently reviewed development component.
+   out=original(body,timeout);data=json.loads(body['messages'][1]['content'])
+   if 'criteria' in data:return out
+   out['value']={'deliberation':{'artifact':{'retain':'Authored complete'},'development':{'provisional_preference':{'parents':['p0'],'meaning':'Authored compound-terminal wanting with unknown fulfillment','rationale':'Authored connection to the current contributor; no observed success'}},'artifact_dependency':'independent'}};return out
   a.injected_transport=transport
   def hook(phase,name):
    if phase=='after_intent' and name=='terminal':raise RuntimeError('authored terminal interruption')
