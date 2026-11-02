@@ -9373,235 +9373,259 @@
       "path": ".gitignore",
       "source_sha256": "e1c7d68b4ab66f98bcbe74b303830aeba78e89f22f3696273f16c344f57fbfac",
       "integration_sha256": "1f7becad151a30b0f19bed185b9ea7b15d3a27f85f4ef2435091dcc162f9beaf",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "README.md",
       "source_sha256": "c57c2dcbea34c9dd1507c32c88bed5d0eaa25fa0a63e59c83efc24368f16350c",
       "integration_sha256": "26f03af5a92cd5b080acbe61871b7dfea1cb6c2bb72790c5880ae93b951656f9",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-batch/src/broker_v2.rs",
       "source_sha256": "7a38d140bf6492c8c6bb1cfc1c60721bf9b17e656fbe7e5c81b77107d528c9d1",
       "integration_sha256": "86576c11f655b612ee9b6331ade5b9319ca4f0fa886b55fa777d3f16b4b8c830",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive.rs",
       "source_sha256": "e4b1d8044ee56dd5e9834dd22d131b27b619f0e75fcbb316cffab65df312bf5b",
       "integration_sha256": "4182aec89ae86f7210c06e164a96f72669a2e17cfb23205cbf210d2f5755ba97",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding.rs",
       "source_sha256": "a37b4e2ea30fcec4525f6f7580ed66979d0ebba87ab4bd466b11b37540865e49",
       "integration_sha256": "ec175d65719fedacd82fcfdb448d8411c656ef106f432505357d27d19c82a2a3",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project.rs",
       "source_sha256": "7852804b4908496b8a33a49fd4e069857dfbcc4bf2ac38790f29d2a61afa7e46",
       "integration_sha256": "060586382eb0fd80634194c378471f47bb04ceae6f4c5ef3362955695b886340",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance.rs",
       "source_sha256": "84c29fa6cec7b284bc9234dcda315c60bc0d468bd97b6d921c86fae7f9c8c623",
       "integration_sha256": "6d1566feca506c8532b57e3ec178a997ca8ef48c0e373cc92bfa3e866b00ae14",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/cycle.rs",
       "source_sha256": "43091e6ddf05c51ec909b9e4f2fccb72127067b3405c2440042a174452b30813",
       "integration_sha256": "d1c9036ece116185df6da202f7abb54c02fc1c0575c1e97bed1102e871b42cca",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/guidance.rs",
       "source_sha256": "343a559a542ebbe358c5b3c954ecb13b9815a5f4f5b9af0027e57bb8cce876d8",
       "integration_sha256": "a243b967454f3928dadab48698e4c1a4efd4c939ff7fa92e549078010651bdf2",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer.rs",
       "source_sha256": "3012b6a94b54da54412468d8a0641dab0d52fd3d38209e22c7d3ec01177dbe92",
       "integration_sha256": "2b394b2d67e5a0c9e1ddac9423ffa092532f2b1c29054eaaec787019a196d48e",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/supplemental.rs",
       "source_sha256": "45525a417c5dceedcdf38e52a623f0e27bb5956d92c3367e7335cbe25d09c1b5",
       "integration_sha256": "4ac1162791ed2a7a6b1b6773a76d5c371fce14e0feba41c0580dcc3d9cb2d2d8",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/typed.rs",
       "source_sha256": "d3d35a962fdd32f3b1d139e24c3d8294f649650f174b8976c7f80c4b3efd3cd2",
       "integration_sha256": "d8f0bb334f9bc9d7d78f59fb660258310da676533d72e7035433f289c901fb86",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/attention.rs",
       "source_sha256": "cca6007ba21110e24631bd3284143529c92961c132b585153923d2dc56a12ce1",
       "integration_sha256": "10395abaf9db712125d538fbabd0ccd03224515cb33d17958eedf66ef57f7140",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/browser.rs",
       "source_sha256": "f975560ccb74993fe4b87fbea8393d56c460bff2702facaca91910e799281121",
       "integration_sha256": "fe336bd10195410462788b0307d1477aa53b23b1662819ff54381fc363ffe1df",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/budget.rs",
       "source_sha256": "5e7c5d10ebac21536bd9f2b67d09d803403d7c9588b4ab82774039495d8be29e",
       "integration_sha256": "3d4a9d8c094493252f9ee9414b83bb5bf090676556e24246e694ff96dc7c52dd",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/cost.rs",
       "source_sha256": "a6c0fe33fd2b2d7390ea481f6491e8409c41ba4231de784375e49a353de6bfd3",
       "integration_sha256": "c716af122a27e3420e720c0185b3d295bdccc8558f8c2c8c07f5126eda0bb3e1",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/criterion_return.rs",
       "source_sha256": "c66aed22f2d451ce2b7fd8a65bf42baa708f94beff7862af2c4ce51fb7390470",
       "integration_sha256": "c6ef56a9327611ba66a9c2f90806572fe0efbb653976841f95b5de1f2c44da4d",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/cycle.rs",
       "source_sha256": "2a196dcd990c392b56b481831c833bc178934375c0619415ca18163d45741749",
       "integration_sha256": "bde044a47b24be927045f299ea756504e5e300ecbea1f92e6f4060caac24ed38",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/desire.rs",
       "source_sha256": "41b0fef0ca85c2b86847bb98db2a75fd9d5eb213dacf8e7a7c644fd84e13f37a",
       "integration_sha256": "94ce10987178926e430f3bb682b327b9d628297952c63df15cbbc6372f3962a8",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/expansion.rs",
       "source_sha256": "8975f7df1df0412271e389faef2fa8b1b72b5cd5faa94fd9e1eb4577419fca1c",
       "integration_sha256": "9ab96b9e5aaf646593dc6dc173c776edb64ed8e63d5786760c92b4396b2d39fb",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/lifecycle.rs",
       "source_sha256": "41bb2f530970f9114c39bb4b1aae8feea17543ad0875028c59812f55e714bf99",
       "integration_sha256": "cc7a65e7e6bc8014bcee727d2bc4121b9a5f9ff1a41bab8ac9733f47e1f08e81",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/provisional.rs",
       "source_sha256": "b4c177b2980880af756fd1e970917c40588a8574fbf64779f66ff737e76dfe60",
       "integration_sha256": "8c47bd77344c26c9e0aa7a1ad0b513ce169118ff929451563ca920b9b0eb2e17",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/relational.rs",
       "source_sha256": "902a4dac00ea21c5c708787fc29223784330de9d61107fd43dc8d5b56c332dbd",
       "integration_sha256": "2ab52216459803b98590fdded06db933325c0d7c676d90ca8f611f4c389255a5",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/coding/project/success.rs",
       "source_sha256": "844f7e6fb8de877672bd1a40410e8963781692cab27f716acb4b5a881ec29536",
       "integration_sha256": "82212c36ae94414de7eab03e7484d9e2e83f08d1501ec186617ef3a5aab7bfff",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine/adaptive/provider.rs",
       "source_sha256": "89ac0cbb68358b0306eaa0fb6a0f45064f90ae920d7a4e2f4a1429d0ea51553c",
       "integration_sha256": "870e95b890580a53b9ac4b8ee804877a5a05b021b10495b394cfd4ea5a687ab2",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/engine_project_cmd.rs",
       "source_sha256": "2cac5db3d422e153704b78055c5538cd1b9c3e220effc3390b85f0d319ebb2fe",
       "integration_sha256": "dbc22e3fe24e0706a6473988b892f831c2ab13f0be2ba9b2b38f19bce4092b17",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/src/main.rs",
       "source_sha256": "af01b48ea4e1e24a102f44a8132e88f1f2ac78f9fbc1e0b80c3e7da8be171d79",
       "integration_sha256": "105576d52f384fae23d16c342b7bb3dcbc3b4bea665a193331f96472400d01b1",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-cli/tests/m4_train.rs",
       "source_sha256": "b7c6b24048b789e914c6ec8496fa5b446b27f0ffe268640d7dda521ae4150e7c",
       "integration_sha256": "65831073b2cf2740280e50b45fc38d032abd6e2329c857591da185897d21cb3c",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-domain/src/lib.rs",
       "source_sha256": "7189bc99707d9f2e51495d0e35ab33df964efa0148cae5567cf2824ec884e602",
       "integration_sha256": "60ff39590bbe709cc984dbec3daecebd444e01439650aca9ea480692842829a6",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-ledger/src/active.rs",
       "source_sha256": "943d03e8711ae073834c67ed6b8b37a7daee267b6a2858a438e007ffe249a7e5",
       "integration_sha256": "dc2edb4b54155f9cdff62790aa58e0497bb35da9ac972c091c0dcb7c1c4279f2",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-ledger/src/lib.rs",
       "source_sha256": "98c6cecf299e9509da9e15676da5088ce118da79d68dffecbb0b7ea8c7365600",
       "integration_sha256": "865d876f27c7d8f7573428153a341b19a4ba3b70c489ceec1a5e54fe974d2401",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-ledger/src/provisional.rs",
       "source_sha256": "74b12d4da80a2880bacf3c33762363c61dc974807e633a30570cc7d94b469f1b",
       "integration_sha256": "1076629701a2e83475cafda8fdfde7322e8284813b65de823e0fa7e70b7f1aee",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-ledger/src/selection.rs",
       "source_sha256": "2629a1f5be59b416b081c41309cb232c178106fc9f30a96b615dbac9f67f80ac",
       "integration_sha256": "44052ce78ba476cb9e7e55e3be5c445743288483cf68b9007ecf28097a995c62",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "crates/tsr-ledger/src/tensions.rs",
       "source_sha256": "e10f2951e24bf545e0117432f7f77809ada4e262874f4433564478dcec415ec1",
       "integration_sha256": "d4aa58f8f2ac10fb2af31ded744c331030ffacc24f5e4c8db590af1372f60398",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
+      "path": "scripts/m3-following-expansion.py",
+      "source_sha256": "be79426256062c9729b609d7e10c4500e2317ed1b04bbc5e85365d0f77b84991",
+      "integration_sha256": "b274113e2fff5fe343f5ec3d887eb7f23c89e376047056f24379786e42dda1ac",
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
+      "path": "scripts/m3-following-native-expansion.py",
+      "source_sha256": "8007fae0456f5d3ce8a6be2cc25ebc2ed22ea0a0858bfc8baf4573a90d7a7c83",
+      "integration_sha256": "1dd0145ef5f0ff04118fb4bc045d713efdd320993192d3a5dcf359afe77c096f",
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
+      "path": "scripts/prepare-rts-autonomous.py",
+      "source_sha256": "c259eeb15117b9958878c40493fdbdfcae92be16bca23d548c902c041a031c0f",
+      "integration_sha256": "31ca1dec9980032a60e84168a104a1436c754234914641aaa0357c7766cf1802",
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "ui/engine/README.md",
       "source_sha256": "b92afd86f9adc5d3cca3e1088d9693a0afaf8fc4621e7034c0166e435571b7c9",
       "integration_sha256": "684499b2fc4a408fcc808944c121195a4b2621e540ce6a6e31382b8b9c45c562",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
+      "path": "ui/engine/decisions.py",
+      "source_sha256": "33d1e5b8c32d43ccf3b8637314846179155d36948f336b335374c468fab96afb",
+      "integration_sha256": "13b2826c897a57aaef00254b249c440e2c954ba1761723a274c9e04c2de54ede",
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "ui/engine/fixture_server.py",
       "source_sha256": "d3e8fa78960c7c046ce4a372c0c3ed17eb8e5db474640d59dcfd348e66e359e4",
       "integration_sha256": "944170a49f180411b5713c3033d586658950fba72ec10d1ba195f442e393a593",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "ui/engine/server.py",
       "source_sha256": "e7b26bea1773518be7a58123f0c08892b1e29fad6436149ac7b6bb90bda1e314",
       "integration_sha256": "e51cf19b652d9a6880e7fa1b0554d92ed34d23a6806c50a3366f9e353d677d8e",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "ui/engine/test_interaction.py",
       "source_sha256": "56aa590fd6820df7d87afb14cfd85679129f5d046030e729221a033a7e9574c5",
       "integration_sha256": "123ea5f7ae1e54ed914ed2a3defc9b502643a015aa653dffe7ae9d2dee48511a",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     },
     {
       "path": "ui/engine/test_server.py",
       "source_sha256": "df4a3f250b0b5a4f5a9eb279946c0c8ea17b90e7bb1993c8c9ca6ec417354509",
       "integration_sha256": "e5db96a665412748cb5920d103c1683e824af291cd80c981f8639f05e736468e",
-      "reason": "public UI portability/privacy repair or rustfmt-only Rust formatting; see integration report"
+      "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
     }
   ]
 }

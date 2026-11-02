@@ -37,7 +37,7 @@ class Decisions:
   store=self.store;campaign,m,ledger,_=store.ledger();status=ledger.status()
   if status.get('unknown_executions') or status.get('blocking_unknown_calls',status['unknown_calls'])!=[KEY] or status['overrun']:raise ValueError('This decision cannot authorize unknown execution effects or other unresolved calls.')
   proof=ledger.quarantine_generation(ROOT/'target/pond-beautiful-live-v1/adapter',REQUEST,REVIEW['journal_sha256'],REVIEW,dry_run=True)
-  
+
   with ledger.locked() as (_,rows):head=rows[-1]["hash"]
   events=store.events(p)
   return {'version':'local-human-generation-disposition@v1','unknown_key':KEY,'proof':proof,'review':REVIEW,'project':p,'source':store.source_snapshot(p),'events_sha256':sha(events),'input_ids':[e['id'] for e in events if e['type']=='input'],'resume_input_id':next((e['id'] for e in reversed(events) if e['type']=='input'),None),'ledger_head':head,'manifest_sha256':ledger.hash,'max_calls':status['effective_max_calls'],'max_execution_groups':status['effective_max_execution_groups'],'max_committed_microusd':status['effective_cap_microusd'],'baseline_committed_microusd':status['committed_microusd'],'remaining_calls':status['effective_max_calls']-status['calls'],'remaining_operations':status['effective_max_execution_groups']-status['execution_groups'],'remaining_microusd':status['effective_cap_microusd']-status['committed_microusd'],'minutes':120,'text':store.recovery_disclosure()['text'],'resume':'Continue the saved messages in this project; preserve original games and contributing history.'}

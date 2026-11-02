@@ -65,4 +65,3 @@ if __name__ == '__main__':
             with path.open('x') as stream:
                 json.dump(dict(status='controller-error', error_class=type(error).__name__, recorded_at=datetime.now(timezone.utc).isoformat()), stream)
         raise
-

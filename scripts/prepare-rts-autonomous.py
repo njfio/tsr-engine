@@ -33,7 +33,7 @@ def main():
     assert len(spec['goal'].encode()) <= 512
     scope = out / 'scope.json'
     scope.write_text(json.dumps(spec, indent=2)+'\n')
-    engine = out / 'engine' 
+    engine = out / 'engine'
     def cli(*argv):
         result = subprocess.run([str(ROOT / 'target/debug/tsr'), 'engine', '--directory', str(engine), 'project', *argv], capture_output=True, text=True, timeout=180, check=True)
         return json.loads(result.stdout)
