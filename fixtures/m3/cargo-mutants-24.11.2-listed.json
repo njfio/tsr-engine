@@ -1,0 +1,684 @@
+[
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::all -> Self with Default::default()\n@@ -140,17 +140,17 @@\n         \"verify_edit\",\n         \"Gate a proposed multi-file patch: broken callers, signature breaks, dangling references.\",\n     ),\n ];\n \n impl Surface {\n     /// Every tool: the default, and what every existing wiring already gets.\n     pub fn all() -> Self {\n-        Self { keep: None }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Resolves `--tools`/`RTS_MCP_TOOLS`: a profile name, a comma-separated list of tool names,\n     /// or `all`. An unknown name is an error rather than a silently smaller surface — the one\n     /// failure mode that would look like it worked.\n     pub fn parse(spec: &str) -> Result<Self, String> {\n         let spec = spec.trim();\n         if spec.is_empty() {\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::all",
+      "return_type": "-> Self",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 149
+        },
+        "start": {
+          "column": 5,
+          "line": 146
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 28,
+        "line": 148
+      },
+      "start": {
+        "column": 9,
+        "line": 148
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::parse -> Result<Self, String> with Ok(Default::default())\n@@ -147,54 +147,17 @@\n     pub fn all() -> Self {\n         Self { keep: None }\n     }\n \n     /// Resolves `--tools`/`RTS_MCP_TOOLS`: a profile name, a comma-separated list of tool names,\n     /// or `all`. An unknown name is an error rather than a silently smaller surface — the one\n     /// failure mode that would look like it worked.\n     pub fn parse(spec: &str) -> Result<Self, String> {\n-        let spec = spec.trim();\n-        if spec.is_empty() {\n-            return Err(\n-                \"tool surface must not be empty (use `all`, `core`, `verify`, or a list)\"\n-                    .to_string(),\n-            );\n-        }\n-        let names: Vec<String> = match spec.to_ascii_lowercase().as_str() {\n-            \"all\" | \"*\" => return Ok(Self::all()),\n-            \"core\" => CORE.iter().map(|name| (*name).to_string()).collect(),\n-            \"verify\" => VERIFY.iter().map(|name| (*name).to_string()).collect(),\n-            \"tsr\" => TSR.iter().map(|name| (*name).to_string()).collect(),\n-            _ => spec\n-                .split(',')\n-                .map(|name| name.trim().to_string())\n-                .filter(|name| !name.is_empty())\n-                .collect(),\n-        };\n-        if names.is_empty() {\n-            return Err(\"tool surface is empty after parsing\".to_string());\n-        }\n-        let known = SHORT.iter().map(|(name, _)| *name).collect::<Vec<_>>();\n-        let unknown = names\n-            .iter()\n-            .filter(|name| {\n-                !known.contains(&name.as_str())\n-                    && !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n-            })\n-            .cloned()\n-            .collect::<Vec<_>>();\n-        if !unknown.is_empty() {\n-            return Err(format!(\n-                \"unknown tool(s) in surface: {}. Known: {}\",\n-                unknown.join(\", \"),\n-                known.join(\", \")\n-            ));\n-        }\n-        Ok(Self { keep: Some(names) })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Whether the tool is inside the surface.\n     pub fn keeps(&self, name: &str) -> bool {\n         match &self.keep {\n             None => true,\n             Some(names) => names.iter().any(|kept| kept == name),\n         }\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 39,
+        "line": 192
+      },
+      "start": {
+        "column": 9,
+        "line": 155
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::parse\n@@ -162,17 +162,17 @@\n         let names: Vec<String> = match spec.to_ascii_lowercase().as_str() {\n             \"all\" | \"*\" => return Ok(Self::all()),\n             \"core\" => CORE.iter().map(|name| (*name).to_string()).collect(),\n             \"verify\" => VERIFY.iter().map(|name| (*name).to_string()).collect(),\n             \"tsr\" => TSR.iter().map(|name| (*name).to_string()).collect(),\n             _ => spec\n                 .split(',')\n                 .map(|name| name.trim().to_string())\n-                .filter(|name| !name.is_empty())\n+                .filter(|name|  /* ~ changed by cargo-mutants ~ */name.is_empty())\n                 .collect(),\n         };\n         if names.is_empty() {\n             return Err(\"tool surface is empty after parsing\".to_string());\n         }\n         let known = SHORT.iter().map(|(name, _)| *name).collect::<Vec<_>>();\n         let unknown = names\n             .iter()\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 170
+      },
+      "start": {
+        "column": 32,
+        "line": 170
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace && with || in Surface::parse\n@@ -173,17 +173,17 @@\n         if names.is_empty() {\n             return Err(\"tool surface is empty after parsing\".to_string());\n         }\n         let known = SHORT.iter().map(|(name, _)| *name).collect::<Vec<_>>();\n         let unknown = names\n             .iter()\n             .filter(|name| {\n                 !known.contains(&name.as_str())\n-                    && !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n+                    || /* ~ changed by cargo-mutants ~ */ !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n             })\n             .cloned()\n             .collect::<Vec<_>>();\n         if !unknown.is_empty() {\n             return Err(format!(\n                 \"unknown tool(s) in surface: {}. Known: {}\",\n                 unknown.join(\", \"),\n                 known.join(\", \")\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "package": "rts-mcp",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 181
+      },
+      "start": {
+        "column": 21,
+        "line": 181
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::parse\n@@ -172,17 +172,17 @@\n         };\n         if names.is_empty() {\n             return Err(\"tool surface is empty after parsing\".to_string());\n         }\n         let known = SHORT.iter().map(|(name, _)| *name).collect::<Vec<_>>();\n         let unknown = names\n             .iter()\n             .filter(|name| {\n-                !known.contains(&name.as_str())\n+                 /* ~ changed by cargo-mutants ~ */known.contains(&name.as_str())\n                     && !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n             })\n             .cloned()\n             .collect::<Vec<_>>();\n         if !unknown.is_empty() {\n             return Err(format!(\n                 \"unknown tool(s) in surface: {}. Known: {}\",\n                 unknown.join(\", \"),\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 180
+      },
+      "start": {
+        "column": 17,
+        "line": 180
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::parse\n@@ -173,17 +173,17 @@\n         if names.is_empty() {\n             return Err(\"tool surface is empty after parsing\".to_string());\n         }\n         let known = SHORT.iter().map(|(name, _)| *name).collect::<Vec<_>>();\n         let unknown = names\n             .iter()\n             .filter(|name| {\n                 !known.contains(&name.as_str())\n-                    && !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n+                    &&  /* ~ changed by cargo-mutants ~ */matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n             })\n             .cloned()\n             .collect::<Vec<_>>();\n         if !unknown.is_empty() {\n             return Err(format!(\n                 \"unknown tool(s) in surface: {}. Known: {}\",\n                 unknown.join(\", \"),\n                 known.join(\", \")\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 25,
+        "line": 181
+      },
+      "start": {
+        "column": 24,
+        "line": 181
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::parse\n@@ -177,17 +177,17 @@\n         let unknown = names\n             .iter()\n             .filter(|name| {\n                 !known.contains(&name.as_str())\n                     && !matches!(name.as_str(), \"daemon_stats\" | \"daemon_telemetry\")\n             })\n             .cloned()\n             .collect::<Vec<_>>();\n-        if !unknown.is_empty() {\n+        if  /* ~ changed by cargo-mutants ~ */unknown.is_empty() {\n             return Err(format!(\n                 \"unknown tool(s) in surface: {}. Known: {}\",\n                 unknown.join(\", \"),\n                 known.join(\", \")\n             ));\n         }\n         Ok(Self { keep: Some(names) })\n     }\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::parse",
+      "return_type": "-> Result<Self, String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 193
+        },
+        "start": {
+          "column": 5,
+          "line": 151
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 185
+      },
+      "start": {
+        "column": 12,
+        "line": 185
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::keeps -> bool with true\n@@ -189,20 +189,17 @@\n                 known.join(\", \")\n             ));\n         }\n         Ok(Self { keep: Some(names) })\n     }\n \n     /// Whether the tool is inside the surface.\n     pub fn keeps(&self, name: &str) -> bool {\n-        match &self.keep {\n-            None => true,\n-            Some(names) => names.iter().any(|kept| kept == name),\n-        }\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Whether this surface is a subset (and therefore uses the short descriptions).\n     pub fn is_subset(&self) -> bool {\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::keeps",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 201
+        },
+        "start": {
+          "column": 5,
+          "line": 195
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 200
+      },
+      "start": {
+        "column": 9,
+        "line": 197
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::keeps -> bool with false\n@@ -189,20 +189,17 @@\n                 known.join(\", \")\n             ));\n         }\n         Ok(Self { keep: Some(names) })\n     }\n \n     /// Whether the tool is inside the surface.\n     pub fn keeps(&self, name: &str) -> bool {\n-        match &self.keep {\n-            None => true,\n-            Some(names) => names.iter().any(|kept| kept == name),\n-        }\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Whether this surface is a subset (and therefore uses the short descriptions).\n     pub fn is_subset(&self) -> bool {\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::keeps",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 201
+        },
+        "start": {
+          "column": 5,
+          "line": 195
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 200
+      },
+      "start": {
+        "column": 9,
+        "line": 197
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace == with != in Surface::keeps\n@@ -191,17 +191,17 @@\n         }\n         Ok(Self { keep: Some(names) })\n     }\n \n     /// Whether the tool is inside the surface.\n     pub fn keeps(&self, name: &str) -> bool {\n         match &self.keep {\n             None => true,\n-            Some(names) => names.iter().any(|kept| kept == name),\n+            Some(names) => names.iter().any(|kept| kept != /* ~ changed by cargo-mutants ~ */ name),\n         }\n     }\n \n     /// Whether this surface is a subset (and therefore uses the short descriptions).\n     pub fn is_subset(&self) -> bool {\n         self.keep.is_some()\n     }\n \n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::keeps",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 201
+        },
+        "start": {
+          "column": 5,
+          "line": 195
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "package": "rts-mcp",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 59,
+        "line": 199
+      },
+      "start": {
+        "column": 57,
+        "line": 199
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::is_subset -> bool with true\n@@ -197,17 +197,17 @@\n         match &self.keep {\n             None => true,\n             Some(names) => names.iter().any(|kept| kept == name),\n         }\n     }\n \n     /// Whether this surface is a subset (and therefore uses the short descriptions).\n     pub fn is_subset(&self) -> bool {\n-        self.keep.is_some()\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n         if !self.is_subset() {\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::is_subset",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 206
+        },
+        "start": {
+          "column": 5,
+          "line": 203
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 28,
+        "line": 205
+      },
+      "start": {
+        "column": 9,
+        "line": 205
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::is_subset -> bool with false\n@@ -197,17 +197,17 @@\n         match &self.keep {\n             None => true,\n             Some(names) => names.iter().any(|kept| kept == name),\n         }\n     }\n \n     /// Whether this surface is a subset (and therefore uses the short descriptions).\n     pub fn is_subset(&self) -> bool {\n-        self.keep.is_some()\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n         if !self.is_subset() {\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::is_subset",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 206
+        },
+        "start": {
+          "column": 5,
+          "line": 203
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 28,
+        "line": 205
+      },
+      "start": {
+        "column": 9,
+        "line": 205
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::short -> Option<&'static str> with None\n@@ -205,23 +205,17 @@\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n-        if !self.is_subset() {\n-            return None;\n-        }\n-        SHORT\n-            .iter()\n-            .find(|(tool, _)| *tool == name)\n-            .map(|(_, short)| *short)\n+        None /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::short",
+      "return_type": "-> Option<&'static str>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 220
+        },
+        "start": {
+          "column": 5,
+          "line": 208
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 219
+      },
+      "start": {
+        "column": 9,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::short -> Option<&'static str> with Some(\"\")\n@@ -205,23 +205,17 @@\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n-        if !self.is_subset() {\n-            return None;\n-        }\n-        SHORT\n-            .iter()\n-            .find(|(tool, _)| *tool == name)\n-            .map(|(_, short)| *short)\n+        Some(\"\") /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::short",
+      "return_type": "-> Option<&'static str>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 220
+        },
+        "start": {
+          "column": 5,
+          "line": 208
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "Some(\"\")",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 219
+      },
+      "start": {
+        "column": 9,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::short -> Option<&'static str> with Some(\"xyzzy\")\n@@ -205,23 +205,17 @@\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n-        if !self.is_subset() {\n-            return None;\n-        }\n-        SHORT\n-            .iter()\n-            .find(|(tool, _)| *tool == name)\n-            .map(|(_, short)| *short)\n+        Some(\"xyzzy\") /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::short",
+      "return_type": "-> Option<&'static str>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 220
+        },
+        "start": {
+          "column": 5,
+          "line": 208
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "Some(\"xyzzy\")",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 219
+      },
+      "start": {
+        "column": 9,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::short\n@@ -205,17 +205,17 @@\n         self.keep.is_some()\n     }\n \n     /// The one-line description to advertise for `name`, under a subset surface only.\n     ///\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n-        if !self.is_subset() {\n+        if  /* ~ changed by cargo-mutants ~ */self.is_subset() {\n             return None;\n         }\n         SHORT\n             .iter()\n             .find(|(tool, _)| *tool == name)\n             .map(|(_, short)| *short)\n     }\n \n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::short",
+      "return_type": "-> Option<&'static str>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 220
+        },
+        "start": {
+          "column": 5,
+          "line": 208
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 213
+      },
+      "start": {
+        "column": 12,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace == with != in Surface::short\n@@ -210,17 +210,17 @@\n     /// `None` means \"leave the pinned description alone\": either the surface is `all`, or the\n     /// tool has no one-liner and its paragraph is what it has.\n     pub fn short(&self, name: &str) -> Option<&'static str> {\n         if !self.is_subset() {\n             return None;\n         }\n         SHORT\n             .iter()\n-            .find(|(tool, _)| *tool == name)\n+            .find(|(tool, _)| *tool != /* ~ changed by cargo-mutants ~ */ name)\n             .map(|(_, short)| *short)\n     }\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::short",
+      "return_type": "-> Option<&'static str>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 220
+        },
+        "start": {
+          "column": 5,
+          "line": 208
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "package": "rts-mcp",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 39,
+        "line": 218
+      },
+      "start": {
+        "column": 37,
+        "line": 218
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::disabled -> Vec<String> with vec![]\n@@ -221,23 +221,17 @@\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n     pub fn disabled(&self, tools: impl IntoIterator<Item = String>) -> Vec<String> {\n-        let Some(keep) = &self.keep else {\n-            return Vec::new();\n-        };\n-        tools\n-            .into_iter()\n-            .filter(|name| !keep.iter().any(|kept| kept == name))\n-            .collect()\n+        vec![] /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     /// The point of the profiles: a small surface, and every tool in it has a one-liner.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::disabled",
+      "return_type": "-> Vec<String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 236
+        },
+        "start": {
+          "column": 5,
+          "line": 222
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "vec![]",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 235
+      },
+      "start": {
+        "column": 9,
+        "line": 229
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::disabled -> Vec<String> with vec![String::new()]\n@@ -221,23 +221,17 @@\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n     pub fn disabled(&self, tools: impl IntoIterator<Item = String>) -> Vec<String> {\n-        let Some(keep) = &self.keep else {\n-            return Vec::new();\n-        };\n-        tools\n-            .into_iter()\n-            .filter(|name| !keep.iter().any(|kept| kept == name))\n-            .collect()\n+        vec![String::new()] /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     /// The point of the profiles: a small surface, and every tool in it has a one-liner.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::disabled",
+      "return_type": "-> Vec<String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 236
+        },
+        "start": {
+          "column": 5,
+          "line": 222
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "vec![String::new()]",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 235
+      },
+      "start": {
+        "column": 9,
+        "line": 229
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace Surface::disabled -> Vec<String> with vec![\"xyzzy\".into()]\n@@ -221,23 +221,17 @@\n \n     /// The names outside the surface, given the tools that exist.\n     ///\n     /// Deliberately takes names rather than a router: naming `rmcp`'s router type here would\n     /// make rmcp part of this library's public API, and its blanket impls come with it — the\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n     pub fn disabled(&self, tools: impl IntoIterator<Item = String>) -> Vec<String> {\n-        let Some(keep) = &self.keep else {\n-            return Vec::new();\n-        };\n-        tools\n-            .into_iter()\n-            .filter(|name| !keep.iter().any(|kept| kept == name))\n-            .collect()\n+        vec![\"xyzzy\".into()] /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     /// The point of the profiles: a small surface, and every tool in it has a one-liner.\n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::disabled",
+      "return_type": "-> Vec<String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 236
+        },
+        "start": {
+          "column": 5,
+          "line": 222
+        }
+      }
+    },
+    "genre": "FnValue",
+    "package": "rts-mcp",
+    "replacement": "vec![\"xyzzy\".into()]",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 235
+      },
+      "start": {
+        "column": 9,
+        "line": 229
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ delete ! in Surface::disabled\n@@ -226,17 +226,17 @@\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n     pub fn disabled(&self, tools: impl IntoIterator<Item = String>) -> Vec<String> {\n         let Some(keep) = &self.keep else {\n             return Vec::new();\n         };\n         tools\n             .into_iter()\n-            .filter(|name| !keep.iter().any(|kept| kept == name))\n+            .filter(|name|  /* ~ changed by cargo-mutants ~ */keep.iter().any(|kept| kept == name))\n             .collect()\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::disabled",
+      "return_type": "-> Vec<String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 236
+        },
+        "start": {
+          "column": 5,
+          "line": 222
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "package": "rts-mcp",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 29,
+        "line": 234
+      },
+      "start": {
+        "column": 28,
+        "line": 234
+      }
+    }
+  },
+  {
+    "diff": "--- crates/rts-mcp/src/surface.rs\n+++ replace == with != in Surface::disabled\n@@ -226,17 +226,17 @@\n     /// public-API snapshot grew eighteen unrelated `DynClone` lines the first time. The caller\n     /// that already depends on rmcp disables what this returns.\n     pub fn disabled(&self, tools: impl IntoIterator<Item = String>) -> Vec<String> {\n         let Some(keep) = &self.keep else {\n             return Vec::new();\n         };\n         tools\n             .into_iter()\n-            .filter(|name| !keep.iter().any(|kept| kept == name))\n+            .filter(|name| !keep.iter().any(|kept| kept != /* ~ changed by cargo-mutants ~ */ name))\n             .collect()\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n",
+    "file": "crates/rts-mcp/src/surface.rs",
+    "function": {
+      "function_name": "Surface::disabled",
+      "return_type": "-> Vec<String>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 236
+        },
+        "start": {
+          "column": 5,
+          "line": 222
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "package": "rts-mcp",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 59,
+        "line": 234
+      },
+      "start": {
+        "column": 57,
+        "line": 234
+      }
+    }
+  }
+]

@@ -1,0 +1,9 @@
+# Browser post-execution recovery
+
+The recovery profile preserves live6 pending journals and the unfinished game. It verifies a frozen source prefix, exact completed execution and current test receipt, no later adapter reservation/dispatch, native and campaign settlement, and independent observation/source hashes. It copies native state only. A fresh outer cycle starts at reconsideration; no previous execution or model request is repeated.
+
+Independent gameplay assessment is appended through existing operator-guidance intake with explicit attribution, under the same contributor identities and immutable criteria. It reports observed restart loss separately from static row-clear impossibility. No user preference is invented and no repair code or relationship revision is prescribed. Actual native status flags remain unchanged; immutable historical provenance alone determines export ownership.
+
+Local validation: 15 recovery/capacity controls passed; 32 unit checks passed with one unrelated opt-in skip. The first authored full flow exposed the ancestor's superseded status changing after revision; that is fixed alongside current applicability. The conclusive authored native flow passed in421.678 seconds: preserved post-return state → reconsideration → independent authored review → fresh native proposal/review → one actual isolated browser execution → second reconsideration → review-required checkpoint → inert restart. No provider calls or campaign operations were used. This proves wiring, not model behavior or repaired gameplay. Earlier failed fixture remains in its log.
+
+Independent source review found no remaining blocker. Native unknown external cost, stopped/exceeded states, altered prefix/source/observation, appended dispatch and missing external settlement fail closed. Original live6 replay remains a safe pending-stage refusal, not clean completion. A new fresh admission is required; historical evidence is never repinned or rewritten.

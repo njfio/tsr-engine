@@ -1,0 +1,13 @@
+{
+  "request": "2137775d8e56c102422e7092560bd7f347d1f83e52c8bda1ffe1b29aacb79fb9",
+  "trial": "2f298baea3ba2b7f700726b57b0d7bb7e1b05db5c887c93cd6f22ca81cf308cd",
+  "files": {
+    "adapter/adapter.jsonl": "13903fec9a8badb4cac658e4cf820eb9ae506c5023bb40cda6d9cc066de30263",
+    "adapter/terminal-output.json": "7215a91ef1c7ba459a4943103f1bb896af24436ba45b08cc9f8890e23e81077e",
+    "adapter/output-0/failed-response-1/content.bin": "ea76d8ebcf299931f7d75b24ac7155a54f82455727e4bd334264c5e19ba5c072",
+    "process-result.json": "821979480944738837e8570b5b92629450cc30c76c17cc8b37e04358f3535c89",
+    "run.stderr": "62d01359c90a80f8abb6109a3212f897fe942710c23b515a54332343ebcd8ab9",
+    "session-grant.json": "7b7202e0ecfc20732f8999bfee5d6ad3112fbc4a2afc0b63e1c71a48566dfae0"
+  },
+  "outcome": "Received, settled $0.001434, unadmitted invalid evidence citation and scalar unknown. No review or execution. Original preserved."
+}

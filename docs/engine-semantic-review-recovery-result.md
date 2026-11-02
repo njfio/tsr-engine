@@ -1,0 +1,27 @@
+# Bounded semantic-review reconsideration
+
+The normal synthetic controller now permits one source-bound reconsideration after a settled, valid semantic `reject` or `unknown`. The implementation is `9942221`. Original desires, criteria, permissions and observations remain authoritative; a review enters generation as an attributed, fallible judgment. Unknown is not converted into a negative world fact. A fresh reviewer does not receive the previous review's conclusions.
+
+Pre-action recovery can produce fresh relational guidance or possibilities and assessment. Post-action recovery can only reconsider guidance when native reconsideration is due, then stop without another action. Repeated rejection, exact unchanged content, malformed reports, source drift, uncertainty or exhausted allowance stops. Exact-content comparison is not a claim to detect semantic novelty. Original reports, failed attempts and actual receipts remain immutable. The final proposal remains unexecuted, and formal project acceptance is separate.
+
+## Verification and actual run
+
+Seventeen focused offline tests passed, including real-controller/fake-provider recovery, unknown versus negative feedback, unchanged-content refusal, post-action non-repetition, restart and admission/request/schema/source tampering. Independent review found and verified a repaired recovery-lineage replay gap. These authored controls demonstrate mechanics, not model competence.
+
+One preregistered live workshop run used normal orchestration without manual stage steering. It completed initial aspiration, possibilities, assessment, one simulator operation, return-informed relational development and a final proposal. Four separate runtime review calls accepted their respective stages. **No rejection or unknown occurred, so live semantic recovery remains unexercised.** The plan forbids injecting a failure or repeating until one occurs.
+
+The selected operation recorded the existing fictional measurement response. It established a ledger event, not a corrected guide or verified measurement. The subsequent generated development distinguished bounded contribution from compulsory personal accounts while retaining both parent meanings; it explicitly left measurement accuracy, actual learning and learner choices unknown. The final proposal concerns the remaining fictional learning offer; it was neither executed nor formally accepted. Both rich desires remain open beyond simulator predicates. These observations do not establish reviewer independence, causal benefit or broad reliability.
+
+Terminal status: `proposal_only_complete`; final root `9c2376e82addc00bf979d5607d492b42405a3938258cfbf6e51781ad5010d2f1`. Evidence lives in `target/workshop-recovery-campaign-1/`. The run used **five generator plus four reviewer calls, one simulated operation, $0.006929 settled**, with no unknown usage, cost or application outcome. Usage was 38,785 input plus 8,215 completion tokens (47,000 total; 3,373 reasoning tokens included in completion). Unused run slots expired. Campaign totals are **61 calls, 18 operations, $0.037280**; remaining **39 calls, 22 operations, $4.962720**. The older Garden Trial 1 unknown reservation remains separate.
+
+Independent accounting reconciled nine unique provider identities. Fresh-process terminal replay with generation, review and action callbacks forbidden returned the identical result, preserving run inventory and ledger. Local evidence files are `accounting-summary.json` and `replay-audit.json`. Independent semantic review found the ordinary cycle grounded while explicitly leaving recovery unexercised.
+
+## Pricing preflight repair
+
+Two launches stopped before enrollment or model dispatch because public rates moved above narrowly pinned snapshot ceilings. They consumed no inference or operation allowance. The repair at `d52d37b` records current four-category rates and requires their conservative combined estimate to fit the existing $0.05 request reservation. Finite category bounds derive from that same reservation and the fixed token envelope. Historical quotes retain their recorded ceilings; the original campaign manifest, $5/100-call/40-operation caps and unknown reservations remain intact. This is conservative accounting, not a provider-enforced billing guarantee or an account-setting change.
+
+Eighteen pricing/accounting tests passed; one optional native-worker test was skipped. Independent review verified both source and the appended implementation-upgrade identity. No protected files, criteria, credentials or security settings changed. No new whole-workspace pass is claimed; missing lefthook remains unchanged and explicit checks were used.
+
+The remaining empirical question is whether a genuine adverse runtime judgment leads to useful fresh behavior or justified stopping. The mechanism is available for subsequent admitted work; this successful all-accept run cannot answer that question. Human boundaries remain external permissions, budget/scope changes and formal project acceptance. Runtime semantic judgment is a bounded veto/hold and can be wrong.
+
+See the [frozen plan](engine-campaign-review-recovery-plan.md), [implementation review](../specs/lanes/reviews/engine-runtime-review-recovery-prereview.md), [semantic review](../specs/lanes/reviews/engine-semantic-review-recovery-result.md), and [pricing review](../specs/lanes/reviews/engine-campaign-price-v2-review.md).

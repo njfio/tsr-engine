@@ -1,0 +1,22 @@
+{
+  "playwright": {
+    "version": "1.64.1",
+    "integrity": "sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==",
+    "tarball": "https://registry.npmjs.org/playwright/-/playwright-1.64.1.tgz",
+    "bytes": 905535,
+    "dependencies": {
+      "playwright-core": "1.64.1"
+    },
+    "optionalDependencies": null,
+    "sha256": "36ba838d2d55c44fafcff89f919b5d7bc829209318076578ee2bc7cb5687fd57"
+  },
+  "playwright-core": {
+    "version": "1.64.1",
+    "integrity": "sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==",
+    "tarball": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.64.1.tgz",
+    "bytes": 3172161,
+    "dependencies": null,
+    "optionalDependencies": null,
+    "sha256": "3af03703c967c95037454f2283f709d53ce804a4776d4219d319f5bbcc2a0185"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "version": "game-wants-offline@v5",
+  "status": "prepared_unadmitted_operator_assisted",
+  "paid_dispatch": false,
+  "files": {
+    "experiments/game-wants-v3/mapping.py": "9bf0a2cbb975a2d7f48f91f805ea3dd3b5c3f99f52296c5136e7235f927164aa",
+    "docs/game-wants-cumulative-result.md": "15d98fd3a6465fab71686ef19b29d4395bb032e43ac71759be18c903b74ca6bc",
+    "docs/game-wants-cumulative-result.json": "9fc69c0f3d3d96c878b5be3aa732a183c91beba44b2bf9439972b522a7de9950",
+    "scripts/engine-criterion-return.py": "38145ee07212c8144d27db7917d5ec78402c2bd12586a04204bbed1f48c513bc",
+    "scripts/test_browser_supplemental_controls.py": "ba8807e490dce8350e7601dda3a1d762724d4b9be5ca32d939d1abd9a861062d",
+    "scripts/test_criterion_control_observations.py": "b1c430e9e100735c6d604683793cc402098f396c1c0bb5e5e6648114e9c72561",
+    "scripts/test_engine_criterion_consistency.py": "6096763c9e5d68b144707a8f7313c63dea3f3adae1a2b400ab8b53cf8491a999",
+    "crates/tsr-cli/src/engine_project_cmd.rs": "2cac5db3d422e153704b78055c5538cd1b9c3e220effc3390b85f0d319ebb2fe",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/criterion_return.rs": "c66aed22f2d451ce2b7fd8a65bf42baa708f94beff7862af2c4ce51fb7390470",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/typed.rs": "5fd85d3db9f2a21b43e13797d407945f89c2350dc83b6a6e2f6567787298b100",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/supplemental.rs": "33feb915cf4e87a4706ca0e51a594ee8d8f7ea6310daa326989f7b93be5fd024",
+    "experiments/game-wants-v5/protocol.json": "eb35fb8f0c63ece2d285731c3490a52a4d386f701bd1ddaf8959f81111b556f2",
+    "experiments/game-wants-v5/README.md": "0bd4d99dbd5e459fa7abc3eba97fdb3bdf711711be10c63311770c3bdacac100",
+    "docs/game-wants-policy-refresh-result.md": "7b5ff5f956b41c283ce52d85a27a203d8925600c1cf354901d31f99d243d03f0",
+    "docs/game-wants-policy-refresh-result.json": "c64e369fa944f8c8ecae540c270e67bfd78f262f76a88679287347ccf4b7f6fb",
+    "crates/tsr-cli/src/engine/adaptive/coding.rs": "90ae1615004001f3ba1003d6d67ff58b6692ea4a41d5273d1585504ebf589990"
+  },
+  "base_packet": {
+    "path": "experiments/game-wants-v4/manifest.json",
+    "sha256": "c834d838604b65e33a708775ddde1da421e46c77de476c0d74567d951cf2afc0"
+  },
+  "independent_review": "binding_review scoped refresh passed; final tests and fresh launch binding reviewed separately"
+}

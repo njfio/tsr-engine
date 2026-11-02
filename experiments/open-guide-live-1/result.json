@@ -1,0 +1,178 @@
+{
+  "acceptance_reason": "Incomplete objective; no acceptance review copy created.",
+  "accounting_unknowns": 0,
+  "calls": 6,
+  "campaign_after": {
+    "calls": 254,
+    "committed_microusd": 217356,
+    "effective_max_calls": 272,
+    "effective_max_execution_groups": 74,
+    "evaluation_suite_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+    "execution_groups": 71,
+    "fixture_only": false,
+    "known_cost_microusd": 217356,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 7,
+    "remaining_calls": 18,
+    "remaining_execution_groups": 3,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "completion_tokens": 7772,
+  "corpus_reads": 0,
+  "evidence_sha256": {
+    "CLOSED.json": "098185274a15ab31e068fa2aa2cffbc030da1e66b9955aeac8b765c305c0718f",
+    "adapter/adapter.jsonl": "38be384a32726aae9b6db64795fcc696f966b437202ce55595d1bc649507f67e",
+    "admission.json": "15f32abcda931c3557a4378fb642feff8e931853bd578a864fd38b3163c643c8",
+    "billing-dry-run.json": "2417f7e580cb34b71d446854c9f8f4116856c262455e6e240d659e0ca844e89e",
+    "billing-idempotence.json": "70ea76e5b50a6e6fcf091b5d57b56e1b824805f3614643b2ec5842180a9e6464",
+    "billing-reconciled.json": "7b7e153f2d4084bd0dbbfc9f17448ad2f2db1766604e5261f3b008a75a2004d9",
+    "billing-review.json": "0224fc3d4301feb3071988546276f2a726825690935f04e59c2c1e3284fd117f",
+    "campaign-grant.json": "d3578810d67e2374e2e88e9eef10a89f62bc0effb2af3075545b1bf6c16525c8",
+    "campaign-upgrade.json": "5c75533c0796b0450eb84cc985fa06280cccfd33b22e3667d656eff722aa8791",
+    "cycle-admission.json": "cec05344bb6e5c7fb25e91b48c5297132fa5e9f6030020c30024a56aec8c91d9",
+    "cycle/cycle.jsonl": "9592e54a9c1348d66b88f04b58c59e964896323db8b91b96c60cb6ec09bb3491",
+    "objective-status-original.json": "ac530a959ded0a3dce7c1f644d2cc63172a009b042fec9d2722f209a434f2378",
+    "price-preflight.json": "f3a3c749ed00456bc1c1b8a6585d1e1cf6ca7392fa7455bf6a26512676fed505",
+    "provider-exact-lookup.json": "448f953f053ed8adfdc45d73ef76397fe3171764ecdbfd66a3f176d3b771bebd",
+    "readiness-check.json": "4805932cd31fc1661002b08401a3af744f1387c83d2aed93e51cf55a20f66cc8",
+    "reconcile.py": "3339a2947cecd442617c9dc0214bf74a2504c52cdcc9b303a13969f27af0d29b",
+    "replay-after-billing.json": "7eb9148603e317cf35597f9310d413bfbff08cc0d5e1f69c700ff464590c1dae",
+    "replay-check.json": "031e8d154b9cbce07a440121971373fa6cd261732741ef3e00d829d93048422d",
+    "run-output.log": "e7fc192ff2124606f08e4ef7b173dd7ecf6fcb0cf4a404938e5db704bf5588b7"
+  },
+  "evidence_use": "Second service rationale referenced the first reviewed result, while treating the next outcome as a forecast. No evidence that memory changed selected strategy.",
+  "execution_groups": 2,
+  "failed_request_id": "a811f9e0-b4b3-4758-9123-d9d36ef1cbc8",
+  "failed_review_charge_usd": "0.000000",
+  "final_acceptance_recorded": false,
+  "format_corrections": 0,
+  "generated_kinds": [
+    "service",
+    "service"
+  ],
+  "historical_live3_files_verified_unchanged": 17,
+  "implementation_commit": "d7d53006",
+  "independent_reviewer": "/root/prospective_critique",
+  "interpretation": "Valid retention of an authored robust guide over two conditions; no generated repair, new relationship, new desire identity, human benefit or causal advantage demonstrated. Third condition was never reached.",
+  "launch": {
+    "baseline_calls": 248,
+    "baseline_cost_microusd": 212482,
+    "baseline_groups": 69,
+    "deadline": "2026-10-28T17:42:30.268282+00:00",
+    "launch_at": "2026-10-28T15:45:36.499185+00:00",
+    "max_calls": 24,
+    "max_groups": 5,
+    "max_wall_minutes": 120,
+    "reservation_microusd": 1200000,
+    "single_batch": true
+  },
+  "native_unknown_preserved": true,
+  "packet_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+  "prompt_tokens": 20423,
+  "protected_service_sha256": "b87f47ee6dbc481234abe7707a3b971d684751b107b4afaa7e5117cd7fb14439",
+  "provider_error": 503,
+  "relationship_development": false,
+  "relationship_history_entries": 0,
+  "remaining_batch_authority": false,
+  "replay": "Fresh process safely refused redispatch before and after billing reconciliation; journals and ledger unchanged. Not clean terminal replay.",
+  "rounds": [
+    {
+      "complete": true,
+      "exit": 0,
+      "independent_check": {
+        "diagnostics": {
+          "available_previous_edges": 0,
+          "cross_category_edges": 3,
+          "requested_paths": [
+            {
+              "from": 11,
+              "hops": 1,
+              "same_category": true,
+              "to": 12
+            },
+            {
+              "from": 11,
+              "hops": 2,
+              "same_category": false,
+              "to": 21
+            },
+            {
+              "from": 21,
+              "hops": 2,
+              "same_category": false,
+              "to": 31
+            }
+          ],
+          "retained_available_edges": 0
+        },
+        "facts": {
+          "legal_bounded_edges": true,
+          "requested_routes_exist": true
+        },
+        "minimum_obligations_met": true,
+        "repeatability": "requires separate source assessment",
+        "scope": "Deterministic fictional graph queries only; not reader satisfaction, truth, qualitative fulfillment, authority, or a joint utility score."
+      },
+      "output": "11>12,12>21,21>22,22>31,31>32,32>11\n",
+      "previous_output": "",
+      "receipt": "0613408e211bee0f83b1688e11c4621f9fddea995151d83d8deaad5a3115bb43",
+      "round": 1,
+      "runtime_review": "met",
+      "source_snapshot": "867a52d49393b7c896f811062231c4a79415cb1e1af723e178a1876763583faf"
+    },
+    {
+      "complete": true,
+      "exit": 0,
+      "independent_check": {
+        "diagnostics": {
+          "available_previous_edges": 6,
+          "cross_category_edges": 3,
+          "requested_paths": [
+            {
+              "from": 32,
+              "hops": 1,
+              "same_category": false,
+              "to": 11
+            },
+            {
+              "from": 22,
+              "hops": 4,
+              "same_category": false,
+              "to": 12
+            },
+            {
+              "from": 12,
+              "hops": 3,
+              "same_category": false,
+              "to": 31
+            }
+          ],
+          "retained_available_edges": 6
+        },
+        "facts": {
+          "legal_bounded_edges": true,
+          "requested_routes_exist": true
+        },
+        "minimum_obligations_met": true,
+        "repeatability": "requires separate source assessment",
+        "scope": "Deterministic fictional graph queries only; not reader satisfaction, truth, qualitative fulfillment, authority, or a joint utility score."
+      },
+      "output": "11>12,12>21,21>22,22>31,31>32,32>11\n",
+      "previous_output": "11>12,12>21,21>22,22>31,31>32,32>11\n",
+      "receipt": "54c539073fce4bc0507b6968bd13b33ed5bb8e7d3d4ac5a9848ee764655c9b65",
+      "round": 2,
+      "runtime_review": "not_completed_provider_503",
+      "source_snapshot": "867a52d49393b7c896f811062231c4a79415cb1e1af723e178a1876763583faf"
+    }
+  ],
+  "settled_usd": "0.004874",
+  "source_sha256": "a7f2e29b13cc97c110e1cff67014eb430de46bb3be01fc1517f9cc927401a34f",
+  "source_unchanged_authored_seed": true,
+  "status": "incomplete_provider_503_during_second_round_review",
+  "third_round": "not_run",
+  "total_tokens": 28195,
+  "version": "open-guide-live-result@v1"
+}

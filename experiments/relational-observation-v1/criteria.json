@@ -1,0 +1,41 @@
+{
+  "requirements": {
+    "orientation": "Help someone locate reliable current reading-room information and recover from superseded directions.",
+    "discovery": "Make other reading perspectives accessible without assuming what a reader already knows or enjoys."
+  },
+  "assessment_scope": {
+    "orientation": [
+      {
+        "domain": "artifact",
+        "text": "Help someone locate reliable current reading-room information and recover from superseded directions."
+      }
+    ],
+    "discovery": [
+      {
+        "domain": "artifact",
+        "text": "Make other reading perspectives accessible without assuming what a reader already knows or enjoys."
+      }
+    ]
+  },
+  "coverage": {
+    "orientation": [
+      "app.js",
+      "index.html",
+      "style.css"
+    ],
+    "discovery": [
+      "app.js",
+      "index.html",
+      "style.css"
+    ]
+  },
+  "prerequisite_policy": "Frozen static-source criterion profile. Attributed task reports feed reflection and choice, not this native criterion evidence class. Source-present facts can support static judgment; human familiarity, enjoyment and invitation remain unknown without evidence. No acceptance or authority. Fresh state_root and requirements_revision are bound during separately approved preparation.",
+  "prerequisites": {
+    "orientation": {
+      "kind": "static_semantic"
+    },
+    "discovery": {
+      "kind": "static_semantic"
+    }
+  }
+}

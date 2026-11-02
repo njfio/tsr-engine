@@ -1,0 +1,6 @@
+{
+  "lookup": "docker ps -a --filter name=tsr-browser-capability-v1 --format ID/Names/Status",
+  "exit": 0,
+  "matching_containers": [],
+  "new_probe_dispatch": false
+}

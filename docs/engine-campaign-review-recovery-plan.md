@@ -1,0 +1,13 @@
+# One bounded semantic-review recovery
+
+Preregistered before live requests. Existing campaign baseline: 52 calls,17 operations,$0.030351; remaining48 calls,23 operations,$4.969649. Same Luna/provider, synthetic-only, no changed permissions or protected criteria.
+
+Reuse the normal workshop controller and its review gates with one explicitly admitted recovery. A settled, valid source-bound reject or unknown may be supplied to fresh generation as attributed, fallible reviewer evidence. Keep original desires, lineage, authority, scope and observations unchanged. Distinguish unmet from unknown; do not create a negative world observation or new requirement. Fresh reviewer context excludes the previous review's conclusions. A model may justify disagreement, clarify, retain meaning with reasons, or stop.
+
+At most two extra generator and two extra reviewer slots supplement the existing five-generator/four-reviewer/one-operation run: maximum13 calls and one simulated operation. Each request stays8192 completion tokens/240 seconds/32KiB. Original failed attempts remain immutable. One recovery marker consumes the allowance; repeated rejection, exact unchanged candidate, stale source, invalid reports, uncertain dispatch/application/usage, or exhausted limits stop. Exact-content fingerprinting ignores identity bookkeeping but retains claims; it is not a natural-language novelty detector. Fresh review and the finite cap handle paraphrases without pretending semantic novelty is mechanically proven.
+
+Pre-action recovery may generate a fresh relational proposal or fresh possibilities/assessment. Post-action recovery, only when native relational reconsideration is due, may generate and review reflection but cannot repeat or add an operation; then it stops. Abstain remains a stop. Scope changes, withdrawals or unrelated new evidence invalidate the frozen recovery rather than silently broadening it.
+
+Offline tests use explicitly authored fake reports and a real controller to exercise recovery success, repeated rejection, unknown versus negative, unchanged candidates, source/tamper/replay boundaries and post-action non-repetition. These are mechanism tests, not live semantic evidence.
+
+The small live proof is one ordinary fresh workshop run with recovery enabled. Only a genuine reviewer rejection/unknown of an actually generated candidate may exercise recovery. No failure or winning replacement is injected. If no such judgment occurs, report live recovery unexercised rather than manufacturing one or retrying until failure. Independent review assesses whether any recovered proposal responds substantively to evidence without false certainty or reviewer obedience. No broad reliability, calibrated learning or TSR advantage follows from one run.

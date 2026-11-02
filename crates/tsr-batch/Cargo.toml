@@ -1,0 +1,31 @@
+[package]
+name = "tsr-batch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Batch runner for systems 1 (record) and 2 (rules) over the M3 corpus (PRD B9, B11 M3)"
+
+[dependencies]
+tsr-domain = { path = "../tsr-domain" }
+tsr-store = { path = "../tsr-store" }
+tsr-policy = { path = "../tsr-policy" }
+tsr-corpus = { path = "../tsr-corpus" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+# Reuse installed workspace-version primitive for descriptor-relative, no-symlink inspection.
+rustix = { version = "1.1.5", features = ["fs"] }

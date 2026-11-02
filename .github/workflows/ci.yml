@@ -1,0 +1,46 @@
+name: Engine verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  authored-engine:
+    runs-on: ubuntu-latest
+    container: rust:1.90-bookworm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Rust workspace (no nested container runtime)
+        run: cargo test --locked --workspace --no-fail-fast
+      - name: Build native CLI for authored transport tests
+        run: cargo build --locked -p tsr-cli
+      - name: Contract and recovery tests (no provider)
+        env:
+          PYTHONPATH: .:scripts
+        run: >-
+          python3 -m unittest
+          scripts.test_engine_wanting_presentation
+          scripts.test_engine_deliberation_restart
+          scripts.test_engine_criterion_consistency
+          scripts.test_engine_criterion_reassessment
+          scripts.test_engine_criterion_migration
+          scripts.test_engine_browser_return_schema
+          scripts.test_engine_browser_predispatch
+          scripts.test_engine_browser_recovery_pair
+      - name: Native development and interrupted admission (authored transport)
+        env:
+          PYTHONPATH: .:scripts
+          TSR_BROWSER_ADAPTER_AUTHORED: '1'
+        run: >-
+          python3 -m unittest
+          scripts.test_engine_browser_provisional.BrowserProvisional.test_initial_single_contributor_recursive_identity_and_inert_restart
+          scripts.test_engine_browser_deliberation.BrowserDeliberation.test_lost_native_component_result_recovers_without_second_admission
+      - name: Local UI HTTP and state tests (authored transport)
+        env:
+          PYTHONPATH: ui/engine:.:scripts
+        run: python3 -m unittest discover -s ui/engine -p 'test_*.py'

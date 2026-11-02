@@ -1,0 +1,45 @@
+{
+  "goal": "Repair the invoice project: subtotal is unit price times quantity; discounts subtract from subtotal and never make the total negative. All protected probes must pass.",
+  "image": "sha256:f4ac0e0b42b4188fa2e645566edcc84c51de05aea0a2947ff06f23e6052100b6",
+  "user": "501:20",
+  "editable": {
+    "src/pricing.rs": "pub fn subtotal(unit_cents: u32, quantity: u32) -> u32 {\n    unit_cents + quantity\n}\n",
+    "src/discount.rs": "pub fn discounted_total(subtotal_cents: u32, discount_cents: u32) -> u32 {\n    subtotal_cents + discount_cents\n}\n"
+  },
+  "protected": {
+    "tests/probe.rs": "#[path = \"../src/pricing.rs\"] mod pricing;\n#[path = \"../src/discount.rs\"] mod discount;\nfn main() {\n    let args: Vec<String> = std::env::args().collect();\n    let unit: u32 = args[2].parse().unwrap();\n    let quantity: u32 = args[3].parse().unwrap();\n    let subtotal = pricing::subtotal(unit, quantity);\n    match args[1].as_str() {\n        \"subtotal\" => println!(\"{}\", subtotal),\n        \"invoice\" => println!(\"{}\", discount::discounted_total(subtotal, args[4].parse().unwrap())),\n        _ => panic!(\"unknown protected case\"),\n    }\n}\n"
+  },
+  "probe_entry": "tests/probe.rs",
+  "cases": [
+    {
+      "id": "subtotal",
+      "args": [
+        "subtotal",
+        "150",
+        "2"
+      ],
+      "expected_stdout": "300\n"
+    },
+    {
+      "id": "discount",
+      "args": [
+        "invoice",
+        "150",
+        "2",
+        "30"
+      ],
+      "expected_stdout": "270\n"
+    },
+    {
+      "id": "floor",
+      "args": [
+        "invoice",
+        "50",
+        "1",
+        "100"
+      ],
+      "expected_stdout": "0\n"
+    }
+  ],
+  "timeout_ms": 15000
+}

@@ -1,0 +1,5 @@
+{
+  "product": "Fix src/pricing.rs subtotal(unit_cents, quantity) to compute their mathematical product when it fits u32. Inspect current source; both source files start broken.",
+  "discount": "Fix src/discount.rs total(subtotal_cents, discount_cents) to subtract discount and return zero when discount exceeds subtotal.",
+  "overflow": "subtotal must cap overflowing products at u32::MAX without panic or wrap. Ordinary u32 multiplication can overflow before a later comparison. Preserve all three requirements together."
+}

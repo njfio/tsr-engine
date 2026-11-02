@@ -1,0 +1,17 @@
+{
+  "version": "relational-experience-final-condition-packet@v1",
+  "implementation_commit": "d842d40e22746d19a2543a4c86b3f36695349330",
+  "prepared_manifest_sha256": "e45decbbbf02e98f69a05b6258cc498d88c1f74e28711b6d555fadeb3e2db9c7",
+  "adapter_sha256": "55dc919af68e55045497ee6d79d518482ecac5638944642bb73ed09e7285ea1e",
+  "scope_grant_sha256": "a31388428f40133a641e09454b6c4ba79124c1abe315ba6ed3f42a8db33c25e4",
+  "files": {
+    "README.md": "3f04c4751f46d5ed6ac37e4e076f157b1ed70899068c70b450ea6eb6b67fcdfb",
+    "observe.cjs": "26ae78b6c89302050610d5337952da99441fa890b413e9f004274be3e8a6cf5f",
+    "prepare.py": "aa591df4eb4d90d573d6fb4eaf73813a129eb4d0bb5701437146432f18cdba59"
+  },
+  "original_packet_sha256": "3db11fdf75ba2f10fb83dcc65ef45864fdadea41ac07c403ff913654f193e313",
+  "recovery_proof_sha256": "a1324144922e87c54603d29a5eb7277a51b431ec4965cd4390037dcc8fc8399f",
+  "review": "independent-agent:/root/contrast_bridge_review; no launch-blocking source issue; exact-prefix third-condition continuation",
+  "scope": "Same approved evaluation, final condition already published; no new attempt or feedback republication",
+  "launch_pending": true
+}

@@ -1,0 +1,23 @@
+{
+  "version": "game-wants-offline@v2",
+  "status": "not_admitted_not_live_ready",
+  "base_packet": {
+    "path": "experiments/game-wants-v1/manifest.json",
+    "sha256": "13d1a67409ce707c7ee1b0d28c4cbf761086c7d3cff9a49708dab7d51d59ba2a"
+  },
+  "implementation": {
+    "scripts/engine-criterion-return.py": "e17a75e9f45f8fa9963ef04230c37a8fd647c28361875fab19240e8050bbbd37",
+    "scripts/engine-browser-ordinary.py": "45f33aae2f24861b25682fe6d3667444c25ff0ba096d6a2668b8a8dbae0be9b1",
+    "scripts/engine-browser-harness.cjs": "6242352c04356c4f1894cf2739ec19a556414afacbf7cc2fa2acb5c55d8e56a6",
+    "scripts/engine-browser-adapter.py": "b4e62b44aa45308c01c978e5f60c7a5970b39995f1dafb171c12d837cdfe2408",
+    "scripts/test_game_wants_packet.py": "3a810aa2acaedb646dbd86cd421ed585486c55cba1a8a2e00a022670b9d647ee",
+    "scripts/test_criterion_control_observations.py": "ecca3519a99da50c0838237222d740f1160692f418724da245bc9cfa656d040e",
+    "scripts/test_engine_criterion_consistency.py": "8b5326bb4aed8de0f3bb545938064f90cc5b9f13163f29bc303dd485b69e70c6"
+  },
+  "intended_change": "Criterion evidence capture v5 includes exact ownership-validated native control observations; no criterion verdict inferred",
+  "unchanged": "Exact historical prompt, authored roots, observation policy, parity and stopping semantics from base packet",
+  "paid_dispatch": false,
+  "live_admissions": 0,
+  "remaining_prerequisite": "Verified source-local control/readout mapping and transport for the frozen finite observation policy; current protected probe supports12actions, proposed search includes32",
+  "authority": "No paid execution; future explicit scope approval and fresh reviewed binding required"
+}

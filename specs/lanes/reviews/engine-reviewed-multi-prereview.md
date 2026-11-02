@@ -1,0 +1,19 @@
+# Independent prereview: reviewed two-cycle workflow
+
+Reviewer `/root/b91_full_review`; no provider calls or executions. Reviewed combined profile, existing gate/recovery/restart integration, focused test source and `docs/engine-autonomous-quickstart.md`.
+
+No blocking source finding in current changes. A new explicit `reviewed-multi@v1` profile keeps both original desires active, excludes the old fixed request4 withdrawal, and cannot mix with autonomy/idle/continuation profiles. This avoids incorrectly applying a withdrawal after recovery shifts phases. Bounds are ten generator/nine reviewer calls maximum, two simulated operations, one semantic reconsideration. Existing source/criteria/permission, uncertain outcome, STOP and post-action reflection-only recovery rules remain unchanged.
+
+The supervisor reuses acknowledged outcome2 restart; this remains a safe pre-application boundary even if an earlier rejected relation makes outcome2 a fresh relation rather than possibilities. No cached favorable action is supplied. The final expected stop is `action_budget_review_complete`, not a claim of rich desire satisfaction. Existing profiles retain their semantics, while changed helper pins require fresh admissions.
+
+Focused test source verifies seven generator/seven review calls across two operations, retained original desires/authority/active IDs, no withdrawal, fresh-process restart and terminal replay without new calls/state changes. Requested explicit distinct substantive response/progress assertions rather than relying on event count alone. Terminal test results remain pending at this note.
+
+Quickstart commands match actual preparer, wrapper and campaign inspect interfaces. It clearly separates frozen synthetic external scope from locally supplied desire initialization, requires initial admission inspection and existing campaign authority, preserves unknown reservations, documents safe STOP behavior and no uncertain rerun. Requested explicit19-call/two-operation limit and a concrete result-report link only after live verification. A separately frozen plan should be pinned, not the mutable user quickstart.
+
+Combined live evidence and reviewer competence are not yet established by these checks. Same-model semantic gates remain fallible; automatic continuation is distinct from automatic proof of rich meaning or general autonomy.
+
+## Final offline signoff
+
+Frozen `docs/engine-reviewed-multi-plan.md` is now pinned in the extension and accurately defines19-call/two-operation bounds, unchanged source/parents, one recovery, grounded revisions, restart and honest failure. Added tests explicitly require two distinct substantive responses, strictly improved receipt observations and final[1,1], reject forged operator boundaries/mixed profiles, and cover combined initial rejection followed by saved-output restart and operator STOP. Driver reports19 affected checks passed32.007s, followed by three final focused combined checks passed6.558s; the added profile-negative case makes20 distinct covered tests. Diff check clean. No remaining source blocker; deterministic fixture pass is not a live two-cycle result. Actual admission and output semantics remain separate.
+
+Actual readiness at `4f77fe2`: `target/workshop-supported-campaign-1` matches frozen workshop source/root `02cde51283f737656940b7bc598e0b039dae82c3f0a2e5fff8c145ad4c418c4a`, current helper/controller pins, modelLuna and reviewed plan. Extension `f87ff796135afb1d9ce59fe3a56eefcc7f23c33b2e269e0a5bdca90c42c7fd9a` recomputes exactly. Ten generator/nine reviewer requests, two operations, one reconsideration,32KiB/8192completion/240s per call, expiry19:10UTC. Both original desires active; no operator boundary. Initial payload12215bytes, no synthetic journal exists. Source-bound admission ready; no calls by reviewer. Current campaign remains shared rather than reset.

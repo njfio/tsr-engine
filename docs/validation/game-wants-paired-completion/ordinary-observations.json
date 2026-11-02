@@ -1,0 +1,434 @@
+[
+  {
+    "batch": "crossing-first",
+    "bundle": 0,
+    "observation_sha256": "3e7613d2e086a3dc4ba0a0810849d7b958f853db87d085fb75516aa0c35b06b5",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "917f315453aa428f32e31e0e835dc8eb174c7b6f8b841998a7e8bf37cd40068a",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Traffic hit you. Restart to try again. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ],
+      [
+        "Traffic hit you. Restart to try again. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "crossing-first",
+    "bundle": 1,
+    "observation_sha256": "d2d26e44d4409489f3cec7ae077bac64cbfc1830c2cf422e12715c8167c942f7",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "149e7d7bfd7e0ad1cfb7fa0788864efc90fe7e2c0b71bbab501ed833a59efc10",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "crossing-first",
+    "bundle": 2,
+    "observation_sha256": "2770623a9bbdf8a9bf794c9601ed49dc067502eecb65d18f6ad7494c034f2a68",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "d5d30bda97cfccf5ccf5f041b2f77c3c48d9aa6ee4f2d99405f269953d4c20e6",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "crossing-first",
+    "bundle": 3,
+    "observation_sha256": "3a95a50728b32efc41a2f78059899f0639704888208416a076634ca3f14b77ed",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "d88b6bde27b4316e38d6a017677af2dd42a290a0aabd914ab1c33de528df2b33",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "crossing-first",
+    "bundle": 4,
+    "observation_sha256": "9dd46396d6b84dc47deae22cc7c866ad5b3ea864123f91be66f7d8b3e23c3640",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "77af6b847fd17d56dca8ecb248b3b82f2bf633ba295d4e518eb22beb4e01c7eb",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "crossing-first",
+    "bundle": 5,
+    "observation_sha256": "0deb61ce1813e68e47dc1af9630eff227e00c1ab1fd272eeff122d1cff85e95c",
+    "snapshot": "cb2d095d094a8161e99a9cd204267ec06367751c2ff19833fbc95d7f17b85735",
+    "receipt": "f45816e41553c72e57fd6366622838398432053a47f37a16f04314f799336791",
+    "source_files": {
+      "app.js": "f33c23b1b041b662f2086d7cf68df3cbaed0b8c1476497298a774ec1b1d77fd4",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 0,
+    "observation_sha256": "4b941c319396e543cd0e602fb6ca5dc0c561f995fa0cfaf40a38d8dcecc663c5",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "8590d90e91cece5d6e922a2200811e24a585a823730c3b94d8a6b26dc11b6e00",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 1,
+    "observation_sha256": "f86dc92fb6f2832a1613e445ac89a347bf710282f844f033bff5e59d39b2cb25",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "ee02412557a533406de68e1d96e7d446474fcedc9d5b74d43a5c260435d508d5",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 2,
+    "observation_sha256": "2a4468e56974c7ea129655ecbd16e16c148798ee046cbbe479ec020fc6127957",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "076713723cc82c02b6c82d7522a66fa818b05d7b988f57153abf382e474ee673",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 3,
+    "observation_sha256": "e35a6ab78eb9f604fef3c50abd4a7c9e8f09c288981d59fa09200dfd95e0c59a",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "acbc9e78967e0322f9f408eb0d3c5c36129088aa6696fe790dba47260435a44e",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 4,
+    "observation_sha256": "7d35d7729af9c269594f17eb0ce32a17595b6d32b1b10be54cfd1b5d17a83d60",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "0fadb43430494eca4526db4f3c0c179c450a50be3556d94d3f00743abe0e7208",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "growth-first",
+    "bundle": 5,
+    "observation_sha256": "39a590b579c26fbb3ade4a47714c671fcf7db7009f849b356c44de9acd8f8f94",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "5a36c644ee1a8bbac4f78b10e1dc92e60516ec3cd6dfdebbfb1ef3fc9487e175",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 0,
+    "observation_sha256": "4aa3544bcfd2cfd0dd0fb8868e0cd02d93d7a422b7cdd238d3d6fd7cf2ece881",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "c4d582e6f7ab26f3032633ef21156ed845f7670f29a94cb64e8e2df9c9c62262",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 6/10 rows. Body: 4. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 1,
+    "observation_sha256": "4b8546d73c98e140e8a258f5230e863f826e40ab3b8acd1791dc63d1449c3739",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "34bfab2c71b42429c23040d6be8474294bb24ae985d4478ae781afe187230bf4",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 2,
+    "observation_sha256": "886fbf396c5a17915b54188716b77e055169a84fd93f405181c9d0b2fffd4240",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "940a3ee18262507c8871dfb24d1acb258ea0235b4a2f91b01453ba95099e88da",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 0."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 3,
+    "observation_sha256": "3022ffd2d41b0d0a3a858c0c13396d3224d97dc5f8b0e0cd282442801c9b3164",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "258bc04ec8a4dd5ff678783ffd950e83776e2f8b8026283df71430c7649176fb",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ],
+      [
+        "The bank marks the edge of the board. Crossing: 0/10 rows. Body: 1. Moves: 4."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 4,
+    "observation_sha256": "f870d6275f9b350399f345a6152dc3e4eab93bf344df6e7855e8c24c5decc084",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "aee3990dadb4a0c0297299517e5beef3a7dcc37740a3c3a6df09012dc473fb1f",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  },
+  {
+    "batch": "mixed-pursuit",
+    "bundle": 5,
+    "observation_sha256": "0853b8b9440771b57c43999ee8b89451cc29d8d860bda87c63b6f27b8d995b4d",
+    "snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+    "receipt": "a9904a1f6afad1231200366c8fdfd2a288644b9f862f242e6b8c8a883aa8a8fe",
+    "source_files": {
+      "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+      "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+      "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+    },
+    "readouts": [
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ],
+      [
+        "Keep crossing; the trailing body follows your path. Crossing: 1/10 rows. Body: 2. Moves: 6."
+      ]
+    ],
+    "protocol_passes": [
+      true,
+      true
+    ]
+  }
+]

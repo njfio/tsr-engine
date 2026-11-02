@@ -1,0 +1,5 @@
+{
+  "product": "subtotal(unit_cents, quantity) returns their mathematical product when representable as u32.",
+  "discount": "total(subtotal_cents, discount_cents) subtracts the discount, returning zero when discount exceeds subtotal.",
+  "overflow": "subtotal caps products exceeding u32::MAX at u32::MAX, without panic or wrap."
+}

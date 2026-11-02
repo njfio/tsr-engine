@@ -1,0 +1,11 @@
+# Source-bound browser recovery
+
+Continue the same user-requested maze/falling-block mashup from the known completed live6 source. The old pending outer journals, prototype and v1 remain immutable. Exact pinned journals, native files, request/source snapshot, settled campaign prefix and source-bound independent gameplay observations are verified before copying only native state. The old execution is never replayed. A fresh derivative starts in ordinary native reconsideration, then selection; no authored game fix or desired relationship is supplied.
+
+The independent assessment distinguishes observed restart loss (193→189→161 collectibles) from static proof that row clearing cannot be reached through controls. This is not new user feedback or player satisfaction evidence. Existing operator guidance intake appends the functional assessment under the same contributor IDs, preserving criteria, original history, source and returns. It does not skip reconsideration or create execution authority. A fresh reviewed proposal must precede any new execution.
+
+Native current/superseded/withdrawn flags are status, not immutable historical provenance. The adapter validates all other record fields exactly and forwards status unchanged; this neither revokes desires conceptually nor enables inactive guidance. Permission checks remain separate.
+
+One continuation: at most 188 total Luna calls (84 proposal/review pairs plus 20 shared format/capacity corrections), 98 isolated groups, 120 minutes, hard remaining cumulative budget below $10. The $9.40 planning floor is not a guarantee all worst-case requests fit; each actual serialized request receives a conservative price reservation. Existing 465-call/174-group/$10.232177 cumulative caps remain, with 276 calls / 76 groups / $0.256900 consumed. No provider-failure retry. Same pinned browser image, only the approved inner Chromium sandbox exception; outer filesystem/network/resource controls unchanged.
+
+No forced revision, forced novelty, implicit acceptance or replay of unknown effects. The actual engine must repair both defects. Final testing must exercise row clearing through player controls, not by injecting game state, plus a complete restart reset and maze/block interaction. Stop honestly on a real unresolved outcome. Local authored tests are wiring evidence only.

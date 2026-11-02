@@ -14,6 +14,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
+use std::{cell::RefCell, collections::BTreeMap};
 use tsr_domain::{Event, EventId, Hash, TaskId};
 
 pub const SCHEMA_SQL: &str = r#"
@@ -71,19 +72,28 @@ pub enum StoreError {
 
 pub struct Store {
     conn: Connection,
+    // Decode reuse only, never a validity or query cache. Every read still queries
+    // SQLite and compares the exact payload. Retain only the latest query's rows.
+    decoded_events: RefCell<BTreeMap<i64, (String, Event)>>,
 }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            decoded_events: RefCell::default(),
+        })
     }
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            decoded_events: RefCell::default(),
+        })
     }
 
     /// Append an event. Returns its sequence number. Appending an event whose id is already present
@@ -166,12 +176,7 @@ impl Store {
             .conn
             .prepare("SELECT seq, payload FROM events ORDER BY seq")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (seq, payload) = row?;
-            out.push((seq, serde_json::from_str(&payload)?));
-        }
-        Ok(out)
+        self.decode_rows(rows)
     }
 
     /// A task's events, in sequence order.
@@ -182,11 +187,26 @@ impl Store {
         let rows = stmt.query_map(params![task.to_string()], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })?;
+        self.decode_rows(rows)
+    }
+
+    fn decode_rows(
+        &self,
+        rows: impl Iterator<Item = rusqlite::Result<(i64, String)>>,
+    ) -> Result<Vec<(i64, Event)>, StoreError> {
+        let mut previous = self.decoded_events.take();
+        let mut next = BTreeMap::new();
         let mut out = Vec::new();
         for row in rows {
             let (seq, payload) = row?;
-            out.push((seq, serde_json::from_str(&payload)?));
+            let event = match previous.remove(&seq) {
+                Some((bytes, event)) if bytes == payload => event,
+                _ => serde_json::from_str(&payload)?,
+            };
+            out.push((seq, event.clone()));
+            next.insert(seq, (payload, event));
         }
+        *self.decoded_events.borrow_mut() = next;
         Ok(out)
     }
 
@@ -315,6 +335,100 @@ mod tests {
         assert_eq!(all[0].1.id, e1.id);
         assert_eq!(all[1].1.id, e2.id);
         assert_eq!(all[2].1.id, e3.id);
+    }
+
+    #[test]
+    fn decoding_cache_tracks_query_rows_and_returns_independent_values() {
+        let s = Store::open_in_memory().unwrap();
+        let first = opened(vec![]);
+        let other = TaskId(Hash::of(&[b"other-cache-task"]));
+        let second = Event::new(
+            other,
+            vec![],
+            Source::Rules,
+            EventKind::TaskOpened { task: other },
+            "authored",
+        );
+        s.append_all(&[first.clone(), second.clone()]).unwrap();
+        let mut all = s.all().unwrap();
+        assert_eq!(s.decoded_events.borrow().len(), 2);
+        all[0].1.recorded_at = "caller mutation".into();
+        let selected = s.by_task(&task()).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].1.recorded_at, first.recorded_at);
+        assert_eq!(s.decoded_events.borrow().len(), 1);
+        assert_eq!(s.all().unwrap()[1].1.id, second.id);
+        assert!(s
+            .by_task(&TaskId(Hash::of(&[b"absent"])))
+            .unwrap()
+            .is_empty());
+        assert!(s.decoded_events.borrow().is_empty());
+    }
+
+    #[test]
+    fn decoding_cache_handles_rollback_and_reused_sequence() {
+        let s = Store::open_in_memory().unwrap();
+        s.conn.execute_batch("BEGIN").unwrap();
+        s.append(&opened(vec![])).unwrap();
+        assert_eq!(s.all().unwrap().len(), 1);
+        s.conn.execute_batch("ROLLBACK").unwrap();
+        let next = Event::new(
+            task(),
+            vec![],
+            Source::Rules,
+            EventKind::TaskOpened { task: task() },
+            "different after rollback",
+        );
+        assert_eq!(s.append(&next).unwrap(), 1);
+        assert_eq!(s.all().unwrap()[0].1.id, next.id);
+        assert_eq!(
+            s.by_task(&task()).unwrap()[0].1.recorded_at,
+            next.recorded_at
+        );
+    }
+
+    #[test]
+    fn decoding_cache_rechecks_payload_without_relying_on_head_or_id() {
+        let s = Store::open_in_memory().unwrap();
+        let first = opened(vec![]);
+        s.append(&first).unwrap();
+        s.all().unwrap();
+        let root = s.head_root().unwrap();
+        // Deliberately defeat database invariants only in this private test store.
+        // The Engine's independent identity validation must still reject this row.
+        s.conn
+            .execute_batch("DROP TRIGGER events_no_update")
+            .unwrap();
+        let mut changed = first.clone();
+        changed.recorded_at = "changed while id column stays fixed".into();
+        s.conn
+            .execute(
+                "UPDATE events SET payload=?1 WHERE seq=1",
+                params![serde_json::to_string(&changed).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(s.head_root().unwrap(), root);
+        assert_eq!(
+            s.by_task(&task()).unwrap()[0].1.recorded_at,
+            changed.recorded_at
+        );
+        s.conn
+            .execute("UPDATE events SET payload='{' WHERE seq=1", [])
+            .unwrap();
+        assert!(matches!(s.all(), Err(StoreError::Json(_))));
+        assert!(matches!(s.by_task(&task()), Err(StoreError::Json(_))));
+        s.conn
+            .execute(
+                "UPDATE events SET payload=?1 WHERE seq=1",
+                params![serde_json::to_string(&first).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(s.all().unwrap()[0].1.recorded_at, first.recorded_at);
+        s.conn
+            .execute_batch("DROP TRIGGER events_no_delete; DELETE FROM events")
+            .unwrap();
+        assert!(s.all().unwrap().is_empty());
+        assert!(s.decoded_events.borrow().is_empty());
     }
 
     #[test]

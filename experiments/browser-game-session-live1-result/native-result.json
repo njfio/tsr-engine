@@ -1,0 +1,27 @@
+{
+  "result": {
+    "status": "review_required",
+    "built_in_transport": false,
+    "callback_effects_require_external_admission": true,
+    "native_reason": "independent_acceptance_or_shareable_feedback_required"
+  },
+  "campaign": {
+    "calls": 264,
+    "execution_groups": 73,
+    "known_cost_microusd": 228567,
+    "committed_microusd": 228567,
+    "effective_cap_microusd": 10225523,
+    "unknown_calls": [],
+    "unknown_executions": [],
+    "overrun": false,
+    "stopped": false,
+    "effective_max_calls": 462,
+    "remaining_calls": 198,
+    "remaining_execution_groups": 99,
+    "effective_max_execution_groups": 172,
+    "evaluation_suite_sha256": "d15ed9927a837379b32b175e6b459fe31c802b75d4f03e00de14a8b240cb66e5",
+    "reconciled_bills": 7,
+    "fixture_only": false,
+    "provider_hard_cap": false
+  }
+}

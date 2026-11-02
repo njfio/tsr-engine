@@ -1,0 +1,125 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.674163792,
+          "process_status": "Success",
+          "argv": [
+            "/usr/local/rustup/toolchains/1.90.0-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package",
+            "rts-mcp",
+            "--locked",
+            "--offline",
+            "--lib"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.357910084,
+          "process_status": "Success",
+          "argv": [
+            "/usr/local/rustup/toolchains/1.90.0-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package",
+            "rts-mcp",
+            "--locked",
+            "--offline",
+            "--lib",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "package": "rts-mcp",
+          "file": "crates/rts-mcp/src/surface.rs",
+          "function": {
+            "function_name": "Surface::keeps",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 195,
+                "column": 5
+              },
+              "end": {
+                "line": 201,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 197,
+              "column": 9
+            },
+            "end": {
+              "line": 200,
+              "column": 10
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__rts-mcp__src__surface.rs_line_197_col_9.log",
+      "diff_path": "diff/crates__rts-mcp__src__surface.rs_line_197_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.645663168,
+          "process_status": "Success",
+          "argv": [
+            "/usr/local/rustup/toolchains/1.90.0-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package",
+            "rts-mcp",
+            "--locked",
+            "--offline",
+            "--lib"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.35962125,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/usr/local/rustup/toolchains/1.90.0-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package",
+            "rts-mcp",
+            "--locked",
+            "--offline",
+            "--lib",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 1,
+  "missed": 0,
+  "caught": 1,
+  "timeout": 0,
+  "unviable": 0,
+  "success": 0
+}

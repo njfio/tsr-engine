@@ -23,6 +23,10 @@ pub struct LedgerEntry {
     pub expanded_by: Option<EventId>,
     /// The contrast that crossed, when it entered through an expansion.
     pub from_contrast: Option<ContrastId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_success: Option<EventId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_provisional: Option<EventId>,
     /// The preferences that made that contrast matter (the expansion's `catalyzed_by`).
     pub catalyzed_by: Vec<PreferenceId>,
     /// The status in the active view. `None` means: in the structure, absent from the active view.
@@ -108,12 +112,13 @@ impl VibrationalReality {
 ///
 /// Admission by source (PRD §B2.1): a preference whose origin is `Source::Operator` — including a
 /// rejection reason — is open on arrival; one whose origin is `Source::Generator` is in the
-/// structure but absent from the active view until an Operator `StatusSet(Open)` exists for it.
+/// structure but absent from the active view until an Operator `StatusSet(Open)` or a validated
+/// Council `ReviewedPreferenceAdmission` exists for it.
 pub fn fold(events: &[(i64, Event)], root: tsr_domain::Hash) -> CollectiveReality {
     let mut order: Vec<PreferenceId> = Vec::new();
     let mut by_id: BTreeMap<PreferenceId, LedgerEntry> = BTreeMap::new();
 
-    for (_, ev) in events {
+    for (position, (_, ev)) in events.iter().enumerate() {
         match &ev.kind {
             EventKind::Expanded { expansion } => {
                 let Some(pref) = expansion_preference(expansion) else {
@@ -140,12 +145,177 @@ pub fn fold(events: &[(i64, Event)], root: tsr_domain::Hash) -> CollectiveRealit
                     LedgerEntry {
                         preference: pref,
                         expanded_by: Some(ev.id),
+                        from_success: None,
+                        from_provisional: None,
                         from_contrast: Some(expansion.from_contrast),
                         catalyzed_by: expansion.catalyzed_by.clone(),
                         status,
                         history,
                     },
                 );
+            }
+            EventKind::SuccessExpanded { expansion } => {
+                if ev.source != Source::Generator
+                    || crate::success::basis(&events[..position], ev.task, expansion.success)
+                        .is_err()
+                {
+                    continue;
+                }
+                let Ok(pref) = crate::success::canonical(expansion) else {
+                    continue;
+                };
+                if by_id.contains_key(&pref.id) {
+                    continue;
+                }
+                order.push(pref.id);
+                by_id.insert(
+                    pref.id,
+                    LedgerEntry {
+                        catalyzed_by: pref.parents.clone(),
+                        preference: pref,
+                        expanded_by: Some(ev.id),
+                        from_contrast: None,
+                        from_success: Some(expansion.success),
+                        from_provisional: None,
+                        status: None,
+                        history: vec![],
+                    },
+                );
+            }
+            EventKind::ProvisionalExpanded { expansion } => {
+                if ev.source != Source::Generator
+                    || crate::provisional::basis(&events[..position], ev.task, expansion).is_err()
+                {
+                    continue;
+                }
+                let Ok(pref) = crate::provisional::canonical(expansion) else {
+                    continue;
+                };
+                if pref.parents.iter().any(|id| {
+                    !by_id
+                        .get(id)
+                        .is_some_and(|p| crate::provisional::eligible_parent(p, ev.task))
+                }) {
+                    continue;
+                }
+                if by_id.contains_key(&pref.id) {
+                    continue;
+                }
+                order.push(pref.id);
+                by_id.insert(
+                    pref.id,
+                    LedgerEntry {
+                        catalyzed_by: pref.parents.clone(),
+                        preference: pref,
+                        expanded_by: Some(ev.id),
+                        from_contrast: None,
+                        from_success: None,
+                        from_provisional: Some(expansion.proposal),
+                        status: None,
+                        history: vec![],
+                    },
+                );
+            }
+            EventKind::ReviewedProvisionalPreferenceAdmission { review, evidence } => {
+                if ev.source != Source::Council || !ev.parents.contains(evidence) {
+                    continue;
+                }
+                let Ok(pref) =
+                    crate::provisional::validate(&events[..position], ev.task, review, *evidence)
+                else {
+                    continue;
+                };
+                if pref.parents.iter().any(|id| {
+                    !by_id
+                        .get(id)
+                        .is_some_and(|p| crate::provisional::eligible_parent(p, ev.task))
+                }) {
+                    continue;
+                }
+                let Some(entry) = by_id.get_mut(&pref.id) else {
+                    continue;
+                };
+                if entry.status.is_some()
+                    || entry.preference != pref
+                    || entry.expanded_by != Some(review.expansion)
+                    || entry.from_provisional != Some(review.proposal)
+                {
+                    continue;
+                }
+                entry.status = Some(PreferenceStatus::Open);
+                entry
+                    .history
+                    .push((PreferenceStatus::Open, Source::Council));
+            }
+            EventKind::ReviewedSuccessPreferenceAdmission { review, evidence } => {
+                if ev.source != Source::Council || !ev.parents.contains(evidence) {
+                    continue;
+                }
+                let Ok(pref) =
+                    crate::success::validate(&events[..position], ev.task, review, *evidence)
+                else {
+                    continue;
+                };
+                if pref.parents.iter().any(|id| !by_id.contains_key(id)) {
+                    continue;
+                }
+                let Some(entry) = by_id.get_mut(&pref.id) else {
+                    continue;
+                };
+                if entry.status.is_some()
+                    || entry.preference != pref
+                    || entry.expanded_by != Some(review.expansion)
+                    || entry.from_success != Some(review.success)
+                {
+                    continue;
+                }
+                entry.status = Some(PreferenceStatus::Open);
+                entry
+                    .history
+                    .push((PreferenceStatus::Open, Source::Council));
+            }
+            EventKind::ReviewedPreferenceAdmission { review, evidence } => {
+                if ev.source != Source::Council || !ev.parents.contains(evidence) {
+                    continue;
+                }
+                let Ok(pref) =
+                    crate::reviewed::validate(&events[..position], ev.task, review, *evidence)
+                else {
+                    continue;
+                };
+                if pref.parents.iter().any(|id| !by_id.contains_key(id))
+                    || by_id.get(&pref.id).is_some_and(|e| {
+                        e.status.is_some()
+                            || e.preference != pref
+                            || e.expanded_by != Some(review.expansion)
+                    })
+                {
+                    continue;
+                }
+                let (_, original) = events[..position]
+                    .iter()
+                    .find(|(_, e)| e.id == review.expansion)
+                    .expect("validated");
+                let EventKind::Expanded { expansion } = &original.kind else {
+                    unreachable!()
+                };
+                let entry = by_id.entry(pref.id).or_insert_with(|| {
+                    order.push(pref.id);
+                    LedgerEntry {
+                        preference: pref,
+                        expanded_by: Some(review.expansion),
+                        from_success: None,
+                        from_provisional: None,
+                        from_contrast: Some(review.contrast),
+                        catalyzed_by: expansion.catalyzed_by.clone(),
+                        status: None,
+                        history: vec![],
+                    }
+                });
+                entry.status = Some(PreferenceStatus::Open);
+                entry
+                    .history
+                    .push((PreferenceStatus::Open, Source::Council));
             }
             EventKind::StatusSet {
                 preference,

@@ -15,6 +15,8 @@ pub mod review_cmd;
 pub mod store_path;
 pub mod task;
 
+pub mod corpus_cmd;
+
 pub mod reconstruct {
     //! Rebuild a session from its event log and check the M0 invariants.
     //!
@@ -183,3 +185,11 @@ pub mod reconstruct {
         Ok(Session { events })
     }
 }
+
+pub mod select_cmd;
+
+pub mod worker_config;
+
+pub mod tensions_cmd;
+
+pub mod engine;

@@ -1,0 +1,11 @@
+# Corpus preparation EPERM diagnosis and minimal fix
+
+Read-only diagnostic reproduced the exact failure: `openat` on `/Users/n/Documents` using `O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC` returned EPERM. Earlier `/` and `/Users/n` opens succeeded; lstat of the actual corpus and record succeeded. No corpus body was read during diagnosis.
+
+Installed macOS SDK `sys/fcntl.h` defines `O_SEARCH = O_EXEC | O_DIRECTORY` (O_EXEC 0x40000000). The reader needs ancestor traversal, not directory listing. A same-path descriptor traversal using `O_SEARCH | O_NOFOLLOW | O_CLOEXEC` reached the exact corpus successfully without reading bodies. Thus the failure was an overbroad directory open mode encountering denied ancestor read/list permission, not evidence that corpus content access was denied or that flags were unsupported.
+
+Directory descriptors now request search-only on macOS, O_PATH on Linux/Android, and retain the existing read-only fallback on other Unix targets. Final file access remains RDONLY/NONBLOCK/NOFOLLOW/CLOEXEC, regular-file checked and byte bounded. Every component remains descriptor-relative and no-follow. No filesystem/security settings or access permissions changed. Temporary test directory modes only exercise search-without-list permission. No escalation was repeated, no data relocation used to evade denial.
+
+Verification: search-only/nested-directory and negative symlink/traversal/noncanonical-root control passed; all 14 existing broker-v2 tests passed. Original failed preparation remains in `target/qualitative-retrieval-live-1/`; subsequent preparation uses a new history-preserving instance in the same workspace after the code fix. No claim of Windows support or arbitrary privileged access.
+
+Independent reviewer `/root/search_mode_review` found no blocking finding: least-required-access correction, unchanged no-follow/regular-file/bound controls. Actual same-workspace preparation then succeeded without escalation. Fresh manifest `b1b44da9fe4e187464ac7872284b93a4b3e456461978f9a039df95621796f91b`, initial body 4,625 canonical UTF-8 bytes; all five export/driver tests passed against rebuilt binary. This resolves the prior preparation blocker; historical failure records are retained.

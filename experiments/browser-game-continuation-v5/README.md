@@ -1,0 +1,11 @@
+# Browser continuation v5: complete current-source review
+
+Prospective continuation of the same user-requested mashup. Preserve live5 (35894603), its valid unknown review, all admitted shared-board relationship history and v1. Prepare a separate derivative, verify the exact prior admission and owned review journal, and project the unknown as missing-evidence judgment, never substantive rejection or execution evidence.
+
+Provider's official public model catalog reports Luna context_length 1,050,000 and max_output_tokens 128,000. This profile retains 32,768 completion tokens and estimates input conservatively as the complete serialized UTF-8 request byte count plus 4,096 framing tokens. It permits at most 1,013,136 serialized bytes; this is derived from model context, not a tiny edit limit. Measured usage is authoritative; exceeding the request estimate makes the output unusable after honest billing. JSON output mode is not schema enforcement. Native validation and independent semantic review still apply.
+
+Generator, reviewer, reconsideration and correction requests share that profile. The three current files fit completely. Larger sources retain explicit range/coverage metadata and source-bound reads; no secret, protected source, full native state or undisclosed content is exported. No code or required evidence is silently truncated. No old response is repaired or adopted.
+
+Envelope: at most192 calls (86 decision/review pairs plus20 shared format/capacity corrections),100 isolated groups,120 minutes. Each request reserves max($0.05, conservative input/output quote estimate); unknown calls retain their exact reservation. The $9.60 planning floor is not a guarantee that every maximum-size request can run. Stop before the next reservation cannot fit. Existing cumulative465calls174groups$10.232177 ceiling remains; baseline273calls74groups$0.249657 leaves less than$10 for this run. No provider-failure retry or second attempt. Same approved container-only Chromium exception, all outer isolation unchanged.
+
+Run prepare.py with exact packet SHA, immutable live5 source and campaign manifest. It creates admissions only, no model request or execution. Fresh price, ledger-prefix upgrade and exact v6 trial/suite grant are required before the ordinary native launcher. The engine authors changes; local fixtures demonstrate harness wiring only.

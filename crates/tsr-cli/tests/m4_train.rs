@@ -38,8 +38,16 @@ fn regenerate(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
 
 /// Run `tsr <args>` and return `(exit_code, stdout, stderr)`.
 fn run(args: &[&str]) -> (i32, String, String) {
+    // Explicit simulated cutoff for the unchanged synthetic corpus. No ambient clock
+    // and no changes to its historical events or review labels.
+    let cutoff = if args.starts_with(&["train", "dataset"]) && !args.contains(&"--as-of") {
+        vec!["--as-of", "2028-01-01T00:00:00Z"]
+    } else {
+        Vec::new()
+    };
     let out = Command::new(tsr_bin())
         .args(args)
+        .args(cutoff)
         .output()
         .expect("the tsr binary runs");
     (

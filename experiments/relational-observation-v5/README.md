@@ -1,0 +1,41 @@
+# Relational observation evaluation — offline prospective packet
+
+Prospective packet only: paid approval is pending. This packet cannot dispatch and creates no live admission. A later live binding must use new source identities and independently reviewed authority; do not execute or modify any historical live-v4 preparation. Previous three-condition evaluations remain preserved and closed, including incomplete outcomes.
+
+## Goal and disclosure
+
+`conditions.json` freezes two synthetic wants, separate engine obligations, three exact environment conditions and task objectives. They are not user testimony or reader preferences. Supply only `prepare.projection(index)` for the eligible condition after the previous checkpoint and its independent assessment settle. Do not export this complete schedule, protected observer source, private state, or future condition bodies. One fixed `observe.cjs` contains no condition facts and requires no per-condition script or admission switch. Ordinary source-bound feedback/checkpoint transitions supply the current facts to deliberation. The same observer records control actions and visible results on each exact source.
+
+The model chooses layout, wording, interactions and relational meaning. Three semantic test hooks are the minimum integration surface, not a prescribed design: visible native links/buttons marked room/reading/prior. They may all expose already-visible content, or navigate/reveal it. No required panels, menu, relation, failure, third desire, or optimization score. The checker uses real Tab/Enter at desktop and 320px. A 128-key observation guard and per-request time/report capacities bound each probe, not useful engine work. Exceeding them is unavailable evidence, not task failure. Task phrase probes in the authored test data are not a production pass/fail oracle; the observer reports raw before/after visible text. Enter-dispatched means only that keyboard input reached the focused control, not handler success. Semantic correctness must be independently assessed. Do not game the checker by treating markers as fulfillment.
+
+## Assessment and ordinary loop
+
+Publish the two original artifact criteria in `criteria.json` once and preserve their identities. Current facts/tasks are versioned scenario guidance, not replacement criteria. Engine history/permissions remain in a separate immutable obligation field. Use the reviewed `public-criterion-return@v2` scope contract; never reintroduce preservation of engine contributors as a webpage feature. Freeze prerequisites: static-source findings may establish source-present content, finite observed task results establish only their recorded interaction; unknown reader response cannot become not_met.
+
+Use existing `engine-browser-assessment.collect` and `reflection_evidence`, ordinary qualitative reflection/independent review, criterion assessment and next choice. The observer is an authenticated attributed report, not a native receipt or final user acceptance. The criterion assessor's existing static source/native receipt scope must be disclosed; do not claim it consumed attributed task evidence unless that evidence is explicitly included by a separately verified binding. For this packet, control outcomes inform reflection/choice while criterion judgments remain limited to their admitted source/receipt coverage. No invented Contrast from report status.
+
+Allow repair, initial relationship, meaning development, supported Contrast-derived Preference, retention and abstention. Existing wants/history and obligations persist. Reviewed success-derived native Preferences are available when authenticated met criteria cover every contributing root; unrelated unknown/unmet obligations remain visible. Two-ancestry-root and recursive participation rules apply. Novelty remains optional. Three successful retentions are a valid terminal result; no extra trial to obtain novelty.
+
+## Policy and stop
+
+Same CheaperInference gpt-6-luna/settings and existing pinned networkless non-root browser container. Only Chromium's existing inner sandbox exception applies; outer isolation is unchanged. No cumulative dollar, call, operation or elapsed-time ceiling is recommended or enabled by this packet. Preserve actual accounting, reservations, per-request limits, bounded retry/backoff, Stop and unresolved-effect blocking. The proposed existing recovery profile allows one retry after a uniquely authenticated terminal zero-charge 503, with 60 seconds backoff; exhausted provider recovery stops as an external blocker rather than looping. No semantic approval shopping or uncertain-effect retry. This retry bound is not a cumulative useful-work ceiling. Stop on three completed condition checkpoints, explicit abstention, user Stop, safety/unknown-effect blocker or substantive inability. Unlimited does not mean repeat failed reviews until favorable or loop forever.
+
+This packet is not authority to spend. Before any separately approved launch, verify fresh pricing/runtime/source pins, absence of unresolved effects, and create a prospective session admission with the fixed observer and source-bound feedback schedule under the existing unlimited policy. All model/review/correction calls and operations count even without a total ceiling. No provider/privacy/credential changes.
+
+## Evidence and evaluation
+
+Record exact delivered inputs, predictions, observed reports, independent assessments, alternatives/choices, relationship/Preference admissions and resulting actions. Separate delivered, cited, and behaviorally consequential evidence; no causal claim from citation. A relationship is influential only with a trace to a later actual choice/action; prose alone is insufficient. No new identity is a valid result. This single run tests operation/evidence handling, not comparative TSR advantage.
+
+Unassisted means no manual prompt repair, semantic answer, journal edit, evidence routing or derivative-session preparation after the initial approved start. Count any such intervention. Record automatic recoveries separately. If the current harness cannot perform an entire condition transition automatically, report that boundary; do not conceal setup as autonomy. A same-model information-equal comparator is future design only, not part of this packet.
+
+## Offline checks
+
+`python3 experiments/relational-observation-v5/prepare.py --build` deterministically creates the fixed observer and pins packet/implementation files; it cannot dispatch or create a grant. Omit `--build` to verify hashes. Authored fixture tests exercise different valid UI structures, missing/ambiguous controls and retained source binding, with no model calls. Existing native tests cover authenticated report delivery, unknown/stale rejection, Stop and restart. Fixtures are infrastructure, not engine output or reader experience.
+
+Inherited recovery behavior remains unchanged, as do the frozen conditions, criteria, and observer. Proven pre-dispatch interruptions and retained settled review responses may resume without another judgment or action execution. Missing content or unknown effects remain blocked.
+
+## Differences from completed v4
+
+Conditions, objectives, observer and original host task wording are byte-identical. Effective model prompting is NOT identical: a0220f1b adds a capability-derived summary, presents reviewed relationship followed by separately reviewed success-derived identity, and replaces only the exact SHA-bound stale host capability enumeration with a summary reference. Retention remains valid. e8ea5d53 adds fail-closed malformed-history diagnostics; it changes no valid history semantics. No chronology or adverse evidence is removed. Single settled-contradiction reassessment remains durable and bounded once; recursive two-root lineage and unrelated open obligations remain unchanged. The original input is retained; no claim that presentation caused earlier retention or that this test must generate novelty.
+
+Offline verification reuses existing authored packet Stop/restart tests with this packet selected explicitly. Read-only retained v4 requests serve only as representation/evidence-preservation fixtures, never as replays or newly admitted model actions. Fresh runtime, price, source and ledger checks remain required immediately before any separately approved launch.

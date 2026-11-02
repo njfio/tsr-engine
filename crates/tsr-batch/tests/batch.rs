@@ -1,0 +1,1289 @@
+//! Integration tests for `tsr-batch` (PRD §B9, §B11 M3).
+//!
+//! Every test uses the `ScriptedRunner` and the `ScriptedDriver`: nothing here runs a repository's
+//! tests on the host, and nothing here needs a container runtime. The one test that would need
+//! Claude Code is `#[ignore]`d with its reason.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use tsr_batch::driver::{read_session, Mode, ScriptedDriver};
+use tsr_batch::invariants::{check_session_invariants, session_from_store};
+use tsr_batch::results::{read_results, Outcome};
+use tsr_batch::run::{run_all, run_one, BatchConfig};
+use tsr_batch::session::SessionCtx;
+use tsr_batch::task::{read_tasks, CorpusTask};
+use tsr_batch::{ClaudeCodeDriver, Driver, DRIVER_UNAVAILABLE_EXIT};
+use tsr_corpus::{Limits, RunResult, ScriptedRunner};
+use tsr_domain::{Hash, TaskId};
+use tsr_policy::gate::Grant;
+use tsr_policy::profile::Profile;
+use tsr_store::Store;
+
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/m3/batch")
+        .canonicalize()
+        .expect("fixtures/m3/batch exists")
+}
+
+fn profile() -> Profile {
+    Profile::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles/default.toml"))
+        .expect("default profile loads")
+}
+
+fn tasks() -> Vec<CorpusTask> {
+    static FIXTURE: std::sync::OnceLock<(tempfile::TempDir, Vec<CorpusTask>)> =
+        std::sync::OnceLock::new();
+    FIXTURE
+        .get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            let mut tasks = read_tasks(&fixtures().join("tasks.jsonl")).unwrap();
+            fs::create_dir_all(dir.path().join("tests")).unwrap();
+            fs::write(
+                dir.path().join("lib.rs"),
+                "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+            )
+            .unwrap();
+            // Each task gets a dedicated integration-test target, so its inline module
+            // path is rooted there rather than in an undeclared external source file.
+            for task in &mut tasks {
+                let mut source = String::new();
+                for name in task.failing_tests() {
+                    let parts: Vec<_> = name.split("::").collect();
+                    for module in &parts[..parts.len() - 1] {
+                        source.push_str(&format!("mod {module} {{ "));
+                    }
+                    source.push_str(&format!(
+                        "#[test] fn {}() {{ assert_eq!(2, 2); }}",
+                        parts.last().unwrap()
+                    ));
+                    for _ in &parts[..parts.len() - 1] {
+                        source.push('}');
+                    }
+                }
+                let file = format!("tests/{}.rs", task.id);
+                fs::write(dir.path().join(&file), source).unwrap();
+                task.oracle_test_files = vec![file];
+            }
+            let git = |args: &[&str]| {
+                let output = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir.path())
+                    .args([
+                        "-c",
+                        "core.hooksPath=/dev/null",
+                        "-c",
+                        "user.name=fixture",
+                        "-c",
+                        "user.email=fixture@example.invalid",
+                    ])
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                String::from_utf8(output.stdout).unwrap().trim().to_string()
+            };
+            git(&["init", "-q"]);
+            git(&["add", "."]);
+            git(&["commit", "-qm", "bounded fixture"]);
+            let tree = git(&["rev-parse", "HEAD^{tree}"]);
+            for task in &mut tasks {
+                task.repo = dir.path().to_string_lossy().into_owned();
+                if task.mutated_snapshot.is_some() {
+                    task.base_snapshot = Some(tree.clone());
+                } else {
+                    task.parent_snapshot = Some(tree.clone());
+                }
+            }
+            (dir, tasks)
+        })
+        .1
+        .clone()
+}
+
+// A non-executing double: materialize real trusted bytes, then return explicit
+// synthetic libtest evidence. Never run source code or claim real acceptance.
+fn bounded_result(argv: &[String]) -> RunResult {
+    if let Some((repo, snapshot, dest)) = tsr_corpus::provision_argv_parts(argv) {
+        tsr_corpus::mine::materialize(&repo, &snapshot, &dest).unwrap();
+        return RunResult::exit_only(0);
+    }
+    if argv.last().is_some_and(|a| a == "--exact") {
+        let name = &argv[argv.len() - 2];
+        return RunResult::from_output(
+            0,
+            format!("test {name} ... ok\ntest result: ok.\n").as_bytes(),
+            b"",
+            0,
+        );
+    }
+    RunResult::exit_only(0)
+}
+struct BoundedRunner {
+    script: ScriptedRunner,
+}
+impl BoundedRunner {
+    fn script(&mut self, dest: impl Into<PathBuf>, argv: &[String], result: RunResult) {
+        self.script.script(dest, argv, result);
+    }
+}
+impl tsr_corpus::Runner for BoundedRunner {
+    fn run(&self, dest: &Path, argv: &[String], limits: &Limits) -> RunResult {
+        let result = tsr_corpus::Runner::run(&self.script, dest, argv, limits);
+        if result.exit == -999 {
+            bounded_result(argv)
+        } else {
+            result
+        }
+    }
+}
+fn ok_runner() -> BoundedRunner {
+    BoundedRunner {
+        script: ScriptedRunner::new(RunResult::exit_only(-999)),
+    }
+}
+
+/// A runner that fails the flipped tests (exit 1) but passes the full suite.
+///
+/// D3: the oracle runs in the session's copy (`dest`), so the flipped argv is scripted against
+/// `dest`, not the parent snapshot.
+fn flipped_fails_runner(dest: &Path) -> BoundedRunner {
+    let mut r = ok_runner();
+    // D3/P3: each oracle test is run on its own with `cargo test -- <name> --exact`.
+    for task in tasks() {
+        for name in task.failing_tests() {
+            let argv = tsr_batch::run::exact_test_argv(dest, &name);
+            r.script(dest, &argv, RunResult::exit_only(1));
+        }
+    }
+    r
+}
+
+fn ctx_for(task: &CorpusTask, dir: &Path, mode: Mode) -> SessionCtx {
+    let store = Store::open(&dir.join(format!("{}.sqlite", mode.system()))).expect("store opens");
+    let grant = Grant {
+        task: TaskId(Hash::of(&[task.id.as_bytes()])),
+        allowed_kinds: vec![
+            tsr_domain::ActionKind::Inspect,
+            tsr_domain::ActionKind::RunApprovedTest,
+            tsr_domain::ActionKind::Generate,
+            tsr_domain::ActionKind::ProposePatch,
+            tsr_domain::ActionKind::RequestApproval,
+            tsr_domain::ActionKind::Stop,
+        ],
+        read_scope_paths: profile().read_scope.paths.clone(),
+        read_scope_rts_tools: profile().read_scope.rts_tools.clone(),
+        allowed_test_ids: profile().tests.iter().map(|t| t.id.clone()).collect(),
+        budgets: profile().budgets.clone(),
+    };
+    SessionCtx::new(
+        store,
+        TaskId(Hash::of(&[task.id.as_bytes()])),
+        profile(),
+        grant,
+        "2026-01-01T00:00:00Z".to_string(),
+    )
+}
+
+#[test]
+fn record_session_satisfies_reconstruct_invariants() {
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Record, session);
+    let mut ctx = ctx_for(task, dir.path(), Mode::Record);
+    ctx.open_task().unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
+    ctx.close("done").unwrap();
+    assert!(report.stopped, "the session reached a Stop");
+
+    let session = session_from_store(ctx.store(), &ctx.task()).unwrap();
+    check_session_invariants(&session).expect("record session satisfies the invariants");
+}
+
+#[test]
+fn rules_session_satisfies_reconstruct_invariants() {
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
+    ctx.open_task().unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
+    ctx.close("done").unwrap();
+    assert!(report.stopped, "the session reached a Stop");
+    assert!(
+        report.denials.is_empty(),
+        "a well-formed rules session is not denied: {:?}",
+        report.denials
+    );
+
+    let session = session_from_store(ctx.store(), &ctx.task()).unwrap();
+    check_session_invariants(&session).expect("rules session satisfies the invariants");
+}
+
+#[test]
+fn rules_mode_denies_a_gated_action_without_a_forecast() {
+    let task = &tasks()[2]; // kamn store task
+    let dir = tempfile::tempdir().unwrap();
+    let session = read_session(&fixtures().join("session-missing-forecast.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
+    ctx.open_task().unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
+    ctx.close("done").unwrap();
+
+    assert_eq!(
+        report.denials.len(),
+        1,
+        "exactly the forecast-less test is denied"
+    );
+    let reason = &report.denials[0].reason;
+    assert!(
+        reason.contains("record a forecast for RunApprovedTest at state version"),
+        "the denial names what to record, got: {reason}"
+    );
+    assert!(
+        reason.contains("before this action"),
+        "the denial says when, got: {reason}"
+    );
+
+    // The denied action did not happen: no Executed event for it, and the session still satisfies
+    // the invariants (a denied action is not a dispatch).
+    let session = session_from_store(ctx.store(), &ctx.task()).unwrap();
+    check_session_invariants(&session)
+        .expect("a session with a denial still satisfies the invariants");
+}
+
+#[test]
+fn record_mode_gates_nothing() {
+    let task = &tasks()[2];
+    let dir = tempfile::tempdir().unwrap();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Record, session);
+    let mut ctx = ctx_for(task, dir.path(), Mode::Record);
+    ctx.open_task().unwrap();
+    let report = driver.drive(&mut ctx, task, dir.path()).unwrap();
+    ctx.close("done").unwrap();
+
+    assert!(report.denials.is_empty(), "system 1 gates nothing");
+    let session = session_from_store(ctx.store(), &ctx.task()).unwrap();
+    check_session_invariants(&session).expect("record session satisfies the invariants");
+}
+
+#[test]
+fn batch_run_records_results_for_the_five_fixture_tasks() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    // A runner that materialises the base tree into the copy directory on a materialize call
+    // (the way `tsr corpus materialize` does), so the mutant tasks' mutation diff has a real
+    // tree to apply against.
+    struct CopyingRunner;
+    impl tsr_corpus::Runner for CopyingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            bounded_result(argv)
+        }
+    }
+    let runner = CopyingRunner;
+    let mut all = tasks();
+    assert_eq!(all.len(), 5, "five fixture tasks");
+
+    // The mutant tasks' copies are their base snapshot with the mutation diff applied (D4); the
+    // diff is read from the CAS by its hex digest, so seed the objects the fixture names.
+    let cas = tsr_corpus::mine::cas_dir(dir.path());
+    std::fs::create_dir_all(&cas).unwrap();
+    let mutation = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-pub fn add(a: i32, b: i32) -> i32 { a + b }\n+pub fn add(a: i32, b: i32) -> i32 { a - b }\n";
+    for task in &mut all {
+        if task.mutation_diff.is_some() {
+            let digest = tsr_corpus::digest(mutation.as_bytes());
+            std::fs::write(cas.join(&digest), mutation).unwrap();
+            task.mutation_diff = Some(digest);
+        }
+    }
+
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let results = run_all(
+        &all,
+        Mode::Rules,
+        |_t| Box::new(ScriptedDriver::new(Mode::Rules, session.clone())),
+        &runner,
+        &config,
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 5);
+    for r in &results {
+        assert_eq!(r.system, "rules");
+        assert_eq!(
+            r.outcome,
+            Outcome::Accepted,
+            "the ok runner accepts every task"
+        );
+        assert!(!r.state_root_at_start.is_empty());
+        assert!(!r.state_root_at_end.is_empty());
+        assert!(r.oracle.as_ref().unwrap().accepted);
+    }
+
+    let path = dir.path().join("results.jsonl");
+    tsr_batch::write_results(&path, &results).unwrap();
+    let back = read_results(&path).unwrap();
+    assert_eq!(back, results, "results round-trip through JSONL");
+}
+
+#[test]
+fn oracle_rejects_when_the_flipped_tests_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let runner = flipped_fails_runner(&dest);
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(result.outcome, Outcome::Rejected);
+    let oracle = result.oracle.unwrap();
+    assert!(!oracle.flipped_tests_pass);
+    assert!(!oracle.suite_regressed);
+    assert!(!oracle.accepted);
+}
+
+#[test]
+fn oracle_rejects_when_the_suite_regresses() {
+    let mut runner = ok_runner();
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    // D3: the oracle runs in the session's copy, so the suite is scripted against `dest`.
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let suite = tsr_batch::run::full_suite_argv(&dest);
+    runner.script(&dest, &suite, RunResult::exit_only(1));
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(result.outcome, Outcome::Rejected);
+    let oracle = result.oracle.unwrap();
+    assert!(oracle.flipped_tests_pass);
+    assert!(oracle.suite_regressed);
+    assert!(!oracle.accepted);
+}
+
+#[test]
+fn state_root_at_start_is_the_empty_store_root() {
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let runner = ok_runner();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    // A fresh store's head root is the empty-log root; two fresh stores agree.
+    let other = Store::open_in_memory().unwrap();
+    assert_eq!(
+        result.state_root_at_start,
+        other.head_root().unwrap().to_hex()
+    );
+    assert_ne!(result.state_root_at_start, result.state_root_at_end);
+}
+
+#[test]
+fn d10_rerunning_into_an_existing_out_starts_from_an_empty_store() {
+    // D10: re-running into an existing `--out` must start from empty stores.
+    // Pre-fix, `Store::open` reused the leftover sqlite file, so the second
+    // run's `state_root_at_start` was the first run's end root, not the empty
+    // store's root.
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let runner = ok_runner();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let first = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    let second = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let empty = Store::open_in_memory()
+        .unwrap()
+        .head_root()
+        .unwrap()
+        .to_hex();
+    assert_eq!(
+        second.state_root_at_start, empty,
+        "the second run must start from an empty store, not the first run's end root"
+    );
+    assert_ne!(
+        second.state_root_at_start, first.state_root_at_end,
+        "the second run must not inherit the first run's store"
+    );
+}
+
+#[test]
+#[ignore = "needs Claude Code and a container runtime; the operator runs it on a host that has both"]
+fn claude_code_driver_runs_on_a_host() {
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
+    ctx.open_task().unwrap();
+    let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
+    let err = driver.drive(&mut ctx, task, dir.path()).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("no Claude Code"), "got: {msg}");
+    assert_eq!(DRIVER_UNAVAILABLE_EXIT, 2);
+}
+
+#[test]
+fn claude_code_driver_is_a_documented_stub() {
+    // The stub is available in the sandbox and returns the reason, not a panic.
+    let task = &tasks()[0];
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = ctx_for(task, dir.path(), Mode::Rules);
+    ctx.open_task().unwrap();
+    let driver = ClaudeCodeDriver::new("tsr", "claude-sonnet-4-5");
+    let err = driver.drive(&mut ctx, task, dir.path()).unwrap_err();
+    assert!(err.to_string().contains("no Claude Code"));
+    assert_eq!(driver.name(), "claude-code");
+}
+
+/// D3: the oracle must judge the session's copy (`dest`), not the unmodified parent snapshot.
+///
+/// The defect: `run_one` ran the oracle with `task.snapshot()` (the parent) as the working
+/// directory, so a session that leaves the flipped test failing was still accepted. The oracle's
+/// argv must be run against the copy the session worked in.
+#[test]
+fn d3_oracle_runs_in_the_session_copy_not_the_parent_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // A runner that records every snapshot it was asked to run against.
+    let runner = RecordingRunner::new();
+    let _ = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    let oracle_calls: Vec<PathBuf> = runner
+        .calls()
+        .into_iter()
+        .filter(|(_, argv)| argv.first().is_some_and(|a| a == "cargo"))
+        .map(|(snapshot, _)| snapshot)
+        .collect();
+    assert!(
+        !oracle_calls.is_empty(),
+        "the oracle ran at least once (flipped tests + full suite)"
+    );
+    for snapshot in &oracle_calls {
+        assert_eq!(
+            snapshot, &dest,
+            "D3: the oracle must run in the session's copy {dest:?}, not {snapshot:?}"
+        );
+    }
+}
+
+/// D3: a session that leaves the flipped test failing is NOT accepted; one that fixes it IS.
+///
+/// The oracle's verdict is read from the run in the session's copy, so the two sessions must
+/// differ. Before the fix both were accepted because the oracle ran against the parent snapshot.
+#[test]
+fn d3_a_session_that_leaves_the_flipped_test_failing_is_not_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The session's copy fails the flipped tests (exit 1) but the full suite passes.
+    let mut runner = ok_runner();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    for name in task.failing_tests() {
+        runner.script(
+            &dest,
+            &tsr_batch::run::exact_test_argv(&dest, &name),
+            RunResult::exit_only(1),
+        );
+    }
+
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(
+        result.outcome,
+        Outcome::Rejected,
+        "D3: a session that leaves the flipped test failing must not be accepted"
+    );
+    let oracle = result.oracle.unwrap();
+    assert!(!oracle.flipped_tests_pass);
+    assert!(!oracle.accepted);
+}
+
+/// D3: a session that fixes the flipped test IS accepted.
+#[test]
+fn d3_a_session_that_fixes_the_flipped_test_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The session's copy passes the flipped tests and the full suite.
+    let mut runner = ok_runner();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    for name in task.failing_tests() {
+        runner.script(
+            &dest,
+            &tsr_batch::run::exact_test_argv(&dest, &name),
+            RunResult::from_output(0, format!("test {name} ... ok\n").as_bytes(), b"", 0),
+        );
+    }
+
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(
+        result.outcome,
+        Outcome::Accepted,
+        "D3: a session that fixes the flipped test must be accepted"
+    );
+    assert!(result.oracle.unwrap().accepted);
+}
+
+/// D4: a non-zero provisioning exit must be refused, not ignored.
+///
+/// The defect: `run_one` recorded `provision:<exit>` as Evidence but never inspected the exit, so a
+/// copy that was never materialised was driven and judged anyway. Before the fix this test fails
+/// because `run_one` returns `Ok`; after it, `run_one` returns `RunError::ProvisioningFailed`.
+#[test]
+fn d4_provisioning_failure_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // The provisioning run exits non-zero: the copy was never materialised.
+    let mut runner = ok_runner();
+    let dest = dir.path().join("copies").join(&task.id).join("rules");
+    // N2: `run_one` resolves the repository to an absolute path before building the argv, so the
+    // scripted provisioning run must be keyed on the same absolute argv.
+    let repo_abs = tsr_batch::run::absolute(Path::new(&task.repo)).unwrap();
+    let provision = tsr_batch::run::provision_argv(&repo_abs, task.snapshot(), &dest);
+    runner.script(
+        tsr_batch::run::copies_root(dir.path()),
+        &provision,
+        RunResult::exit_only(1),
+    );
+
+    let result = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+    assert_eq!(result.outcome, Outcome::Unavailable);
+    assert!(result.oracle.is_none());
+    let store = Store::open(&config.out.join("state").join(&task.id).join("rules.sqlite")).unwrap();
+    let events = store.by_task(&tsr_batch::run::task_id(task)).unwrap();
+    assert!(!events
+        .iter()
+        .any(|(_, e)| matches!(e.kind, tsr_domain::EventKind::Proposed { .. })));
+    assert!(matches!(
+        events.last().unwrap().1.kind,
+        tsr_domain::EventKind::TaskClosed { .. }
+    ));
+}
+
+/// A runner that records every `(snapshot, argv)` it was asked to run, and answers success.
+struct RecordingRunner {
+    calls: std::cell::RefCell<Vec<(PathBuf, Vec<String>)>>,
+}
+
+impl RecordingRunner {
+    fn new() -> Self {
+        Self {
+            calls: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> Vec<(PathBuf, Vec<String>)> {
+        self.calls.borrow().clone()
+    }
+}
+
+impl tsr_corpus::Runner for RecordingRunner {
+    fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+        self.calls
+            .borrow_mut()
+            .push((snapshot.to_path_buf(), argv.to_vec()));
+        bounded_result(argv)
+    }
+}
+
+#[test]
+fn limits_and_run_result_are_the_corpus_contract() {
+    // A guard that the corpus contract this crate builds on has not moved.
+    let limits = Limits::new(1000, 4096);
+    let r = RunResult::exit_only(0);
+    assert!(r.succeeded());
+    assert_eq!(limits.wall_clock_ms, 1000);
+}
+
+// ---------------------------------------------------------------------------------------------
+// D1: the untrusted task id must not be joined into a path (security review F1)
+// ---------------------------------------------------------------------------------------------
+
+/// Write a one-line `tasks.jsonl` whose only task carries `id`, and return the manifest path.
+fn manifest_with_id(dir: &Path, id: &str) -> PathBuf {
+    let mut task = tasks().into_iter().next().expect("a fixture task");
+    task.id = id.to_string();
+    let path = dir.join("tasks.jsonl");
+    let line = serde_json::to_string(&task).expect("serializable");
+    fs::write(&path, format!("{line}\n")).expect("write manifest");
+    path
+}
+
+/// D1: an absolute task id must be refused where `tasks.jsonl` is parsed, not joined into
+/// `out/state/<id>` (an absolute id replaces the base and escapes `--out`).
+#[test]
+fn d1_absolute_task_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = manifest_with_id(dir.path(), "/etc/tsr-escape");
+    let err = read_tasks(&path).expect_err("an absolute task id must be refused");
+    assert!(
+        matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+        "expected InvalidId, got {err:?}"
+    );
+}
+
+/// D1: a `../` task id must be refused where `tasks.jsonl` is parsed.
+#[test]
+fn d1_parent_dir_task_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = manifest_with_id(dir.path(), "../escape");
+    let err = read_tasks(&path).expect_err("a `../` task id must be refused");
+    assert!(
+        matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+        "expected InvalidId, got {err:?}"
+    );
+}
+
+/// D1: `.` and `..` are refused, and a well-formed id is accepted.
+#[test]
+fn d1_dot_ids_are_refused_and_a_valid_id_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    for bad in [".", "..", "a/b", "a\\b", ""] {
+        let path = manifest_with_id(dir.path(), bad);
+        let err = read_tasks(&path)
+            .err()
+            .unwrap_or_else(|| panic!("id {bad:?} must be refused"));
+        assert!(
+            matches!(err, tsr_batch::TaskError::InvalidId { .. }),
+            "id {bad:?}: expected InvalidId, got {err:?}"
+        );
+    }
+    // A well-formed id (the fixture's own blake3 hex) still reads.
+    let good = tasks()[0].id.clone();
+    let path = manifest_with_id(dir.path(), &good);
+    let read = read_tasks(&path).expect("a valid id reads");
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].id, good);
+}
+
+/// R2, D1: `run_one` is public, so it must re-check the task id before joining it into a path.
+///
+/// `read_tasks` refuses an unsafe id, but a caller can build a `CorpusTask` directly and hand it to
+/// `run_one`, which joins `task.id` into `out/state/<id>` and `out/copies/<id>`. Pre-fix, an
+/// absolute or `..` id reached those joins unchecked. The fix refuses it at the top of `run_one`.
+#[test]
+fn r2_run_one_rechecks_the_task_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let runner = ok_runner();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    for bad in ["/etc/tsr-escape", "../escape", "..", "."] {
+        let mut task = tasks().into_iter().next().expect("a fixture task");
+        task.id = bad.to_string();
+        let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+            .err()
+            .unwrap_or_else(|| panic!("id {bad:?} must be refused by run_one"));
+        assert!(
+            matches!(err, tsr_batch::RunError::InvalidTaskId { .. }),
+            "id {bad:?}: expected InvalidTaskId, got {err:?}"
+        );
+    }
+
+    // Nothing was created outside `--out`: the escape paths do not exist.
+    assert!(!Path::new("/etc/tsr-escape").exists());
+    assert!(!dir.path().parent().unwrap().join("escape").exists());
+}
+
+/// D4: provisioning runs from a batch-owned root, never from the snapshot value, and passes
+/// `--repo` so `materialize` does not default to `.`.
+///
+/// The defect: `run_one` ran provisioning with the working directory set to `task.snapshot()` — a
+/// tree id, not a directory — so every task failed `provisioning failed … exited 127`, and
+/// `provision_argv` passed no `--repo`, so `materialize` defaulted to `.`.
+#[test]
+fn d4_provisioning_runs_from_a_batch_owned_root_with_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let task = &tasks()[0];
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let runner = RecordingRunner::new();
+    let _ = run_one(task, Mode::Rules, &driver, &runner, &config).unwrap();
+
+    let provision_calls: Vec<(PathBuf, Vec<String>)> = runner
+        .calls()
+        .into_iter()
+        .filter(|(_, argv)| argv.iter().any(|a| a == "materialize"))
+        .collect();
+    assert_eq!(provision_calls.len(), 1, "exactly one provisioning run");
+    let (cwd, argv) = &provision_calls[0];
+
+    // The working directory is the batch-owned copies root, not the snapshot value.
+    assert_eq!(
+        cwd.as_path(),
+        tsr_batch::run::copies_root(dir.path()).as_path(),
+        "D4: provisioning must run from the batch-owned copies root, not the snapshot"
+    );
+    assert_ne!(
+        cwd.as_os_str(),
+        std::ffi::OsStr::new(task.snapshot()),
+        "D4: the snapshot value must never be the provisioning working directory"
+    );
+    // `--repo` is passed, so `materialize` does not default to `.`.
+    let repo_idx = argv
+        .iter()
+        .position(|a| a == "--repo")
+        .expect("D4: provision_argv must pass --repo");
+    // N2: the repository is resolved to an absolute path before use, so a relatively-mined repo is
+    // still materialisable from the copies root the provisioning run is given as its cwd.
+    assert_eq!(
+        argv[repo_idx + 1],
+        tsr_batch::run::absolute(Path::new(&task.repo))
+            .unwrap()
+            .display()
+            .to_string(),
+        "D4/N2: --repo must name the task's repository, made absolute"
+    );
+    // The snapshot is passed as an argument, never as a path the batch runs from.
+    let snap_idx = argv.iter().position(|a| a == "--snapshot").unwrap();
+    assert_eq!(argv[snap_idx + 1], task.snapshot());
+}
+
+/// R1: a snapshot value that is not a hex object id is refused before anything is mounted.
+///
+/// The defect: the snapshot value from `tasks.jsonl` became `ExecRunner`'s working directory, so
+/// `"parent_snapshot":"/etc"` made `/etc` the sandbox's writable mount (PRD §B10: the disposable
+/// copy is the only writable mount). A snapshot is accepted only as a hex object id.
+#[test]
+fn r1_snapshot_must_be_a_hex_object_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = Some("/etc".to_string());
+
+    let runner = RecordingRunner::new();
+    let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+        .expect_err("R1: a snapshot that is not a hex object id must be refused");
+    assert!(
+        matches!(err, tsr_batch::run::RunError::UnsafeSnapshot { .. }),
+        "R1: expected UnsafeSnapshot, got {err:?}"
+    );
+    // Nothing was mounted: no provisioning run happened at all.
+    assert!(
+        runner.calls().is_empty(),
+        "R1: nothing may be mounted for an unsafe snapshot, got {:?}",
+        runner.calls()
+    );
+}
+
+/// R1: a `..` snapshot is refused too — a relative path is not a hex object id.
+#[test]
+fn r1_dotdot_snapshot_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = Some("../../etc".to_string());
+
+    let runner = RecordingRunner::new();
+    let err = run_one(&task, Mode::Rules, &driver, &runner, &config)
+        .expect_err("R1: a `..` snapshot must be refused");
+    assert!(matches!(
+        err,
+        tsr_batch::run::RunError::UnsafeSnapshot { .. }
+    ));
+    assert!(runner.calls().is_empty());
+}
+
+/// D4: a mutant's copy is its base snapshot materialised with the mutant's own diff applied.
+///
+/// The defect: a mutant's snapshot was a descriptor hash (`mutated_snapshot`) that named nothing
+/// materialisable. The copy is now the base tree with the mutation diff applied, so the copy's
+/// file holds the mutated source.
+#[test]
+fn d4_mutant_copy_applies_the_mutation_diff() {
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(
+        repo.join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(repo.join("tests")).unwrap();
+    std::fs::write(
+        repo.join("tests/t1.rs"),
+        "mod parser { mod tests { #[test] fn handles_empty_input() { assert_eq!(2,2); } } }",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base_tree = git(&["rev-parse", "HEAD^{tree}"]);
+
+    // The mutation diff: replace `a + b` with `a - b`.
+    let mutation = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-pub fn add(a: i32, b: i32) -> i32 { a + b }\n+pub fn add(a: i32, b: i32) -> i32 { a - b }\n";
+    let cas = tsr_corpus::mine::cas_dir(dir.path());
+    std::fs::create_dir_all(&cas).unwrap();
+    let digest = tsr_corpus::digest(mutation.as_bytes());
+    std::fs::write(cas.join(&digest), mutation).unwrap();
+
+    let mut task = tasks()[0].clone();
+    task.parent_snapshot = None;
+    task.base_snapshot = Some(base_tree.clone());
+    task.mutated_snapshot = Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string());
+    task.mutation_diff = Some(digest);
+    task.repo = repo.display().to_string();
+
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    // A runner that actually materialises the base tree into `dest` (the way `tsr corpus
+    // materialize` does), so the mutation diff has a real tree to apply against.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            bounded_result(argv)
+        }
+    }
+
+    let result = run_one(&task, Mode::Rules, &driver, &MaterializingRunner, &config).unwrap();
+    let dest = tsr_batch::run::copies_root(dir.path())
+        .join(&task.id)
+        .join("rules");
+    let copied = std::fs::read_to_string(dest.join("lib.rs")).unwrap();
+    assert!(
+        copied.contains("a - b"),
+        "D4: the mutant's copy must hold the mutated source, got: {copied:?}"
+    );
+    assert_eq!(result.outcome, Outcome::Accepted);
+}
+
+/// D4: a real runner that materialised a copy but whose mutation diff is absent from the CAS is a
+/// hard error — the `dest.exists()` gate must not weaken it.
+///
+/// The regression fix (15c3015) skips the CAS read only when provisioning left no copy at `dest`
+/// (a stand-in runner). A runner that *did* create `dest` — the shape a real `ExecRunner` always
+/// has after exit 0 — must still refuse a missing digest, never drive a silently unmutated copy.
+#[test]
+fn d4_a_materialised_copy_with_a_missing_mutation_diff_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = BatchConfig::new(dir.path(), profile());
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+
+    let mut task = tasks()[0].clone();
+    task.base_snapshot = task.parent_snapshot.take();
+    task.mutated_snapshot = Some("f6a7b8c9d0e1f6a7b8c9d0e1f6a7b8c9d0e1f6a7".to_string());
+    // A digest that names nothing in the CAS.
+    task.mutation_diff =
+        Some("1111111111111111111111111111111111111111111111111111111111111111".to_string());
+
+    // A runner that materialises a copy at `dest` (the way a real runner does after exit 0) but
+    // leaves the CAS empty, so the diff cannot be read.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            bounded_result(argv)
+        }
+    }
+
+    let err = run_one(&task, Mode::Rules, &driver, &MaterializingRunner, &config)
+        .expect_err("a materialised copy with a missing mutation diff must be refused");
+    assert!(
+        matches!(err, tsr_batch::run::RunError::MutationDiff { .. }),
+        "D4: expected MutationDiff, got {err:?}"
+    );
+}
+
+/// D4, D9: end to end on a real repository with a stand-in cargo-mutants — every reversal passes
+/// `git apply --check`, and `tsr task run` provisions every mutant task.
+///
+/// The defect: `tsr corpus mutants` wrote `mutated_snapshot = blake3(descriptor)` and neither
+/// `base_snapshot` nor `mutation_diff`, so `tsr task run` failed at provisioning; and the reversal
+/// was reconstructed from the descriptor's `replacement`, so `git apply --check` refused it
+/// (`corrupt patch`). The fix records the base tree id and the mutation diff in the corpus's own
+/// CAS, materialises the base and applies the mutation diff, and takes the reversal as a real
+/// `git diff` between the mutated copy and the base copy.
+///
+/// This test runs the real `tsr_corpus::mutants::mutants` against a real repository with a stand-in
+/// runner, then provisions every task it wrote through `run_one` with a runner that materialises
+/// the base tree the way `tsr corpus materialize` does.
+#[test]
+fn d4_d9_mutant_tasks_provision_and_reverse_end_to_end() {
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(
+        repo.join("src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\npub fn is_positive(n: i32) -> bool {\n    n > 0\n}\n\n#[cfg(test)]\nmod tests {\n    #[test] fn add_works() { assert_eq!(super::add(1,1),2); }\n}\n",
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    let base_tree = git(&["rev-parse", "HEAD^{tree}"]);
+    assert!(!base_tree.is_empty(), "the repository has a HEAD tree");
+
+    // A stand-in cargo-mutants: the list run writes the sample's descriptors, the kill run writes
+    // the sample's outcomes and one log per scenario.
+    let list = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m3/cargo-mutants-sample.json"),
+    )
+    .unwrap();
+    let outcomes = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/m3/cargo-mutants-outcomes-sample.json"),
+    )
+    .unwrap();
+    struct StandInMutants {
+        list: String,
+        outcomes: String,
+    }
+    impl tsr_corpus::Runner for StandInMutants {
+        fn run(&self, snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            if argv.iter().any(|a| a.contains("--list")) {
+                let path = snapshot.join("mutants.out/mutants.json");
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, &self.list).unwrap();
+                return RunResult::from_output(0, self.list.as_bytes(), b"", 1);
+            }
+            let path = snapshot.join("mutants.out/outcomes.json");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &self.outcomes).unwrap();
+            // One log per scenario, each naming the test that failed under it. The log path is
+            // the one the outcome names, relative to `mutants.out`.
+            let lab: serde_json::Value = serde_json::from_str(&self.outcomes).unwrap();
+            for outcome in lab["outcomes"].as_array().unwrap() {
+                let Some(rel) = outcome["log_path"].as_str() else {
+                    continue;
+                };
+                let log = snapshot.join("mutants.out").join(rel);
+                std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+                std::fs::write(
+                    &log,
+                    "running 1 test\ntest tests::add_works ... FAILED\n\nfailures:\n    tests::add_works\n",
+                )
+                .unwrap();
+            }
+            RunResult::from_output(0, self.outcomes.as_bytes(), b"", 1)
+        }
+    }
+
+    let corpus = dir.path().join("corpus");
+    let report = tsr_corpus::mutants::mutants(
+        &repo,
+        &corpus,
+        &tsr_corpus::mutants::MutantsOptions::default(),
+        &StandInMutants { list, outcomes },
+    )
+    .expect("mutants runs");
+    assert!(report.tasks > 0, "the stand-in produced caught mutants");
+
+    // Every task names its base snapshot and its mutation diff, and both are readable.
+    let manifest = std::fs::read_to_string(corpus.join("tasks.jsonl")).unwrap();
+    let tasks: Vec<CorpusTask> = manifest
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(tasks.len(), report.tasks);
+    let cas = tsr_corpus::mine::cas_dir(&corpus);
+    for task in &tasks {
+        assert_eq!(
+            task.base_snapshot.as_deref(),
+            Some(base_tree.as_str()),
+            "D4: the task records the tree id it mutated"
+        );
+        let digest = task
+            .mutation_diff
+            .as_deref()
+            .expect("D4: the task records its mutation diff");
+        assert!(
+            cas.join(digest).exists(),
+            "D4: the mutation diff is in the corpus's own CAS beside tasks.jsonl"
+        );
+    }
+
+    // D9: every reversal applies to the mutated copy by construction.
+    for task in &tasks {
+        let base = task.base_snapshot.as_deref().unwrap();
+        let mutation =
+            std::fs::read_to_string(cas.join(task.mutation_diff.as_deref().unwrap())).unwrap();
+        let mutated = dir.path().join(format!("mutated-{}", task.id));
+        tsr_corpus::mine::materialize(&repo, base, &mutated).expect("materialise base");
+        let mutation_patch = dir.path().join(format!("mutation-{}.patch", task.id));
+        std::fs::write(&mutation_patch, &mutation).unwrap();
+        let applied = Command::new("git")
+            .arg("-C")
+            .arg(&mutated)
+            .args(["apply", "--whitespace=nowarn"])
+            .arg(&mutation_patch)
+            .output()
+            .unwrap();
+        assert!(
+            applied.status.success(),
+            "the mutation diff must apply to the base tree: {}",
+            String::from_utf8_lossy(&applied.stderr)
+        );
+        let reversal =
+            std::fs::read_to_string(cas.join(task.reversal_diff.as_deref().unwrap())).unwrap();
+        let reversal_patch = dir.path().join(format!("reversal-{}.patch", task.id));
+        std::fs::write(&reversal_patch, &reversal).unwrap();
+        let check = Command::new("git")
+            .arg("-C")
+            .arg(&mutated)
+            .args(["apply", "--check"])
+            .arg(&reversal_patch)
+            .output()
+            .unwrap();
+        assert!(
+            check.status.success(),
+            "D9: every reversal must pass `git apply --check`; task {} said: {}\npatch:\n{reversal}",
+            task.id,
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+
+    // `tsr task run` provisions every mutant task: `run_one` materialises the base and applies the
+    // mutation diff, and the copy holds the mutated source.
+    struct MaterializingRunner;
+    impl tsr_corpus::Runner for MaterializingRunner {
+        fn run(&self, _snapshot: &Path, argv: &[String], _limits: &Limits) -> RunResult {
+            bounded_result(argv)
+        }
+    }
+
+    let out = dir.path().join("batch-out");
+    let mut config = BatchConfig::new(&out, profile());
+    // D4: the batch reads the mutation diff from the corpus directory's own CAS, beside
+    // tasks.jsonl — not from its own `--out`.
+    config.corpus_dir = corpus.clone();
+    let session = read_session(&fixtures().join("session-inspect-test-propose.json")).unwrap();
+    let driver = ScriptedDriver::new(Mode::Rules, session);
+    for task in &tasks {
+        let result = run_one(task, Mode::Rules, &driver, &MaterializingRunner, &config)
+            .unwrap_or_else(|e| panic!("D4: task {} must provision, got {e:?}", task.id));
+        let dest = tsr_batch::run::copies_root(&out)
+            .join(&task.id)
+            .join("rules");
+        let copied = std::fs::read_to_string(dest.join("src/lib.rs")).unwrap();
+        assert!(
+            copied.contains("~ changed by cargo-mutants ~"),
+            "D4: task {}'s copy must hold the mutated source, got: {copied:?}",
+            task.id
+        );
+        assert_eq!(result.outcome, Outcome::Accepted);
+    }
+}
+
+// M3-PROGRESS-01 / M3-RECEIPTS-01: inert runner, no repository code execution.
+#[test]
+fn m3_progress_01_patch_pass_stop_persists_verified_oracle_in_both_modes() {
+    use std::cell::RefCell;
+    use tsr_batch::broker_v2::{
+        Broker, BrokerDriver, Completion, Proposal, ReplayBroker, Request, TaskContext,
+    };
+    struct Capture {
+        inner: ReplayBroker,
+        requests: Vec<serde_json::Value>,
+    }
+    impl Broker for Capture {
+        fn complete(&mut self, request: &Request) -> Result<Completion, String> {
+            let value = serde_json::to_value(request).unwrap();
+            let n = self.requests.len();
+            assert_eq!(value["remaining_action_calls"], 8 - n);
+            let expected = [
+                (false, false),
+                (true, false),
+                (true, true),
+                (false, false),
+                (false, true),
+                (true, true),
+                (true, true),
+                (true, true),
+            ][n];
+            assert_eq!(value["progress"]["inspection_current"], expected.0);
+            assert_eq!(value["progress"]["test_current"], expected.1);
+            assert!(value["progress"]["submission"]
+                .as_str()
+                .unwrap()
+                .contains("independent final oracle"));
+            self.requests.push(value);
+            self.inner.complete(request)
+        }
+    }
+    struct FixtureRunner;
+    impl tsr_corpus::Runner for FixtureRunner {
+        fn run(&self, dest: &Path, argv: &[String], _: &Limits) -> RunResult {
+            if tsr_corpus::provision_argv_parts(argv).is_some() {
+                return bounded_result(argv);
+            }
+            let name = if argv.last().is_some_and(|a| a == "--exact") {
+                argv[argv.len() - 2].as_str()
+            } else {
+                "fixture"
+            };
+            let source = fs::read_to_string(dest.join("lib.rs")).unwrap();
+            let passed = source.contains("a - b");
+            RunResult::from_output(if passed {0} else {101}, format!("running 1 test\ntest {name} ... {}\ntest result: {}. {} passed; {} failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n", if passed {"ok"} else {"FAILED"}, if passed {"ok"} else {"FAILED"}, usize::from(passed), usize::from(!passed)).as_bytes(), b"fixture stderr", 1)
+        }
+    }
+    let mut paired = Vec::new();
+    for mode in [Mode::Record, Mode::Rules] {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut p = profile();
+        p.read_scope.paths.push("lib.rs".into());
+        p.budgets.generator_calls = 8;
+        let test_id = p.tests[0].id.clone();
+        let task = tasks().remove(0);
+        let inspect = || {
+            (
+                Proposal::Inspect {
+                    path: "lib.rs".into(),
+                },
+                None,
+            )
+        };
+        let test = || {
+            (
+                Proposal::Test {
+                    id: test_id.clone(),
+                },
+                Some(0.5),
+            )
+        };
+        let driver = BrokerDriver {
+            broker: RefCell::new(Capture {
+                inner: ReplayBroker {
+                    replies: vec![
+                        inspect(),
+                        test(),
+                        (
+                            Proposal::Replace {
+                                path: "lib.rs".into(),
+                                contents: "pub fn add(a: i32, b: i32) -> i32 { a - b }\n".into(),
+                            },
+                            Some(0.5),
+                        ),
+                        test(),
+                        inspect(),
+                        inspect(),
+                        inspect(),
+                        (Proposal::Stop, None),
+                    ]
+                    .into(),
+                },
+                requests: vec![],
+            }),
+            runner: &FixtureRunner,
+            mode,
+            context: TaskContext {
+                required_reads: vec!["lib.rs".into()],
+                failing_test_id: test_id,
+            },
+        };
+        let config = BatchConfig::new(tmp.path().join("out"), p);
+        let result = run_one(&task, mode, &driver, &FixtureRunner, &config).unwrap();
+        assert_eq!(result.outcome, Outcome::Accepted);
+        let evidence = result.oracle.unwrap().evidence.unwrap();
+        assert!(evidence.verified_success);
+        let manifest =
+            tsr_corpus::mine::read_cas(&config.out.join("cas"), &evidence.manifest).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        let state_root = manifest["state_root"].as_str().unwrap();
+        assert!(tsr_batch::oracle_receipts::verify(
+            &config.out,
+            &evidence.manifest,
+            &task,
+            mode,
+            state_root
+        )
+        .unwrap());
+        assert!(tsr_batch::oracle_receipts::verify(
+            &config.out,
+            &"0".repeat(64),
+            &task,
+            mode,
+            state_root
+        )
+        .is_err());
+        let mut incomplete = manifest.clone();
+        incomplete["runs"].as_array_mut().unwrap().pop();
+        let bytes = serde_json::to_vec(&incomplete).unwrap();
+        let id = tsr_corpus::digest(&bytes);
+        tsr_corpus::mine::write_cas(&config.out.join("cas"), &id, &bytes).unwrap();
+        assert!(
+            !tsr_batch::oracle_receipts::verify(&config.out, &id, &task, mode, state_root).unwrap()
+        );
+        let requests = &driver.broker.borrow().requests;
+        paired.push(
+            requests
+                .iter()
+                .map(|r| (r["remaining_action_calls"].clone(), r["progress"].clone()))
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(paired[0], paired[1]);
+}

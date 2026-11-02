@@ -1,0 +1,51 @@
+{
+  "base_image": "mcr.microsoft.com/playwright@sha256:969a9e3655576186a7f3b3d85502f8c4041f4afce571df7aadba6384d93ee61f",
+  "built_image": "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+  "campaign_unchanged": {
+    "calls": 259,
+    "operations": 72,
+    "settled_usd": "0.222740"
+  },
+  "launch_enabled": false,
+  "outcome": {
+    "chromium_signal": "SIGTRAP",
+    "container_removed": true,
+    "diagnostic": "No usable sandbox",
+    "outer_exit": 2,
+    "page_opened": false,
+    "underlying_namespace_security_mechanism": "not established",
+    "unknown_effects": false
+  },
+  "packages": {
+    "playwright": "1.64.1",
+    "playwright-core": "1.64.1"
+  },
+  "setup": {
+    "authored_browser_capability_probes": 1,
+    "campaign_operations": 0,
+    "game_runs": 0,
+    "image_pulls": 1,
+    "paid_calls": 0,
+    "security_changes": 0,
+    "thin_builds": 1
+  },
+  "sha256": {
+    "Dockerfile": "a07ca3fb6d682f2107d6938786c37185edd266f1106276c2f9f16a1fceee7b49",
+    "README.md": "183e39216072be341071f51f03fd769b3c361eb15399335020eb93cbbf81fef0",
+    "base-image.txt": "9c1e9b665380ef1740fb116fb974c1248e55e92f912771cd09e35403df376e65",
+    "build.log": "959d5feb99ddd4d09ac4954ecb8f4888dacbc4fd49c687cf0b93c2b339f4723d",
+    "built-image.txt": "1f8ddfaa6d4a4994e0ad50fb842b338d95cb88ebe971c5a59ae5eec69c191c55",
+    "cleanup.json": "b36eeb93e086e77ba6b73cbb9379f0f6be197f02fda0cc6cfc8bab4024c333ab",
+    "image-id.txt": "fbab96335a3307ba3b7a5fd409f43e594aaf35760a8224ac0b4688fbf2d55e9f",
+    "package-lock.json": "03b068708c1b9c5788ffc1802c8f489ab981468d113c1c4eee2ef24ed853d0c2",
+    "package.json": "e32da2c1e9ed2a717daad1613fbed558733ce4ab2f7a1f72a05d671db5889b2c",
+    "packages.json": "6acdaa9461b3dc31ef46358bb1351ed35e6a978a3262efc87d5b3605ac6c6866",
+    "probe-command.json": "657a7333b1bed8be7dd6f6a7a88ac7d7db6ac1e9595ad8ae310d060a815350af",
+    "probe-outcome.json": "6569002962581e45dee03009fcdcc7ce34155f85d44db5acbe52dbf94a9a60a5",
+    "probe.stderr": "83660103011a73776a98fc4d869cb4317805a653d25250a9c11b5410bbfc165f",
+    "probe.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "source_commit": "485a016b95bba269786cc10c0b0935dc6488cb4c",
+  "status": "blocked_browser_sandbox",
+  "version": "browser-runtime-setup-evidence@v1"
+}

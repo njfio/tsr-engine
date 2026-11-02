@@ -13,6 +13,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod decision;
+pub mod selection;
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -470,6 +473,20 @@ impl Preference {
                 "a preference is short and typed, never a transcript (max 512 bytes)",
             ));
         }
+        Self::from_admitted_text(text, scope, parents, origin)
+    }
+    /// Identity construction for a separately bounded and reviewed project profile.
+    /// Does not confer eligibility, fulfillment or authority. Legacy `new` stays bounded.
+    pub fn from_admitted_text(
+        text: impl Into<String>,
+        scope: Scope,
+        parents: Vec<PreferenceId>,
+        origin: Source,
+    ) -> Result<Self, ContractError> {
+        let text = text.into();
+        if text.trim().is_empty() {
+            return Err(ContractError::Invalid("a preference needs text"));
+        }
         let payload = serde_json::to_vec(&(&text, &scope)).expect("serializable");
         let parent_hashes: Vec<Hash> = parents.iter().map(|p| p.0).collect();
         let id = PreferenceId(Hash::of_with_parents(&payload, &parent_hashes));
@@ -516,6 +533,90 @@ pub struct Expansion {
     pub parents: Vec<PreferenceId>,
     /// The produced preference's origin: Operator enters directly, Generator waits for review.
     pub origin: Source,
+}
+
+/// Controller-attested independent review of one exact generated expansion.
+/// Evidence is a prior Council observation whose digest is this complete value.
+/// This confers ledger eligibility only, never fulfillment or action authority.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreferenceAdmissionReview {
+    pub expansion: EventId,
+    pub preference: PreferenceId,
+    pub contrast: ContrastId,
+    pub from_return: EventId,
+    pub proposal: EventId,
+    pub source_snapshot: Hash,
+    pub requirements_revision: EventId,
+    pub request_binding: Hash,
+    pub response_digest: Hash,
+    pub reviewer: String,
+    pub generator: String,
+    pub decision: String,
+}
+
+/// Authenticated scoped artifact success; never human fulfillment or authority.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScopedSuccess {
+    pub assessment: EventId,
+    pub receipt: EventId,
+    pub publication: EventId,
+    pub requirements_revision: EventId,
+    pub source_snapshot: Hash,
+    pub scope_digest: Hash,
+    pub criteria: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuccessExpansion {
+    pub success: EventId,
+    pub preference: Preference,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuccessPreferenceReview {
+    pub expansion: EventId,
+    pub success: EventId,
+    pub preference: PreferenceId,
+    pub proposal: EventId,
+    pub source_snapshot: Hash,
+    pub requirements_revision: EventId,
+    pub request_binding: Hash,
+    pub response_digest: Hash,
+    pub reviewer: String,
+    pub generator: String,
+    pub decision: String,
+}
+
+/// Generated wanting grounded in current contributors, without an empirical
+/// fulfillment claim. Admission and execution authority remain separate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvisionalExpansion {
+    pub preference: Preference,
+    pub proposal: EventId,
+    pub source_snapshot: Hash,
+    pub requirements_revision: EventId,
+    pub context_binding: Hash,
+    pub contributors_digest: Hash,
+    pub rationale: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvisionalPreferenceReview {
+    pub expansion: EventId,
+    pub preference: PreferenceId,
+    pub proposal: EventId,
+    pub source_snapshot: Hash,
+    pub requirements_revision: EventId,
+    pub context_binding: Hash,
+    pub contributors_digest: Hash,
+    pub request_binding: Hash,
+    pub response_digest: Hash,
+    pub reviewer: String,
+    pub generator: String,
+    pub decision: String,
 }
 
 /// Where a selected preference strains against the present (the tensions step of Intuition).
@@ -746,6 +847,28 @@ pub enum EventKind {
     },
     Expanded {
         expansion: Expansion,
+    },
+    ScopedSuccess {
+        success: ScopedSuccess,
+    },
+    SuccessExpanded {
+        expansion: SuccessExpansion,
+    },
+    ProvisionalExpanded {
+        expansion: ProvisionalExpansion,
+    },
+    ReviewedProvisionalPreferenceAdmission {
+        review: Box<ProvisionalPreferenceReview>,
+        evidence: EventId,
+    },
+    ReviewedSuccessPreferenceAdmission {
+        review: Box<SuccessPreferenceReview>,
+        evidence: EventId,
+    },
+    /// Reviewed generated wanting becomes eligible with truthful Council provenance.
+    ReviewedPreferenceAdmission {
+        review: Box<PreferenceAdmissionReview>,
+        evidence: EventId,
     },
     StatusSet {
         preference: PreferenceId,

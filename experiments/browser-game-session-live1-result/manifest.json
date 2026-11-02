@@ -1,0 +1,16 @@
+{
+  "version": "browser-session-result@v1",
+  "files": {
+    "campaign-upgrade.json": "aa5f079abfa17251028db46c9a73b2b370a98879f2a68d5881cda28162bd15dd",
+    "browser-observations.json": "4b379323c254b8c13b2e02119671fab2078c16845811c2ddde151cbeb17d5c3c",
+    "independent-browser-verifier.cjs": "a83bf8cdd9275b13deba7b5554be58cf726270011ad7148d67cdc64ff8744627",
+    "authority.json": "d82973622e136eb428eb45975e2b87da5de6a2596f0a0f7ce42da7bb5d2267ca",
+    "replay.json": "094c38236c82caa3b241530db7dac259173d6a918771e53ba903814dfbc22a72",
+    "native-result.json": "4f589205378f2fba2d0e4ad87d22e5427065fd6fdbaa4820c5ffdf83af1e0230",
+    "launch.json": "40ab160f12d9a384aa560fe3617b653f53f8f9041baf72bc74096c4e0ff1ba26",
+    "review.md": "825a7459831e23aa9e5c436e12540bf19b5ca1693815c5297980df8fed1a592d",
+    "session-grant.json": "61c7e1a2aea9fe8de5de04a4cf87b0351f45677c4748bb5ad199a3407ab95b69"
+  },
+  "delivery": "artifacts/lantern-maze-v1",
+  "provider_raw_bodies_committed": false
+}

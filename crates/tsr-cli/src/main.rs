@@ -7,9 +7,15 @@
 
 use clap::{Parser, Subcommand};
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use tsr_cli::{exec, hook, store_path, task};
 
+use tsr_cli::worker_config;
+mod batch_cmd;
+pub mod corpus_cmd;
+mod engine_project_cmd;
+mod eval_cmd;
 mod policy_cmd;
 use tsr_cli::note_cmd;
 use tsr_cli::reconcile_cmd;
@@ -30,6 +36,46 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run the persistent controller, scoped projects and explicit proposal transports.
+    Engine {
+        #[arg(long)]
+        directory: PathBuf,
+        #[command(subcommand)]
+        cmd: EngineCmd,
+    },
+    /// Record explicitly operator-reviewed criterion/candidate impact links.
+    Tensions {
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        reviewed_links: PathBuf,
+        #[arg(long)]
+        operator_review: bool,
+        #[arg(long)]
+        family: String,
+        #[arg(long)]
+        repository: String,
+    },
+    /// Select admitted open preferences and record the reproducible trace (M3).
+    Select {
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        tune: Option<PathBuf>,
+        #[arg(long)]
+        family: String,
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        seed: u64,
+        #[arg(long)]
+        minimum_depth: u32,
+    },
+
     /// Task intake, status, trace export (M0: B3, B5, B11).
     Task {
         #[command(subcommand)]
@@ -146,7 +192,10 @@ enum Cmd {
         cmd: train_cmd::TrainCmd,
     },
     /// Evaluate: calibration, paired comparison, state isolation (M4–M5, B9).
-    Eval,
+    Eval {
+        #[command(subcommand)]
+        cmd: EvalCmd,
+    },
     /// Bundle registry: promote, rollback (M5, B8).
     Model {
         #[command(subcommand)]
@@ -167,6 +216,31 @@ enum TaskCmd {
         /// The task's intent
         #[arg(long)]
         intent: Option<String>,
+    },
+    /// Run a batch of corpus tasks through a driver (M3, B9, B11).
+    Run {
+        /// record | rules
+        #[arg(long)]
+        mode: String,
+        /// The corpus task manifest (tasks.jsonl).
+        #[arg(long)]
+        tasks: PathBuf,
+        /// scripted | claude-code
+        #[arg(long)]
+        driver: String,
+        /// Output directory: results.jsonl and the per-task stores.
+        #[arg(long)]
+        out: PathBuf,
+        /// Test-only: run the oracle through a scripted runner (a canned success) instead of the
+        /// production `ExecRunner`. Never use this for evidence: a scripted oracle cannot tell a
+        /// session that fixed the flipped test from one that did not (D3).
+        #[arg(long)]
+        scripted_runner: bool,
+        /// The RATCHET protection profile to run under. Defaults to
+        /// `<store-root>/profiles/default.toml`, where `<store-root>` is the directory holding the
+        /// store's `.tsr/` (D10). There is no compile-time fallback.
+        #[arg(long)]
+        profile: Option<PathBuf>,
     },
     Status {
         task: String,
@@ -191,8 +265,103 @@ enum PolicyCmd {
 
 #[derive(Subcommand)]
 enum CorpusCmd {
-    Mine { repo: String },
-    Mutants { repo: String },
+    /// Independently qualify mutant candidates with baseline, named red, and reversal green.
+    Qualify {
+        #[arg(long)]
+        tasks: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Record generated-lock provenance without executing source or resolving dependencies.
+    Prepare {
+        #[arg(long)]
+        request: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Mine a repository's first-parent history for red→green flip tasks (B9).
+    Mine {
+        repo: String,
+        /// Output directory: `tasks.jsonl` and the CAS are written here.
+        #[arg(long)]
+        out: PathBuf,
+        /// Only walk commits reachable from this revision (default: HEAD).
+        #[arg(long)]
+        since: Option<String>,
+        /// The suite command (default: `cargo test`).
+        #[arg(long)]
+        suite: Option<String>,
+    },
+    Mutants {
+        repo: String,
+        /// Bounded operator-selected scope; repeated flags form one explicit candidate set.
+        #[arg(long)]
+        package: Option<String>,
+        #[arg(long)]
+        file: Option<String>,
+        #[arg(long)]
+        mutant: Option<String>,
+        /// Restrict mutation screening to unit-test targets; admission still requires full-suite evidence.
+        #[arg(long, value_parser=["lib","bins"])]
+        screen_target: Option<String>,
+        /// Output directory: `tasks.jsonl` and the CAS are written here.
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Split a corpus into train and holdout with clone groups and leakage probes (B9).
+    Split {
+        /// The corpus directory: `tasks.jsonl` and the CAS are read here.
+        dir: PathBuf,
+        /// The split rule: `time` (forward-time by task) or `repo` (lineage-separated).
+        #[arg(long)]
+        by: String,
+        /// The holdout fraction, in (0, 1).
+        #[arg(long)]
+        holdout: f64,
+        /// The seed: the same seed and corpus give the same split.
+        #[arg(long)]
+        seed: u64,
+    },
+    /// Materialise a snapshot into a disposable copy (D4).
+    ///
+    /// The batch runner provisions the copy it drives a session in by asking the sealed sandbox to
+    /// run this command: `tsr corpus materialize --snapshot <sha> --out <dest>`. It is a real
+    /// subcommand so the argv the runner builds names a command that exists.
+    Materialize {
+        /// The snapshot to materialise: a git revision (sha, tag or ref).
+        #[arg(long)]
+        snapshot: String,
+        /// The directory to materialise into.
+        #[arg(long)]
+        out: PathBuf,
+        /// The repository to materialise from (default: the working directory).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+    /// Run the oracle in a materialised copy and report pass/fail (D4).
+    ///
+    /// The batch runner runs the oracle by asking the sealed sandbox to run this command:
+    /// `tsr corpus oracle --snapshot <dir> --tests <csv>` (the flipped tests) or
+    /// `tsr corpus oracle --snapshot <dir> --full-suite` (the regression check). It is a real
+    /// subcommand so the argv the runner builds names a command that exists.
+    Oracle {
+        /// The directory the oracle runs in: the session's copy, not the parent snapshot (D3).
+        #[arg(long)]
+        snapshot: PathBuf,
+        /// The comma-separated test ids to run (the flipped tests).
+        #[arg(long, conflicts_with = "full_suite")]
+        tests: Option<String>,
+        /// Run the full suite instead of a named set of tests.
+        #[arg(long)]
+        full_suite: bool,
+        /// The suite command (default: `cargo test`).
+        #[arg(long)]
+        suite: Option<String>,
+        /// Run each named test exactly (`cargo test -- <name> --exact`), so a filter that matches
+        /// nothing is a failure rather than a silent pass (D3, P3).
+        #[arg(long)]
+        exact: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -202,10 +371,544 @@ enum DataCmd {
 }
 
 #[derive(Subcommand)]
+enum EvalCmd {
+    /// The first numbers with intervals: paired by task, cluster bootstrap by
+    /// lineage, 90% intervals, INCONCLUSIVE when an interval spans zero (B9).
+    Baseline {
+        /// The results directory: `results.jsonl` is read here. Use this when
+        /// one file holds both systems; use `--record`/`--rules` when each run
+        /// wrote its own directory.
+        #[arg(conflicts_with_all = ["record", "rules"])]
+        results_dir: Option<PathBuf>,
+        /// The record system's results directory (`results.jsonl` is read here).
+        #[arg(long, requires = "rules")]
+        record: Option<PathBuf>,
+        /// The rules system's results directory (`results.jsonl` is read here).
+        #[arg(long, requires = "record")]
+        rules: Option<PathBuf>,
+        /// The pairing rule (only `task` is defined).
+        #[arg(long, default_value = "task")]
+        pair_by: String,
+        /// The bootstrap seed: the same seed gives the same report.
+        #[arg(long, default_value_t = tsr_eval::DEFAULT_SEED)]
+        seed: u64,
+    },
+}
+
+#[derive(Subcommand)]
 enum ModelCmd {
     List,
     Promote { bundle: String },
     Rollback,
+}
+
+#[derive(Subcommand)]
+enum EngineCmd {
+    ProjectLifecycleOpen {
+        #[arg(long)]
+        admission: PathBuf,
+    },
+    ProjectLifecycleView,
+    ProjectFeatures,
+    ProjectDataset {
+        #[arg(long)]
+        as_of: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    ProjectTrainingEvidence {
+        #[arg(long)]
+        as_of: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    ProjectEligibilityView,
+    ProjectEligibilityReview {
+        #[arg(long)]
+        review: PathBuf,
+    },
+    ProjectDatasetValidate {
+        #[arg(long)]
+        artifact: PathBuf,
+    },
+    ProjectBudget,
+    ProjectResourceExtend {
+        #[arg(long)]
+        request: PathBuf,
+    },
+    ProjectResourceReserve {
+        #[arg(long)]
+        request: PathBuf,
+    },
+    ProjectResourceNotDispatched {
+        #[arg(long)]
+        proof: PathBuf,
+    },
+    ProjectResourceReconcileFailedZero {
+        #[arg(long)]
+        proof: PathBuf,
+    },
+    ProjectResourceSettle {
+        #[arg(long)]
+        usage: PathBuf,
+    },
+    ProjectLifecycleClose,
+    ProjectLifecycleCloseInconclusive {
+        #[arg(long)]
+        reason: String,
+    },
+    ProjectLifecycleCloseAdvisory {
+        #[arg(long)]
+        reason: String,
+    },
+    ShadowConfigure {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    ShadowView,
+    Tier2Configure {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    Tier2View,
+    /// Set a shared operator near-tie policy; exploration requires explicit epsilon > 0.
+    DecisionPolicy {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    DecisionPolicyView,
+    DirectionInit {
+        #[arg(long)]
+        spec: PathBuf,
+    },
+    DirectionRequest,
+    DirectionRelate {
+        #[arg(long)]
+        response: PathBuf,
+    },
+    DirectionRelationStatus {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    /// Set durable operator quiet-route attention probability and replay seed.
+    DirectionTune {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    /// Withdraw, restore or mark a notebook desire out of scope (operator only).
+    DirectionStatus {
+        #[arg(long)]
+        update: PathBuf,
+    },
+    /// Record operator-observed changes to already admitted evidence; grants no authority.
+    DirectionObserve {
+        #[arg(long)]
+        observation: PathBuf,
+    },
+    DirectionRefine {
+        #[arg(long)]
+        response: PathBuf,
+    },
+    Deliberate {
+        #[arg(long)]
+        response: PathBuf,
+    },
+    /// Initialize, prepare, run/resume, inspect and export a scoped Cargo project.
+    Project {
+        #[command(subcommand)]
+        command: engine_project_cmd::ProjectCmd,
+    },
+    ProjectInit {
+        #[arg(long)]
+        spec: PathBuf,
+        /// Import only explicitly listed paths from this source directory.
+        #[arg(long)]
+        source: Option<PathBuf>,
+    },
+    ProjectConfig,
+    ProjectExport,
+    ProjectPrepare,
+    CodingInit {
+        /// Admit generated exact edits within the disposable implementation.rs scope.
+        #[arg(long)]
+        generated: bool,
+        #[arg(long)]
+        image: String,
+        #[arg(long, default_value = "501:20")]
+        user: String,
+    },
+    CodingPlan,
+    CodingRun {
+        #[arg(long)]
+        commitment: String,
+        #[arg(long)]
+        expected_source: String,
+    },
+    Request,
+    Propose {
+        #[arg(long)]
+        response: PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
+    Configure {
+        #[arg(long)]
+        spec: PathBuf,
+    },
+    Next,
+    Observe {
+        #[arg(long)]
+        commitment: String,
+        #[arg(long)]
+        result: PathBuf,
+    },
+    State,
+    Accept {
+        preference: String,
+    },
+    Init {
+        #[arg(long, default_value_t = 3)]
+        batch_size: u32,
+    },
+    Step {
+        #[arg(long, default_value_t = 1)]
+        cycles: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    Show,
+    Admit {
+        preference: String,
+    },
+}
+fn read_direction_json<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+) -> anyhow::Result<T> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(65537)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(bytes.len() <= 65536, "direction input exceeds 64 KiB");
+    Ok(serde_json::from_slice(&bytes)?)
+}
+fn run_engine(directory: &std::path::Path, cmd: EngineCmd) -> anyhow::Result<()> {
+    use tsr_cli::engine::{Engine, LocalProposer};
+    if let EngineCmd::Project { command } = cmd {
+        return engine_project_cmd::run(directory, command);
+    }
+    let engine = Engine::open(directory)?;
+    match cmd {
+        EngineCmd::Project { .. } => unreachable!(),
+        EngineCmd::DirectionInit { spec } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.deliberation_initialize(read_direction_json(&spec)?)?
+            )?
+        ),
+        EngineCmd::DirectionRefine { response } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.refine_directions(read_direction_json(&response)?)?
+            )?
+        ),
+        EngineCmd::DirectionRelate { response } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.submit_relational(read_direction_json(&response)?)?
+            )?
+        ),
+        EngineCmd::DirectionRelationStatus { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.relational_status(read_direction_json(&update)?)?
+            )?
+        ),
+        EngineCmd::DirectionStatus { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.update_desire_status(read_direction_json(&update)?)?
+            )?
+        ),
+        EngineCmd::ProjectLifecycleOpen { admission } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_lifecycle_open(read_direction_json(&admission)?)?
+            )?
+        ),
+        EngineCmd::ProjectBudget => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_budget()?)?
+        ),
+        EngineCmd::ProjectResourceReserve { request } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_resource_reserve(read_direction_json(&request)?)?
+            )?
+        ),
+        EngineCmd::ProjectResourceNotDispatched { proof } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_resource_not_dispatched(read_direction_json(&proof)?)?
+            )?
+        ),
+        EngineCmd::ProjectResourceReconcileFailedZero { proof } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_resource_reconcile_failed_zero(read_direction_json(&proof)?)?
+            )?
+        ),
+        EngineCmd::ProjectResourceSettle { usage } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_resource_settle(read_direction_json(&usage)?)?
+            )?
+        ),
+        EngineCmd::ProjectFeatures => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_features()?)?
+        ),
+        EngineCmd::ProjectDataset { as_of, out } => {
+            let artifact = engine.project_dataset(&as_of)?;
+            artifact.write(&out)?;
+            println!(
+                "{}",
+                serde_json::json!({"artifact":out,"digest":artifact.digest,"rows":artifact.rows.len(),"eligible_rows":artifact.eligible_rows,"exclusion":artifact.exclusion})
+            );
+        }
+        EngineCmd::ProjectTrainingEvidence { as_of, out } => {
+            use std::io::Write;
+            let input = engine.project_training_evidence(&as_of)?;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out)?;
+            f.write_all(&serde_json::to_vec_pretty(&input)?)?;
+            f.sync_all()?;
+            println!(
+                "{}",
+                serde_json::json!({"path":out,"digest":input.digest()?})
+            );
+        }
+        EngineCmd::ProjectEligibilityView => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_eligibility_view()?)?
+        ),
+        EngineCmd::ProjectEligibilityReview { review } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_eligibility_review(read_direction_json(&review)?)?
+            )?
+        ),
+        EngineCmd::ProjectDatasetValidate { artifact } => {
+            let data = tsr_learn::project_receipts::Artifact::load(&artifact)?;
+            println!(
+                "{}",
+                serde_json::json!({"valid":true,"digest":data.digest,"rows":data.rows.len(),"eligible_rows":data.eligible_rows,"fit_eligible":false})
+            );
+        }
+        EngineCmd::ProjectResourceExtend { request } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.project_resource_extend(read_direction_json(&request)?)?
+            )?
+        ),
+        EngineCmd::ProjectLifecycleView => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_lifecycle_view()?)?
+        ),
+        EngineCmd::ProjectLifecycleCloseInconclusive { reason } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_lifecycle_close_inconclusive(reason)?)?
+        ),
+        EngineCmd::ProjectLifecycleCloseAdvisory { reason } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_lifecycle_close_advisory(reason)?)?
+        ),
+        EngineCmd::ProjectLifecycleClose => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_lifecycle_close()?)?
+        ),
+        EngineCmd::ShadowConfigure { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.configure_shadow(read_direction_json(&update)?)?)?
+        ),
+        EngineCmd::Tier2Configure { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.update_tier2(read_direction_json(&update)?)?)?
+        ),
+        EngineCmd::Tier2View => {
+            println!("{}", serde_json::to_string_pretty(&engine.tier2_view()?)?)
+        }
+        EngineCmd::ShadowView => {
+            println!("{}", serde_json::to_string_pretty(&engine.shadow_view()?)?)
+        }
+        EngineCmd::DecisionPolicy { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.update_decision_policy(read_direction_json(&update)?)?
+            )?
+        ),
+        EngineCmd::DecisionPolicyView => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.decision_policy_view()?)?
+        ),
+        EngineCmd::DirectionTune { update } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.update_selection_tune(read_direction_json(&update)?)?
+            )?
+        ),
+        EngineCmd::DirectionRequest => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.deliberation_request()?)?
+        ),
+        EngineCmd::DirectionObserve { observation } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.update_deliberation_observation(read_direction_json(&observation)?)?
+            )?
+        ),
+        EngineCmd::Deliberate { response } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.deliberate(read_direction_json(&response)?)?)?
+        ),
+        EngineCmd::ProjectInit { spec, source } => {
+            let spec = tsr_cli::engine::adaptive::coding::project::ProjectSpec::from_file(&spec)?;
+            let state = match source {
+                Some(source) => engine.project_import(spec, &source)?,
+                None => engine.project_initialize(spec)?,
+            };
+            println!("{}", serde_json::to_string_pretty(&state)?);
+        }
+        EngineCmd::ProjectExport => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_export()?)?
+        ),
+        EngineCmd::ProjectPrepare => {
+            let result = engine.project_prepare()?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            anyhow::ensure!(result["ready"] == true, "dependencies unavailable; prepare a separate pinned image with the locked crates before execution");
+        }
+        EngineCmd::ProjectConfig => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.project_configuration()?)?
+        ),
+        EngineCmd::CodingInit {
+            image,
+            user,
+            generated,
+        } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.coding_initialize_mode(image, user, generated)?)?
+        ),
+        EngineCmd::CodingPlan => {
+            println!("{}", serde_json::to_string_pretty(&engine.coding_plan()?)?)
+        }
+        EngineCmd::CodingRun {
+            commitment,
+            expected_source,
+        } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.coding_run(
+                tsr_domain::EventId(tsr_domain::Hash::from_hex(&commitment)?),
+                tsr_domain::Hash::from_hex(&expected_source)?
+            )?)?
+        ),
+        EngineCmd::Request => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.proposal_request()?)?
+        ),
+        EngineCmd::Propose { response, apply } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.evaluate_proposal(engine.proposal_response_from_file(&response)?, apply)?
+            )?
+        ),
+        EngineCmd::Configure { spec } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.configure(serde_json::from_slice(&std::fs::read(spec)?)?)?
+            )?
+        ),
+        EngineCmd::Next => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &engine.next(&tsr_cli::engine::adaptive::DeterministicProvider)?
+            )?
+        ),
+        EngineCmd::State => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.adaptive_state()?)?
+        ),
+        EngineCmd::Observe { commitment, result } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.observe(
+                tsr_domain::EventId(tsr_domain::Hash::from_hex(&commitment)?),
+                serde_json::from_slice(&std::fs::read(result)?)?
+            )?)?
+        ),
+        EngineCmd::Accept { preference } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.adaptive_admit(tsr_domain::PreferenceId(
+                tsr_domain::Hash::from_hex(&preference)?
+            ))?)?
+        ),
+        EngineCmd::Init { batch_size } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.initialize(batch_size)?)?
+        ),
+        EngineCmd::Show => println!("{}", serde_json::to_string_pretty(&engine.view()?)?),
+        EngineCmd::Admit { preference } => println!(
+            "{}",
+            serde_json::to_string_pretty(&engine.admit(tsr_domain::PreferenceId(
+                tsr_domain::Hash::from_hex(&preference)?
+            ))?)?
+        ),
+        EngineCmd::Step { cycles, json } => {
+            anyhow::ensure!((1..=100).contains(&cycles), "cycles must be 1..100");
+            for _ in 0..cycles {
+                let trace = engine.step(&LocalProposer)?;
+                if json {
+                    println!("{}", serde_json::to_string(&trace)?);
+                } else {
+                    println!(
+                        "Cycle {}: Desire — deliver all {} requested items",
+                        trace.cycle, trace.requested
+                    );
+                    println!(
+                        "  Before: Belief {:?}; Expectation {:?}",
+                        trace.before.last_route,
+                        trace
+                            .before
+                            .estimates
+                            .iter()
+                            .map(|e| (e.route, e.prediction.value))
+                            .collect::<Vec<_>>()
+                    );
+                    for choice in &trace.possibilities {
+                        println!(
+                            "  Intuition {:?}: {} ({})",
+                            choice.route,
+                            if choice.admitted {
+                                "supported"
+                            } else {
+                                "not admitted"
+                            },
+                            choice.reason
+                        );
+                    }
+                    println!(
+                        "  Belief committed {:?}; Return {}/{} delivered",
+                        trace.chosen, trace.delivered, trace.requested
+                    );
+                    println!("  Surprise residual={:.3}; Contrast unmet={}; unmet_pressure {:.3} -> {:.3}", trace.residual.value, trace.unmet, trace.before.unmet_pressure.value, trace.after.unmet_pressure.value);
+                    println!("  After: Expectation {:?}; accumulated preferences={}, pending review={}\n", trace.after.estimates.iter().map(|e| (e.route,e.prediction.value)).collect::<Vec<_>>(), trace.after.preferences.len(), trace.after.preferences.iter().filter(|p| !p.is_active()).count());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn not_yet(what: &str, section: &str) -> ExitCode {
@@ -216,6 +919,13 @@ fn not_yet(what: &str, section: &str) -> ExitCode {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
+        Cmd::Engine { directory, cmd } => match run_engine(&directory, cmd) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("tsr engine: {e}");
+                ExitCode::from(2)
+            }
+        },
         Cmd::Task { cmd } => run_task(cmd),
         Cmd::Forecast {
             kind,
@@ -239,6 +949,66 @@ fn main() -> ExitCode {
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Check { profile, event } => policy_cmd::run(&profile, &event),
         },
+        Cmd::Tensions {
+            store,
+            task,
+            reviewed_links,
+            operator_review,
+            family,
+            repository,
+        } => {
+            match tsr_cli::tensions_cmd::run(
+                &store,
+                &task,
+                &reviewed_links,
+                operator_review,
+                &family,
+                &repository,
+            ) {
+                Ok(trace) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&trace).expect("serializable")
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tsr: tensions: {e}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        Cmd::Select {
+            store,
+            task,
+            tune,
+            family,
+            repository,
+            seed,
+            minimum_depth,
+        } => {
+            match tsr_cli::select_cmd::run(
+                &store,
+                &task,
+                tune.as_deref(),
+                &family,
+                &repository,
+                seed,
+                minimum_depth,
+            ) {
+                Ok(trace) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&trace).expect("serializable")
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("tsr: select: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
         Cmd::Note { task, text, store } => note_cmd::run(&task, &text, store.as_deref()),
         Cmd::Review {
             task,
@@ -272,10 +1042,65 @@ fn main() -> ExitCode {
             json,
             store,
         }),
-        Cmd::Corpus { .. } => not_yet("corpus", "B9 (M3)"),
+        Cmd::Corpus { cmd } => match cmd {
+            CorpusCmd::Mine {
+                repo,
+                out,
+                since,
+                suite,
+            } => corpus_cmd::mine_cmd(repo, out, since, suite),
+            CorpusCmd::Qualify { tasks, out } => corpus_cmd::qualify_cmd(tasks, out),
+            CorpusCmd::Prepare { request, out } => corpus_cmd::prepare_cmd(request, out),
+            CorpusCmd::Mutants {
+                repo,
+                out,
+                package,
+                file,
+                mutant,
+                screen_target,
+            } => corpus_cmd::mutants_cmd(repo, out, package, file, mutant, screen_target),
+            CorpusCmd::Split {
+                dir,
+                by,
+                holdout,
+                seed,
+            } => corpus_cmd::split_cmd(dir, by, holdout, seed),
+            CorpusCmd::Materialize {
+                snapshot,
+                out,
+                repo,
+            } => corpus_cmd::materialize_cmd(repo.as_deref(), &snapshot, &out),
+            CorpusCmd::Oracle {
+                snapshot,
+                tests,
+                full_suite,
+                suite,
+                exact,
+            } => corpus_cmd::oracle_cmd(
+                &snapshot,
+                tests.as_deref(),
+                full_suite,
+                suite.as_deref(),
+                exact,
+            ),
+        },
         Cmd::Data { .. } => not_yet("data", "B8/B10 (M4)"),
         Cmd::Train { cmd } => train_cmd::run(cmd),
-        Cmd::Eval => not_yet("eval", "B9 (M4–M5)"),
+        Cmd::Eval { cmd } => match cmd {
+            EvalCmd::Baseline {
+                results_dir,
+                record,
+                rules,
+                pair_by,
+                seed,
+            } => eval_cmd::baseline_cmd(
+                results_dir.as_deref(),
+                record.as_deref(),
+                rules.as_deref(),
+                &pair_by,
+                seed,
+            ),
+        },
         Cmd::Model { .. } => not_yet("model", "B8 bundles (M5)"),
     }
 }
@@ -338,6 +1163,21 @@ fn run_task(cmd: TaskCmd) -> ExitCode {
             }
         }
         TaskCmd::Reconcile { .. } => unreachable!("reconcile is dispatched before the store opens"),
+        TaskCmd::Run {
+            mode,
+            tasks,
+            driver,
+            out,
+            scripted_runner,
+            profile,
+        } => batch_cmd::run_cmd(
+            &mode,
+            &tasks,
+            &driver,
+            &out,
+            scripted_runner,
+            profile.as_deref(),
+        ),
         TaskCmd::Export { task: name } => {
             let id = store_path::resolve_task(&store, &name);
             match task::export(&store, &id) {
@@ -481,7 +1321,11 @@ fn run_exec(argv: &[String]) -> ExitCode {
         }
     };
     match exec::run(&store, &task, &workspace, argv) {
-        Ok(outcome) => ExitCode::from(outcome.exit_code.clamp(0, 255) as u8),
+        Ok(outcome) if outcome.exit_code < 0 => {
+            eprintln!("tsr: execution unresolved; consult the recorded outcome");
+            ExitCode::from(1)
+        }
+        Ok(outcome) => ExitCode::from(outcome.exit_code.min(255) as u8),
         Err(exec::ExecRefusal::NoRuntime) => {
             eprintln!(
                 "tsr: no container runtime reachable (podman/docker); refusing to run on the host"

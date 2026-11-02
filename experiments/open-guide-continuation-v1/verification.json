@@ -1,0 +1,87 @@
+{
+  "authored_full_flow": {
+    "completed_operations_repeated": 0,
+    "final_assessment": true,
+    "fresh_replay_no_dispatch": true,
+    "known_terminal_retry_requests": 1,
+    "new_fixture_requests": 6,
+    "new_stub_service_operations": 1,
+    "original_parent_unchanged": true,
+    "provider_calls": 0,
+    "separate_copy_native_acceptance": true,
+    "target_commands_executed": 0
+  },
+  "commands": [
+    {
+      "command": "TSR_OBJECTIVE_TEST_WORKER_BIN=$PWD/target/debug/deps/tsr_cli-95f29d427efcd336 PYTHONPATH=scripts python3 -m unittest test_engine_objective_continuation -v",
+      "passed": 15,
+      "seconds": 201.881,
+      "tests": 15
+    },
+    {
+      "command": "PYTHONPATH=scripts python3 -m unittest test_engine_objective_cycle test_engine_bound_output test_engine_bounded_correction -q",
+      "passed": 28,
+      "tests": 28
+    },
+    {
+      "command": "PYTHONPATH=scripts python3 -m unittest test_engine_project_cycle_adapter test_engine_native_release -q",
+      "passed": 10,
+      "skip_reason": "Existing explicit native/test-environment opt-ins not enabled for these checks",
+      "skipped": 9,
+      "tests": 19
+    }
+  ],
+  "independent_source_design_reviewer": "/root/continuation_review",
+  "limits": "Authored wiring evidence, not model behavior, target correctness, relational development or causal TSR advantage. No live effects or historical acceptance mutations.",
+  "live_authorization": false,
+  "live_recovery_tested": false,
+  "local_preparation": {
+    "branch": "objective_review_required",
+    "operations": 0,
+    "provider_calls": 0,
+    "ready_for_scope_review": true,
+    "status": {
+      "calls": 254,
+      "committed_microusd": 217356,
+      "effective_max_calls": 272,
+      "effective_max_execution_groups": 74,
+      "evaluation_suite_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+      "execution_groups": 71,
+      "fixture_only": false,
+      "known_cost_microusd": 217356,
+      "overrun": false,
+      "provider_hard_cap": false,
+      "reconciled_bills": 7,
+      "remaining_calls": 18,
+      "remaining_execution_groups": 3,
+      "stopped": false,
+      "unknown_calls": [],
+      "unknown_executions": []
+    }
+  },
+  "logs": {
+    "check.json": "032ae1cb837495c856adc449632a0f1f75cbdf05899f8e4082893aeec5f80bb2",
+    "full-flow.log": "ca906c2ee4f6942e054dbf2997d423216e43943ac8a40446547ed2e6fc867047",
+    "preparation.json": "930c565aa5f7996e09bd27331619d4958467c3ac6a1a63ab81770c713f3ccfc4",
+    "shared-adapter-tests.log": "4dcaaba1bc01af2495244e15fb3ac9d4b41c4ae2c1e9e93b991dab397fa16d22"
+  },
+  "manifest_sha256": "c232f86e6371e82830188870585e75992ec155aaa79b44b3acd353b1972462e7",
+  "prior_local_fixture_failures": [
+    {
+      "cause": "cfg(test) output file outside its fixture marker root",
+      "resolution": "Moved only authored output path under correct root; no runtime control changed"
+    },
+    {
+      "cause": "Authored unknown receipt used usage=null rather than actual transport usage object",
+      "resolution": "Corrected fixture to real transport shape"
+    },
+    {
+      "cause": "Negative acceptance test expected CalledProcessError but Native exposes ValueError",
+      "resolution": "Preserved required rejection and corrected exception assertion"
+    }
+  ],
+  "review_status": "approved; initial uncertainty, total lookup deadline, execution identity joins and live target restriction findings resolved",
+  "total_passed": 53,
+  "total_skipped": 9,
+  "version": "local-continuation-verification@v1"
+}

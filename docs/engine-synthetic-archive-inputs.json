@@ -1,0 +1,100 @@
+{
+  "synthetic_only": true,
+  "origin_typed_sha256": "c9463da09b5118a2c64f2df3f266b992e729a1930f2a57b517e893e67f499ad3",
+  "origin_body_sha256": "6809dc6f8515bd4298bc21593959f3388fbc3d485f9cba743c0f85e9ad6949a0",
+  "origin_model": "deepseek-v4.1-flash",
+  "aspiration": {
+    "parents": [
+      "A1",
+      "A2"
+    ],
+    "relationship": "A1 makes accounts answerable to lived experience; A2 makes inherited assumptions contestable without insider permission. Their tension is that provenance can either route challenges to affected people or become an authorization gate. The synthesis treats contestability as part of accountability rather than an exception to it.",
+    "aspiration": "Maintain accounts as contestable provenance: each records affected people, disagreement and change history, and a low-threshold way for newcomers to lodge challenges that are routed to those affected for response or revision, without prior insider approval.",
+    "discriminator": "If a newcomer challenges an account and no insider endorses the challenge, should the archive still register it as a provenance event with named affected respondents, or should it remain unrecorded until an insider authorizes it?"
+  },
+  "spec": {
+    "archive": {
+      "synthetic_only": true,
+      "decisions": [
+        {
+          "id": "hours",
+          "revision": "hours-v1",
+          "text": "FICTIONAL: Archive access closes at dusk.",
+          "affected": [
+            "caretaker",
+            "night-reader"
+          ]
+        },
+        {
+          "id": "translation",
+          "revision": "translation-v1",
+          "text": "FICTIONAL: Only one translation is indexed.",
+          "affected": [
+            "translator"
+          ]
+        }
+      ],
+      "challenges": [
+        {
+          "id": "access",
+          "decision": "hours",
+          "revision": "hours-v1",
+          "author": "newcomer",
+          "dissent": "FICTIONAL: Dusk closure excludes my work schedule; keep this disagreement visible."
+        },
+        {
+          "id": "meaning",
+          "decision": "translation",
+          "revision": "translation-v1",
+          "author": "new-reader",
+          "dissent": "FICTIONAL: The indexed translation omits a disputed meaning."
+        }
+      ],
+      "responses": [
+        {
+          "id": "access-ack",
+          "challenge": "access",
+          "revision": "hours-v1",
+          "actor": "caretaker",
+          "text": "FICTIONAL evaluator evidence: acknowledgment only; no access change addressed.",
+          "addresses": false
+        },
+        {
+          "id": "access-review",
+          "challenge": "access",
+          "revision": "hours-v1",
+          "actor": "night-reader",
+          "text": "FICTIONAL evaluator evidence: access objection considered with a proposed later opening; dissent retained.",
+          "addresses": true
+        },
+        {
+          "id": "meaning-ack",
+          "challenge": "meaning",
+          "revision": "translation-v1",
+          "actor": "translator",
+          "text": "FICTIONAL evaluator evidence: question received, substantive response unavailable.",
+          "addresses": false
+        }
+      ]
+    },
+    "wants": [
+      {
+        "text": "SYNTHETIC BENCHMARK: evaluator-authored, not user intent. Aim/zero values are bookkeeping, not semantic measurements. I want a community's knowledge to remain accountable to the people whose lived experiences produced it, including disagreements and changes of mind.",
+        "aim": {
+          "predicate": "archive_traceability"
+        },
+        "parents": []
+      },
+      {
+        "text": "SYNTHETIC BENCHMARK: evaluator-authored, not user intent. Aim/zero values are bookkeeping, not semantic measurements. I want newcomers to become capable contributors who can question inherited assumptions without needing an insider to authorize every question.",
+        "aim": {
+          "predicate": "archive_contestability"
+        },
+        "parents": []
+      }
+    ],
+    "notes": [],
+    "max_cycles": 6,
+    "attention_limit": 2
+  }
+}

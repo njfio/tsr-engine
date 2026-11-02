@@ -1,0 +1,99 @@
+{
+  "admission_versions": {
+    "adapter": "synthetic-project-cycle-adapter@v3",
+    "controller": "local-project-cycle@v3"
+  },
+  "binary_sha256": "c843eaff62f41794261436912f730cfa6c6e966f98bc70115a7328894e99af22",
+  "campaign_before": {
+    "calls": 220,
+    "groups": 60,
+    "settled_microusd": 178524
+  },
+  "campaign_suite_sha256": "cbc14b21b836d80a7f3a65769fec9a228809fc00e7e5b6597672f0b8aaeb0191",
+  "configuration_sha256": "4647c990030df447d2d21d167e660d984a0914a051ed9a616b49dcab10cc625e",
+  "envelope": {
+    "max_aggregate_worker_seconds": 240,
+    "max_completion_tokens_per_call": 8192,
+    "max_decisions": 4,
+    "max_execution_groups": 2,
+    "max_run_seconds": 3600,
+    "max_seconds_per_call": 240,
+    "max_serialized_request_bytes": 32768,
+    "max_total_calls": 10,
+    "normal_generator_reviewer_calls": 8,
+    "reservation_microusd": 500000,
+    "shared_format_corrections": 2
+  },
+  "excluded": [
+    "protected test bodies",
+    "full native state",
+    "unrelated history",
+    "private data and credentials"
+  ],
+  "existing_total_caps": {
+    "calls": 228,
+    "groups": 62,
+    "microusd": 5000000
+  },
+  "exports": [
+    "complete frozen public.json task contract and ProjectSpec goal; original packet/public file digests",
+    "frozen public parent meanings and requirements",
+    "current admitted src/lib.rs only",
+    "native public contracts and exact source/lineage IDs",
+    "this trial generated and reviewed advisory relation",
+    "bounded authenticated case facts and frozen forecast records",
+    "candidate and source-bound review inputs"
+  ],
+  "frozen_design_manifest_sha256": "17989a0cac61f573ac1fca2e7bf1cf8a2cc6ec84db775a4ae72a2ba30cacd13d",
+  "implementation": {
+    "engine-b91-campaign.py": "9add44b52323484261379a8bb393b84a1d201ba4a62de53d6a87c0caca64e9c6",
+    "engine-b91-driver.py": "f0c61c339d19629ca3a4f7059792e9f6d8ebe1fd0f10e9cfd46fd8bf42491efd",
+    "engine-b91-evidence.py": "c07a508def457463b73a34acf3b5ecb2ff0d38da689f7338d78eae45b607175f",
+    "engine-b91-prepare.py": "31fcb892bd1d4925eb220044e020eba8d5ea8140c39cd85b68106380057bdcf3",
+    "engine-b91-project-envelope.py": "8231c1158a37197ba8ff493151eccf574c385aa89284ba5d03d8268c841fb8ea",
+    "engine-bounded-correction.py": "cfeb35db2cdc01824666f0356dd64ef2af6c45bd2845c94e77827bca6762a45a",
+    "engine-json-output.py": "d394e943efb84d3e4efc1725176cf8899d602de7613ef3b1ca57c8e12cbf8984",
+    "engine-local-model.py": "9cb1dfc613221e8e5de5d5f66af6cbbaed2ea5e4695b980802c004eb10d9b966",
+    "engine-native-cycle.py": "c3ff847531298bf11c9d2327341a69d77cb75683ff7664e2e8c33a433f38d28d",
+    "engine-project-cycle-adapter.py": "423dcbe930f9607de037fe430ca98b0081188988176e4954f4e66077ab988a09",
+    "engine-project-cycle.py": "d9c77b78b466f48a3feb928ce7edec2e72962ea8f2a9af5b7db01514f75e793e",
+    "engine-project-output.py": "d80f03513f12e8074ee334030178e37b76e74d01c6fec69078b0ea132d652909",
+    "engine-project-runtime-review.py": "251e909293dd412fcc2daef73b9e7d9ca395c86d65f753ba1457147bc83d437c",
+    "engine-pursuit-packet.py": "47f6823fa9b43d9f18f134f0655b04b60eb4539f31138462319ae0a0f18135c5",
+    "engine-repair-suite.py": "4fec63c57e4999c5bdd41df89e0b98890e1b33c124e9fe40f7e5b91ed41ff55e",
+    "engine-response-evidence.py": "151ae391a111c8a92df3725da689b22ba4fea6734eb5966f2ff7dcc20b6fd27e",
+    "engine-synthetic-transport.py": "b81002362dcb7532a845d8281d267f4da9fc10ca5dcc9a61377b947c833c5d67",
+    "m3-cheaper-broker.py": "47bfaa7fe402dc492b060f17181ba4b3e2af03813424846eabaf6b92c2205a26"
+  },
+  "model": "gpt-6-luna",
+  "next_steps_before_dispatch": [
+    "Independent local review and all affected tests must pass.",
+    "A new explicit run approval is required; the historical single attempt is closed.",
+    "Fresh per-run budget arithmetic, price, runtime, state and source admission; current remaining8calls2groups do not cover the prior10call envelope."
+  ],
+  "no_authority_yet": true,
+  "origin_scenario_sha256": "97656ae3b07f34c6ee3a8c84c050568e7489dc3a73b5d9a386702d5e6d0e7214",
+  "provider": "CheaperInference",
+  "response_format": {
+    "type": "json_object"
+  },
+  "runtime": {
+    "commands": "existing sealed native Cargo project plan only",
+    "image": "sha256:cff6dcceb8b9d203a818b7ff104b89a6aaa353f8576850ca4f58903539417945",
+    "network": "none",
+    "pull": "never",
+    "timeout_ms": 20000,
+    "user": "501:20"
+  },
+  "status": "local-contract-correction-no-live-authority",
+  "stops": [
+    "valid abstention/no useful change",
+    "semantic rejection or uncertainty",
+    "unknown effect or usage",
+    "source drift",
+    "budget/deadline exhaustion",
+    "native stop/review-required"
+  ],
+  "supersedes_profile_sha256": "693442b25e252ed55db42232b93d0d4fbb882face215cab55f0ad813b4b90e7a",
+  "version": "native-pursuit-release-plan@2"
+}

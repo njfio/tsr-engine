@@ -1,0 +1,109 @@
+{
+  "adaptive_pursuit_demonstrated": false,
+  "calls": 2,
+  "campaign_after": {
+    "calls": 228,
+    "committed_microusd": 187888,
+    "effective_max_calls": 250,
+    "effective_max_execution_groups": 67,
+    "evaluation_suite_sha256": "c626105ab8ff7abb98122818918123e04fe578b08d029165375b72d2d154c3d7",
+    "execution_groups": 63,
+    "fixture_only": false,
+    "known_cost_microusd": 187888,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 6,
+    "remaining_calls": 22,
+    "remaining_execution_groups": 4,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "completion_tokens": 6426,
+  "corpus_reads": 0,
+  "diagnosis": "Pending objective attention projection sets status=None; generic selector requires Some(Open). Passing ABI smoke removes the only remaining selectable entry. Objective still has both active parents and all three unperformed rounds.",
+  "evidence_sha256": {
+    "LAUNCH.json": "fcbccb48bd898c28708bc256a4ef43e743060431652b946318c25bd98f7295b0",
+    "adapter/adapter.jsonl": "f379354ffa55a9bb9c4085c474dce6df98720fb0df6b95bcbb5d40b26f4025d0",
+    "admission.json": "4b875aed2b89ae9fe6ed7ef3b9f8a7e7190ef7c01dde0d7229507c687183a17c",
+    "attention.json": "6fcaddb416c7623eec405da078138e41d8db549f8bdc0ed4a09d58659d7173cc",
+    "campaign-grant.json": "87ebe1b657ce5bd38bc0be49c7b39a5fdc6c1a18420fd9293c79fc7157cf2722",
+    "campaign-upgrade.json": "d8e7f220e78bc7b2c41bf10c5266493754d6fc3b7abb1c7dd4959d9afe8b1534",
+    "cycle-admission.json": "adb17cc3a655f0bf41b7dd136cd7522d6f199fa63cdd6e1176528961d605209c",
+    "cycle/cycle.jsonl": "05f449c6bdbbe9cd39f167408ac0e7dbd931bf67a3bb43881c1933ad7ae331c4",
+    "objective-status.json": "3ef2aa105f1a942d1a467889278c8dffc49f3a016190be09866fc12ca3f2d016",
+    "price-preflight.json": "7b55c7d09af57eb720aa05543d1aa8445660511f32b3276b2d25b7124bd14a6a",
+    "replay.json": "60993da0466c10145b9d6cdad5bb266cf2b20028a5187ad8da516619fbeb566b",
+    "run-output.log": "00ec747c9657a9a96ff7083163c92bccb139677cfe771ecd21904f4f21acd58e"
+  },
+  "execution_groups": 1,
+  "format_corrections": 0,
+  "implementation_commit": "ca4e7089bfcbdb7b7fbbbd27aadc989952daa97a",
+  "ledger_after_sha256": "8304b1bf08ddc3dfdd4bfce04de6f44f10fdbc22e5a95a895940cea10a015ae6",
+  "local_evidence": "target/objective-service-live-1",
+  "native_terminal": "idle:no_eligible_open_attention",
+  "objective_accepted": false,
+  "outcome": "incomplete_native_attention_defect",
+  "packet_sha256": "c626105ab8ff7abb98122818918123e04fe578b08d029165375b72d2d154c3d7",
+  "patch_smoke_groups": 1,
+  "prompt_tokens": 7376,
+  "protected_sources_unchanged": true,
+  "raw_response_bodies_committed": false,
+  "receipts": [
+    {
+      "body_sha256": "d67708b1edc6c9427898fe112f7b1aca3fa6c206f10149e3380f796c908425bb",
+      "elapsed_seconds": 39.64186904206872,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "9f038321-a23b-49fa-8d00-d56258bdeb7f",
+      "response_request_ids": [
+        "9f038321-a23b-49fa-8d00-d56258bdeb7f"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 4015,
+        "completion_tokens_details": {
+          "reasoning_tokens": 3340
+        },
+        "prompt_tokens": 3084,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7099
+      },
+      "usage_status": "reported",
+      "usd": "0.001812"
+    },
+    {
+      "body_sha256": "451a76a99e9848c98acd6c9e36ab401db15127fc61d3f874ad1c519c1ae65a50",
+      "elapsed_seconds": 24.633390583097935,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "040acebf-cafb-4dfb-b40e-3e5599ee2829",
+      "response_request_ids": [
+        "040acebf-cafb-4dfb-b40e-3e5599ee2829"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2411,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1905
+        },
+        "prompt_tokens": 4292,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6703
+      },
+      "usage_status": "reported",
+      "usd": "0.001319"
+    }
+  ],
+  "relationship_development": false,
+  "remaining_attempt_allowance": "expired at terminal; not authority for another attempt",
+  "replayed_without_dispatch": true,
+  "service_rounds": 0,
+  "settled_usd": "0.003131",
+  "total_tokens": 13802,
+  "version": "finite-objective-live-result@v1"
+}

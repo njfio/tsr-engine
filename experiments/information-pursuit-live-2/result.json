@@ -1,0 +1,143 @@
+{
+  "accepted_replacement_bytes": 1335,
+  "adaptive_tsr": "unexercised: immediate repair success",
+  "assessor": "/root/grant_review",
+  "base_release_commit": "afa51806",
+  "calls": 3,
+  "campaign": {
+    "calls": 226,
+    "committed_microusd": 184757,
+    "effective_max_calls": 239,
+    "effective_max_execution_groups": 64,
+    "evaluation_suite_sha256": "b0bb38a978c0561a885192b2352fa444c784b9eef352374050c46e57fe96d5c4",
+    "execution_groups": 62,
+    "fixture_only": false,
+    "known_cost_microusd": 184757,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 6,
+    "remaining_calls": 13,
+    "remaining_execution_groups": 2,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "code_commit": "5f943d5d",
+  "information_reads": 0,
+  "isolated_program_groups": 1,
+  "launch": {
+    "calls_before": 223,
+    "groups_before": 61,
+    "hard_deadline": "2026-10-28T11:09:37.686676+00:00",
+    "maximum_seconds_from_launch": 5400,
+    "settled_microusd_before": 181596,
+    "started_at": "2026-10-28T09:40:39.522354+00:00"
+  },
+  "ledger_sha256": "b2abc2643398f0824469a9ffc89171186b1716ed0425431730bc8bf6baecabc6",
+  "local_evidence": "target/native-information-live-2-dispatch",
+  "original_durable_state_unchanged": true,
+  "prior_failed_result_unchanged": true,
+  "protected_files_unchanged": true,
+  "provider_receipts": [
+    {
+      "body_sha256": "f82709f9f7bf5b7b4bba80302c5b80392dbfa5b6759a55c7d27f0f01b3a587ec",
+      "elapsed_seconds": 26.044132499955595,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "df8d471c-d57f-47da-9042-2b6be6c0fd58",
+      "response_request_ids": [
+        "df8d471c-d57f-47da-9042-2b6be6c0fd58"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2858,
+        "completion_tokens_details": {
+          "reasoning_tokens": 2165
+        },
+        "prompt_tokens": 3505,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6363
+      },
+      "usage_status": "reported",
+      "usd": "0.001414"
+    },
+    {
+      "body_sha256": "8834488044867fb27d11a0f2f9ee0c80d42c79cb6d6d239ced7b75e0933247b3",
+      "elapsed_seconds": 14.475032458081841,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "ceb981d9-45e1-455b-87d1-745c05fb327e",
+      "response_request_ids": [
+        "ceb981d9-45e1-455b-87d1-745c05fb327e"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 1443,
+        "completion_tokens_details": {
+          "reasoning_tokens": 979
+        },
+        "prompt_tokens": 3656,
+        "prompt_tokens_details": {
+          "cached_tokens": 3502
+        },
+        "total_tokens": 5099
+      },
+      "usage_status": "reported",
+      "usd": "0.000587"
+    },
+    {
+      "body_sha256": "ab29943388621b0d6ea2fc33511ad8c23baf94f650b580a68be6017aceecd7e5",
+      "elapsed_seconds": 17.87256137514487,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "2c9d7965-c563-4d19-87e1-ab42786e47dd",
+      "response_request_ids": [
+        "2c9d7965-c563-4d19-87e1-ab42786e47dd"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 1766,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1049
+        },
+        "prompt_tokens": 5190,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6956
+      },
+      "usage_status": "reported",
+      "usd": "0.001160"
+    }
+  ],
+  "rejected_replacement_bytes": 2438,
+  "relationship_revision": false,
+  "replay_without_dispatch": true,
+  "review_copy": "target/native-information-live-2-acceptance",
+  "separate_acceptance": {
+    "accepted": true,
+    "decision_record": "7c44e7c9a1bbf70d3bf2b15846e10a3945a062d22c33399d5eada98f2b8ce3d2",
+    "desire_status": "fulfilled",
+    "requirements_revision": "02d28195aa4338f8774a990f77a9d22c1ff4b34461b69a476ca59cf1b9277238",
+    "semantic_completeness": "accepted_by_operator",
+    "snapshot": "d1363f2cbfa3e4fee1f94a441fcba53e98b076b9c0d81a4cd679c5ed5c92d361",
+    "status": "accepted",
+    "test_receipt": "9a5a52da81c6377494cd9f2e88ddded1d89f39f231225ecb5b16a5cb1010ffd3",
+    "test_verdict": "passed"
+  },
+  "settled_usd": "0.003161",
+  "shared_corrections_used": 1,
+  "sqlite_sidecars": "Read-only review may create SHM/empty WAL; durable originals unchanged",
+  "subsequent_pursuit": false,
+  "terminal": "review_required",
+  "transcriber": "/root",
+  "unused_attempt_allowances": "expired; no further attempt authorized",
+  "usage": {
+    "completion_tokens": 6067,
+    "prompt_tokens": 12351,
+    "total_tokens": 18418
+  },
+  "version": "information-pursuit-live-result@v2"
+}

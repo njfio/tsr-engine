@@ -14,7 +14,8 @@
 //!
 //! Admission by source: a preference whose origin is [`Source::Operator`] — including a rejection
 //! reason — is open on arrival; one whose origin is [`Source::Generator`] is in the structure but
-//! absent from the active view until an Operator `StatusSet(Open)` exists for it.
+//! absent from the active view until an Operator `StatusSet(Open)` or a validated
+//! Council `ReviewedPreferenceAdmission` exists for it.
 //!
 //! Mechanical statuses: `fulfilled` when the preference's criterion closes (a later return meets
 //! it), `overlapping(id)` when a merge finds a duplicate by normalized text within the same scope.
@@ -29,6 +30,9 @@
 pub mod active;
 pub mod error;
 pub mod filter;
+pub mod provisional;
+pub mod reviewed;
+pub mod success;
 pub mod write;
 
 pub use active::{
@@ -44,3 +48,7 @@ pub use write::{is_operator_only, status_name, Ledger};
 pub fn ledger_root(store: &tsr_store::Store) -> Result<tsr_domain::Hash, LedgerError> {
     Ok(store.head_root()?)
 }
+
+pub mod selection;
+
+pub mod tensions;

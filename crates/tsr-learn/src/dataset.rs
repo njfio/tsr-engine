@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use tsr_domain::{ActionKind, Event, EventId, Hash, TaskId};
 
 use crate::decision::{decision_rows, resolve_labels, Label, LabelRecord, TaskLabel};
-use crate::features::{extract, spec_for_families, FeatureSpec, FeatureVector};
+#[cfg(test)]
+use crate::features::spec_for_families;
+use crate::features::{FeatureSpec, FeatureVector};
 use crate::rng::SplitMix64;
 use crate::LearnError;
 
@@ -118,14 +120,14 @@ pub struct Dataset {
 }
 
 /// The split fractions: the calibrate and held-out shares; the fit side takes the remainder.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SplitFractions {
     pub calibrate: f64,
     pub holdout: f64,
 }
 
 /// The split configuration: the rule, the fractions and the seed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SplitConfig {
     pub by: SplitBy,
     pub fractions: SplitFractions,
@@ -460,6 +462,8 @@ pub fn training_root(rows: &[Row]) -> Hash {
 /// whose task has an index row; a task with no index row is excluded (and counted by the caller).
 /// A row whose label is censored or unresolved carries `label: None` and is excluded from training
 /// and scoring.
+/// Historical resolved-label builder, without time eligibility. For new training
+/// use `maturity::build` and `maturity::write`; production fitting requires their proof.
 pub fn build_dataset(
     events: &[(i64, Event)],
     index: &[TaskIndexRow],
@@ -467,6 +471,27 @@ pub fn build_dataset(
     operator: &str,
     split_cfg: SplitConfig,
     source_root: Hash,
+) -> Result<Dataset, LearnError> {
+    build_dataset_schema(
+        events,
+        index,
+        labels,
+        operator,
+        split_cfg,
+        source_root,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_dataset_schema(
+    events: &[(i64, Event)],
+    index: &[TaskIndexRow],
+    labels: &[LabelRecord],
+    operator: &str,
+    split_cfg: SplitConfig,
+    source_root: Hash,
+    input: Option<&crate::schema::Input>,
 ) -> Result<Dataset, LearnError> {
     let SplitConfig {
         by,
@@ -523,7 +548,17 @@ pub fn build_dataset(
         }
     }
     let families: Vec<String> = fit_families.into_iter().collect();
-    let spec = spec_for_families(&families);
+    let spec = crate::schema::spec(
+        if input.is_some() {
+            crate::project_receipts::SCHEMA
+        } else {
+            crate::features::FEATURE_SCHEMA_VERSION
+        },
+        &families,
+    )?;
+    if let Some(input) = input {
+        input.validate(events, index)?;
+    }
 
     // Per task, the events in log order, so a commitment's "strictly before" slice is available.
     let mut by_task: BTreeMap<TaskId, Vec<(i64, Event)>> = BTreeMap::new();
@@ -556,14 +591,8 @@ pub fn build_dataset(
         let generator_raw = dr.generator_raw();
         let operator_raw = dr.operator_raw();
         let controller_logged = dr.controller_logged();
-        let fv = extract(
-            &spec,
-            &before,
-            index_row,
-            dr.action,
-            &families,
-            generator_raw,
-        );
+        let fv =
+            crate::schema::extract(&spec, &before, index_row, dr.action, generator_raw, input)?;
         let tl = label_of.get(&dr.task);
         let (label, evidence) = match tl {
             Some(t) => match t.label {

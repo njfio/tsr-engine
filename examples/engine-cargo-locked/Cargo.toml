@@ -1,0 +1,12 @@
+[workspace]
+members = ["ledger"]
+resolver = "2"
+
+[package]
+name = "invoice"
+version = "0.1.0"
+edition = "2021"
+build = false
+
+[dependencies]
+itoa = "=1.0.18"

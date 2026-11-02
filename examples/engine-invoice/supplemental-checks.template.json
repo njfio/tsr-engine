@@ -1,0 +1,69 @@
+{
+  "version": "supplemental-checks@v1",
+  "snapshot": "<current source hash>",
+  "requirements_revision": "<current requirements event>",
+  "author": "independent-spec-check-author",
+  "reviewer": "<independent mapping reviewer>",
+  "generator": "<original generator identity>",
+  "review": "<review of mapping and harness, not a claim of execution>",
+  "harness": {
+    "supplemental/arithmetic.rs": "#[path = \"../src/pricing.rs\"] mod pricing;\n#[path = \"../src/discount.rs\"] mod discount;\nfn main() {\n    let args: Vec<String> = std::env::args().collect();\n    let a: u32 = args[2].parse().unwrap();\n    let b: u32 = args[3].parse().unwrap();\n    let result = match args[1].as_str() {\n        \"subtotal\" => pricing::subtotal(a, b),\n        \"discount\" => discount::discounted_total(a, b),\n        _ => panic!(\"unadmitted check\"),\n    };\n    println!(\"{result}\");\n}\n"
+  },
+  "probe_entry": "supplemental/arithmetic.rs",
+  "cases": [
+    {
+      "id": "quantity_zero",
+      "args": [
+        "subtotal",
+        "7",
+        "0"
+      ],
+      "expected_stdout": "0\n"
+    },
+    {
+      "id": "product_distinct",
+      "args": [
+        "subtotal",
+        "3",
+        "4"
+      ],
+      "expected_stdout": "12\n"
+    },
+    {
+      "id": "discount_distinct",
+      "args": [
+        "discount",
+        "7",
+        "3"
+      ],
+      "expected_stdout": "4\n"
+    },
+    {
+      "id": "discount_excess",
+      "args": [
+        "discount",
+        "7",
+        "8"
+      ],
+      "expected_stdout": "0\n"
+    }
+  ],
+  "mapping": {
+    "subtotal": {
+      "cases": [
+        "quantity_zero",
+        "product_distinct"
+      ],
+      "rationale": "The stated multiplication requirement implies 7*0=0 and 3*4=12 independently of implementation.",
+      "limits": "Two finite nonoverflowing inputs only; no general arithmetic proof or overflow semantics."
+    },
+    "discount": {
+      "cases": [
+        "discount_distinct",
+        "discount_excess"
+      ],
+      "rationale": "Subtraction with floor zero implies discounted_total(7,3)=4 and discounted_total(7,8)=0; called independently of subtotal.",
+      "limits": "Two finite inputs only; equality, other boundaries and universal behavior remain unverified."
+    }
+  }
+}

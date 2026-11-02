@@ -1,0 +1,130 @@
+{
+  "binary_sha256": "07ab5ddbfbf440fb33fcd59efa51107dae292364b733f15dd0a99637a00455e3",
+  "campaign_before": {
+    "calls": 222,
+    "groups": 61,
+    "ledger_sha256": "93525b7f5f71caddcb3c595217fd37d226989613b8f31a61dc06b61f6937508a",
+    "settled_microusd": 180395
+  },
+  "configuration_sha256": "1e46b1acd5f624708664593336bfbe49530a786dc8c240ef9c9152bca2255a51",
+  "envelope": {
+    "attempts": 1,
+    "local_native_context_bytes": 131072,
+    "max_aggregate_tool_seconds": 240,
+    "max_completion_tokens_per_call": 8192,
+    "max_decisions": 7,
+    "max_information_reads": 1,
+    "max_program_execution_groups": 2,
+    "max_run_seconds": 5400,
+    "max_seconds_per_call": 240,
+    "max_serialized_request_bytes": 32768,
+    "max_total_calls": 16,
+    "max_total_operations": 3,
+    "model": "gpt-6-luna",
+    "normal_generator_reviewer_calls": 14,
+    "provider": "CheaperInference",
+    "reservation_microusd": 800000,
+    "shared_format_corrections": 2
+  },
+  "excluded": [
+    "protected tests and oracle internals",
+    "full native state",
+    "unrelated history",
+    "private data and credentials"
+  ],
+  "existing_total_caps": {
+    "calls": 230,
+    "groups": 62,
+    "microusd": 5000000
+  },
+  "exports": [
+    "frozen complete public task and index",
+    "current admitted src/lib.rs",
+    "selected fictional record contents after actual read",
+    "public native contracts and source/parent/lineage identities",
+    "task-local generated and reviewed advisory history",
+    "bounded authenticated case and access receipt facts",
+    "source-bound candidate and review context"
+  ],
+  "implementation": {
+    "engine-b91-campaign.py": "4d2a694fe74f86fc4311b819fa0c527b02f0a16cfd1df59e127b5bef19b40b74",
+    "engine-b91-driver.py": "f0c61c339d19629ca3a4f7059792e9f6d8ebe1fd0f10e9cfd46fd8bf42491efd",
+    "engine-b91-evidence.py": "c4d1dc2cdb7ba948082bce29266fffc9e5712da5b39285ba5a9f90c3e59528ed",
+    "engine-b91-prepare.py": "31fcb892bd1d4925eb220044e020eba8d5ea8140c39cd85b68106380057bdcf3",
+    "engine-b91-project-envelope.py": "65167127df698f19ffe93f105984ef41439e19fcaa273bb4f0cde4f3b46ad73f",
+    "engine-bounded-correction.py": "af45bb46be64c82fd60f864557c377829c1aa18d5d803104a854f068c60951b0",
+    "engine-json-output.py": "d394e943efb84d3e4efc1725176cf8899d602de7613ef3b1ca57c8e12cbf8984",
+    "engine-local-model.py": "9cb1dfc613221e8e5de5d5f66af6cbbaed2ea5e4695b980802c004eb10d9b966",
+    "engine-native-cycle.py": "236b35d6c4699f7cd3ffe1a8e8c6560e411f5a26190e95c371a4b730671159b0",
+    "engine-project-cycle-adapter.py": "a79223ab6532c8704b351ef5d68961b6b4ce2f1ff5d0827814a1d7a9b176b16a",
+    "engine-project-cycle.py": "aae65a63d6eff001405e69e2664cde061f853364e03e45b6ea24e02f6e8ee7f3",
+    "engine-project-output.py": "f331861497154174de012e4e8aff78f72e29470b1da7fc7ff012a28076364fc3",
+    "engine-project-runtime-review.py": "d27d287146e2dac73e5f8303cc1be789cb06b81dcecc3c1c92c1c6114ce76826",
+    "engine-pursuit-packet.py": "8d0fe72c5f8fb2ef8873179af1dd03a19470cebfe46e965a76b2c031ee54bc02",
+    "engine-repair-suite.py": "4fec63c57e4999c5bdd41df89e0b98890e1b33c124e9fe40f7e5b91ed41ff55e",
+    "engine-response-evidence.py": "151ae391a111c8a92df3725da689b22ba4fea6734eb5966f2ff7dcc20b6fd27e",
+    "engine-sequential-packet.py": "c3a91a3e22a9e4f58b10a6e86749e234d23e1553b21b060a5e61e9f4287d08cb",
+    "engine-synthetic-transport.py": "b81002362dcb7532a845d8281d267f4da9fc10ca5dcc9a61377b947c833c5d67",
+    "m3-cheaper-broker.py": "47bfaa7fe402dc492b060f17181ba4b3e2af03813424846eabaf6b92c2205a26"
+  },
+  "limitations": [
+    "Authored fixtures establish wiring, not live model behavior or real program outcomes.",
+    "JSON object mode does not guarantee schema compliance.",
+    "Unique long histories can exceed32KiB and terminate before full sequence; no evidence is truncated.",
+    "Information access proves bytes and identity, never assertion truth or task success.",
+    "No mixed read/patch task-success ranking or causal TSR advantage is claimed.",
+    "Immediate success, abstention, no read or unchanged relation are legitimate; no resampling.",
+    "Fresh official prices, installed runtime, source/admission and actual scope approval remain launch prerequisites.",
+    "Final independent acceptance is separate and must use an unchanged-source derivative review copy."
+  ],
+  "native_source_sha256": {
+    "crates/tsr-cli/src/engine/adaptive/coding/project.rs": "bf03821406e587dee604b1fe4654c889b4f1b7d4269540e3d719b1c7e8acd844",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance.rs": "ffb716eec4f2002471182739ce542be57bf64e28abb56a31b69def6c31493939",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/budget.rs": "63b6524055e0d0589f36857e6db9290a35e9e31dddd8aa7f250e366ba046dbf7",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/cycle.rs": "38f05f3922cf4ae4bfe643b30292be13c6584949f791ccea4d7c96562817cb38",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/information.rs": "bfb9c20e5167e780c8569730fa04afbfd0cc95531a28d581e4ed18489f024e6a",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/lifecycle.rs": "f73a4d18f6e491e2ace9bc1d90a0a8cde4d29ac3e9d7a7b95aa6d22e7b211ed9",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/relational.rs": "6f5cdd815497498b0920af42df509e001f159c5657cd4e2b6485103cb70d1a3d",
+    "crates/tsr-cli/src/engine/adaptive/provider.rs": "57373d7aa453d2a2fb8270763a9351710055aaad638afd986a69078b15989c2a",
+    "crates/tsr-cli/src/engine_project_cmd.rs": "d04d6d7d61356e1119dc41e39059ff66954043d313a6739ad5c07a54717d09c0"
+  },
+  "packet_sha256": "689f5db8fd2632d852d7458e88d3cd65d647d16f9c3e30f943c721a95c6c86a0",
+  "prepared_source_manifest_sha256": "b0bb38a978c0561a885192b2352fa444c784b9eef352374050c46e57fe96d5c4",
+  "preparer_sha256": "67fc292320e1976ef2a54444c97b02e8811c47419e26ac86278c76bf800538ed",
+  "proposed_total_caps": {
+    "calls": 238,
+    "groups": 64,
+    "microusd": 5000000
+  },
+  "reviewer": "/root/reader_integration_review",
+  "status": "locally-verified-pending-explicit-scope-approval-and-fresh-launch-preflight",
+  "verification": {
+    "campaign_operations": 0,
+    "counterfactual_slot_stress": {
+      "maximum_bytes": 40122,
+      "oversized_bodies_refused": 4,
+      "proven_native_valid_history": false
+    },
+    "focused_python_bounds_tests_passed": 6,
+    "full_authored_flow": {
+      "actual_max_serialized_request_bytes": 28894,
+      "authored_worker_returns": 2,
+      "elapsed_seconds": 286.082,
+      "fixture_calls": 16,
+      "headroom_bytes": 3874,
+      "passed": true,
+      "restart_inert": true,
+      "reviewed_decisions": 7,
+      "shared_corrections": 2,
+      "target_commands_executed": 0,
+      "temporary_information_reads": 1,
+      "terminal": "proposal_resource_budget_exhausted"
+    },
+    "legacy_contract_release_tests_passed": 9,
+    "live_provider_calls": 0,
+    "native_cycle_tests_passed": 15,
+    "native_information_tests_passed": 3,
+    "oracle_compiled_offline_no_run": true
+  },
+  "version": "native-information-release@v1"
+}

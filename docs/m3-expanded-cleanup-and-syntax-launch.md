@@ -1,0 +1,13 @@
+# Approved cleanup and syntax launch
+
+The user approved the exact 37-directory cleanup on 2026-10-16. Manifest SHA256 d79ed06404b4eaf9255ec2db695ed951be0768b515f386b51982350e06be4363 remained unchanged. Quiescence, terminal receipt/cohort hashes, exact directory identities and source/evidence protection passed before execution. Independent execution review found no blocker. Three identity tests passed. A syntax error while preparing the script was caught before any execution and corrected.
+
+Cleanup ran 00:45:38–00:47:06 UTC and removed exactly all 37 reviewed build-output directories using no-follow parent descriptors and identity-checked relative deletion. No source copies, original outcomes, evidence, logs, dependency caches, images or later outputs were selected. Before/after checks confirmed 9,424 exported evidence files and 16,902 source-copy entries unchanged; all 17,636 entries of the immutable protected-source snapshot also passed. Actual observed free-space increase: 194,120,929,280 bytes (180.79 GiB); immediate final free space 424,269,008,896 bytes (395.13 GiB). APFS/background changes may affect this observed delta. A fresh native integrity audit passed for all 107 admissions. This does not establish a reserved holdout or model-performance result.
+
+Syntax preflight at 00:48:00 UTC found 395.03 GiB free, exceeding 248 GiB (200 GiB live guard plus 48 GiB planning allowance). All 48 frozen hashes matched, binding completed cleanup and the post-cleanup audit. Six controller tests passed; independent final review found no blocker. Original syntax module-v1 qualifier d0d68e14aaa4173b2085769641197977009c05d836e14e0116880ff98b906c2e remains pinned.
+
+Syntax launched at 00:48:22 UTC, controller PID 22020, at most eight candidates and two workers. Container inspection confirmed the pinned RTS image, user 65534:65534, network none, privileged false and ALL capabilities dropped. Existing 600-second sealed command cap, 1 MiB output bound, 2700-second outer limit, stopped historical coordinator checks, strict validity rules and 200 GiB guard remain unchanged.
+
+Independently reviewed finite observer PID 23270 started 00:48:51 UTC, polling every 30 seconds for up to 12 hours. It exports and audits terminal evidence at docs/m3-syntax-continuation-final.json without launching a successor. Next reviewed inventory is typed, at most twelve candidates, requiring fresh 272 GiB preflight. No syntax admissions claimed at launch.
+
+No paid calls, historical retries, pushes, merges or deployment. No further deletion authorized. Corpus remains 107 admissions pending syntax results; M3 is not complete. Lefthook unavailable; hooks not claimed passed.

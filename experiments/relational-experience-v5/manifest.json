@@ -1,0 +1,17 @@
+{
+  "version": "relational-experience-recovery-packet@v1",
+  "implementation_commit": "aafadf3021609740726f6cbb8e6553904246014b",
+  "prepared_manifest_sha256": "d57f878ff7a8268f3776844cdfc33ddec84b534a91fe5afcaeec3928f1567872",
+  "adapter_sha256": "94523c3bf5339941aa713524ac051ed0c9dbeba72b20449ace082b01830ea27c",
+  "scope_grant_sha256": "3b95b5649012b6abf98738be23bc4d31638925b11c1959561e648b4a5fbffd87",
+  "files": {
+    "README.md": "40d387a39f929aa83a1e8d4984aba694250cbb53bc7387a9a93c3dc8d9b88de1",
+    "observe.cjs": "26ae78b6c89302050610d5337952da99441fa890b413e9f004274be3e8a6cf5f",
+    "prepare.py": "6333e683358c0c256fff794c20dc66cb48353fbffab3b87409a4fb05d140b49b"
+  },
+  "original_packet_sha256": "e19c4b8b81aae00c697120a14cb42fd51e2a65e0b8c62c7de538f72d0d9982fe",
+  "recovery_proof_sha256": "dfcb4196fd412fe6ef9bbeee6c47d97dd6d3e4c0c140a95a4a21450be475110a",
+  "scope": "same three frozen synthetic conditions; explicit uncapped approval Sentinel_f6d92327e83881919bddf431291dc653; no completed effect replay",
+  "review": "independent-agent:/root/contrast_bridge_review; conditional on full-chain test",
+  "launch_pending": true
+}

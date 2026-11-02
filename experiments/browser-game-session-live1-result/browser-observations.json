@@ -1,0 +1,55 @@
+{
+  "version": "independent-gameplay-observation@v1",
+  "source": {
+    "index.html": "22f8cf158099007602c3643dd46752d9f1b6a86a09bfcc9a1800842696caeab7",
+    "style.css": "6481b0239be5ae45a322d5c097305c93da674ffbed205fc4578db9cc0447c363",
+    "app.js": "8311a205a3bc91ff2c133e85b6a6e843515e39339d78e8027ef680e2625adf2a"
+  },
+  "timing": "Playwright virtual clock; game code unmodified",
+  "checks": [
+    {
+      "name": "initial instruction visible",
+      "pass": true,
+      "observed": "Not started"
+    },
+    {
+      "name": "starts with lives and dots",
+      "pass": true,
+      "observed": "Playing \u2014 193 dots left \u2014 3 lives"
+    },
+    {
+      "name": "right movement and collection",
+      "pass": true,
+      "observed": {
+        "status": "Playing \u2014 192 dots left \u2014 3 lives",
+        "player_pixel": [
+          255,
+          216,
+          77,
+          255
+        ]
+      }
+    },
+    {
+      "name": "wall blocks movement",
+      "pass": true,
+      "observed": "Playing \u2014 193 dots left \u2014 3 lives"
+    },
+    {
+      "name": "WASD movement collects",
+      "pass": true,
+      "observed": "Playing \u2014 192 dots left \u2014 3 lives"
+    },
+    {
+      "name": "pursuer ends idle game",
+      "pass": true,
+      "observed": "Caught! Press Start to try again."
+    },
+    {
+      "name": "restart resets after loss",
+      "pass": true,
+      "observed": "Playing \u2014 193 dots left \u2014 3 lives"
+    }
+  ],
+  "errors": []
+}

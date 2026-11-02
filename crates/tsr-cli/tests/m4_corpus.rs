@@ -407,6 +407,8 @@ fn b7_train_apply_prints_raw_and_calibrated_p_and_support() {
         .args([
             "train",
             "dataset",
+            "--as-of",
+            "2028-01-01T00:00:00Z",
             "--events",
             fx.join("events.jsonl").to_str().expect("events"),
             "--tasks",
@@ -511,6 +513,8 @@ fn by_repo_seeds_1_to_8_give_three_non_empty_sides() {
             .args([
                 "train",
                 "dataset",
+                "--as-of",
+                "2028-01-01T00:00:00Z",
                 "--events",
                 fx.join("events.jsonl").to_str().expect("events"),
                 "--tasks",

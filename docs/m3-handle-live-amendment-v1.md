@@ -1,0 +1,11 @@
+# Paired handle validation: amendment 1
+
+The original run halted after assignment 0 when its broad M3 process matcher likely mistook the read-only monitor for a competing worker. The offending PID was not recorded, so that attribution is not proven. Original terminal evidence and assignment 0 remain immutable and are not rerun.
+
+This authorized continuation executes only original assignments 1–11, with unchanged task, payload, model, order, Record mode, and per-arm bounds. The original $0.544194 accounting baseline remains authoritative: the first attempt spent $0.009473, leaving at most $4.990527 of the approved $5 additional budget. The fresh launch baseline is $0.553667 aggregate, with no outstanding reservations. Remaining arms retain their individual 20-call / 200,000-token ceilings; the original cohort ceilings include assignment 0. Absolute cutoff is 2026-10-18 19:45 UTC, conservatively inside the original six-hour window; downtime counts. A monotonic deadline also prevents backward wall-clock changes from extending execution.
+
+The narrow guard exception accepts only the exact pinned observer script under a pinned trusted interpreter, without extra arguments. Other M3 workers, mutation/provider flags, shell wrappers, changed scripts, and M3 containers remain blockers. A nonblocking file lock prevents another recovery controller. Guard records retain offending PID, role, status, and command digest. Eight offline tests cover observer identity, real lock exclusion, competing worker rejection, continuation scope, preserved prior outcome, no retry, and dual-clock expiry.
+
+The versioned manifest pins original inputs and evidence plus recovery code. Each arm still uses the frozen native engine, provider transport, accounting and evidence verifier. New terminal state is one-shot; failures do not trigger retries. No cohort expansion is authorized.
+
+Analysis retains all six pairs and six attempts per interface in denominators, including missing outcomes. Report completed pairs separately. The interrupted schedule, versioned orchestration change and elapsed time are comparability caveats; this is bounded pilot evidence, not a causal performance claim or completion of all M3 acceptance criteria.

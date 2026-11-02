@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "terminal_equal": true,
+  "ledger_byte_identical": true,
+  "ledger_sha256": "f287f4bd462c5e9ac3976a4ce9c1138807ce0d38fdb8e1882b97e0c688df0dcf",
+  "calls": 537,
+  "execution_groups": 200,
+  "no_new_effects": true
+}

@@ -499,7 +499,19 @@ fn exec_resolves_the_session_task_and_refuses_without_one() {
     );
     assert_eq!(code, 0, "SessionStart exits 0: stderr={err}");
 
-    let (code, _, err) = run_tsr_in(&db, &dir, &["exec", "--", "cargo", "test"], None);
+    // This branch tests absence, independently of installed host runtimes.
+    let empty_path = dir.join("no-runtimes");
+    std::fs::create_dir(&empty_path).expect("empty runtime path");
+    let out = Command::new(tsr_bin())
+        .args(["exec", "--", "cargo", "test"])
+        .current_dir(&dir)
+        .env("TSR_DB", &db)
+        .env("PATH", &empty_path)
+        .output()
+        .expect("run isolated refusal");
+    let code = out.status.code().unwrap_or(-1);
+    let err = String::from_utf8_lossy(&out.stderr);
+
     assert_eq!(
         code, 3,
         "tsr exec with a session reaches the runtime check: stderr={err}"

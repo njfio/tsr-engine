@@ -1,0 +1,42 @@
+{
+  "version": "browser-game-live-result@v1",
+  "source_commit": "363a9b1e",
+  "packet_sha256": "d6e0b4bae6e95f99b271d22e9c706171c4d16520f4c3afe09d6a5d53b0bc800d",
+  "root": "target/browser-game-live2",
+  "outcome": "terminal invalid proposal; no edits or execution",
+  "calls": 2,
+  "format_corrections": 1,
+  "execution_groups": 0,
+  "settled_usd": "0.002317",
+  "unknowns": 0,
+  "campaign": {
+    "calls": 262,
+    "execution_groups": 72,
+    "settled_usd": "0.225523"
+  },
+  "input_tokens": 5124,
+  "output_tokens": 5476,
+  "total_tokens": 10600,
+  "cached_input_tokens": 2506,
+  "files": {
+    "target/browser-game-live2/authority.json": "123451bf7375effb10483065280f2f1f1b0c5c0964349a4d580956c3b2110ee8",
+    "target/browser-game-live2/scope-grant.json": "ca13cedb43300e226afac33b1b7c831d13214401111ceadc32dc1c51f00bf501",
+    "target/browser-game-live2/adapter-admission.json": "b1682ab90aa7be44d69dcb46e79b91a4817e384423f02480a8401e0c83049c53",
+    "target/browser-game-live2/cycle-admission.json": "94c36303e1768793ae89d4efb971f4b803c8c435863888bdb4e99fb277571cf4",
+    "target/browser-game-live2/launch.json": "7a499fa3f8b542e36733ee103d26262350ef9c88837f68ce837fb4231187f3f2",
+    "target/browser-game-live2/price.json": "f2b3789b1d8779495ae89f0d66bb2cbc6e9a1a85a3138062b0fd8767d39bcdd7",
+    "target/browser-game-live2/process-result.json": "019b3436a4ee4ba6f5537b13b087ed40e5073c4ce36395b06d4f93fdc7ea2255",
+    "target/browser-game-live2/verification.json": "224edafba55a0a19cec612442724eedb62023fedfef5ecc7fff9922583c9f3d8",
+    "target/browser-game-live2/adapter/terminal-output.json": "ab7a58826a8650afe64056b405881f5c67b3b7ea660a4744dd214290e2fd1b9b",
+    "target/browser-game-live2/adapter/corrections.jsonl": "4380070af95379e0974d5d3127d1fc0c7b43675da89919bb76217d3f3db1a660",
+    "target/browser-game-live2/adapter/adapter.jsonl": "53e3372381d530bbf8901ff25b8bf02e744f8444a198933a91da364196a8a6a1",
+    "target/browser-game-live2/cycle/cycle.jsonl": "d830a758eee9b01a276da6cd99c1d653efb1b73ab0c5e80f2100275e0b0f5197"
+  },
+  "retained_response_sha256": [
+    "6914d2102044d91888c9f7e5600ee624a07a85059fda34bcbd654569684ed1fb",
+    "04e1c80103293bc7feba0aabb3aefcd11125779584165cdfd8969ac3ddd3332f"
+  ],
+  "historical_result_preserved": "7d98537a",
+  "playable_artifact": null,
+  "replay": "safely refused pending proposal intent without dispatch; not clean terminal cycle replay"
+}

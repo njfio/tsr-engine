@@ -24,9 +24,14 @@ pub mod decision;
 pub mod features;
 pub mod head;
 pub mod isotonic;
+pub mod maturity;
 pub mod probes;
+pub mod project_eligibility;
+pub mod project_receipts;
 pub mod report;
 pub mod rng;
+pub mod schema;
+pub mod shadow;
 pub mod support;
 pub mod synth;
 

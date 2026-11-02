@@ -1,0 +1,100 @@
+{
+  "calls": 1,
+  "corrections": 0,
+  "evidence_files_sha256": {
+    "adapter-admission.json": "afa7027991bf4a18dd2fdd44d749722c93b0d6ec2da8d9174a611cec94a4a5a2",
+    "adapter/adapter.jsonl": "4da9cc7a68613af2260a0b5e7e7c2577d1bb940e660c7c9ffb66c2d58ac27e94",
+    "authority.json": "8e883ba295752086bd2d0c63372adc6d792a1621366ee38eb481ed1cd88c6a9b",
+    "campaign-upgrade.json": "f550fcb6c98da5be01a3d4e4f5b9b57dd6bbea34c5436c7e414a556b38bc70e7",
+    "cycle-admission.json": "f1671ed92fa39b42054a32a41374f8b21640a65c28636cd697f0aa7162a388cc",
+    "cycle/cycle.jsonl": "86d8b398f50ac68b1309271811259283b09b76bf29448ddf8ebe6ba2c495c156",
+    "replay.json": "6db9224d44ea27128df1be9dfa7972de565a05039ae752283783b7fabd39e9e4",
+    "run.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "run.stdout": "661463aac9d306c4fc1ac9a9647417fcc60dce6ab9547e1bfa387a9f01e2e7db",
+    "scope-grant.json": "33ed371b83819458ddcbaab08eb7a86630e3dbdb9c51fe29c3112f82b203b65b"
+  },
+  "execution_groups": 0,
+  "game_generated": false,
+  "independent_review": "/root/binding_review: valid terminal abstention; stated prerequisites unsupported; prompt role ambiguity plausible, not causal proof",
+  "launch": {
+    "attempts": 1,
+    "deadline": "2026-10-29T02:55:29.628090+00:00",
+    "launched_at": "2026-10-29T00:59:10.341417+00:00",
+    "max_calls": 10,
+    "max_execution_groups": 2,
+    "planned_reservation_usd": "0.50",
+    "provider_failure_retries": 0,
+    "shared_format_corrections": 2
+  },
+  "native_acceptance": false,
+  "packet_sha256": "5721cc88240dd4175f8de91ba3509fbb9339708a61ab23a8c3b9df9398f399a2",
+  "playable_artifact": null,
+  "process": {
+    "exit": 0,
+    "finished_at": "2026-10-29T00:59:27.865182+00:00"
+  },
+  "receipts": [
+    {
+      "body_sha256": "b2017838503128cacbc0ef3048e3db5c000ae960294b3ab4ff2557f7120c4d3f",
+      "elapsed_seconds": 10.942463666200638,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "b5072262-0269-4ab8-95fd-a5ab13b7e7f0",
+      "response_request_ids": [
+        "b5072262-0269-4ab8-95fd-a5ab13b7e7f0"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 683,
+        "completion_tokens_details": {
+          "reasoning_tokens": 637
+        },
+        "prompt_tokens": 2245,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 2928
+      },
+      "usage_status": "reported",
+      "usd": "0.000466"
+    }
+  ],
+  "retries": 0,
+  "reviewer_calls": 0,
+  "settled_usd": "0.000466",
+  "source_commit": "2f120d7d3ca0606250857f281ff5368f7255c666",
+  "terminal": "proposal_abstention",
+  "unused_run_allowance_expired": true,
+  "verification": {
+    "campaign": {
+      "calls": 260,
+      "committed_microusd": 223206,
+      "effective_max_calls": 272,
+      "effective_max_execution_groups": 74,
+      "evaluation_suite_sha256": "3ceedf946b9eeaebd63e70b33c90ce3f441158d40c1e5db326f891e73e5bb30e",
+      "execution_groups": 72,
+      "fixture_only": false,
+      "known_cost_microusd": 223206,
+      "overrun": false,
+      "provider_hard_cap": false,
+      "reconciled_bills": 7,
+      "remaining_calls": 12,
+      "remaining_execution_groups": 2,
+      "stopped": false,
+      "unknown_calls": [],
+      "unknown_executions": []
+    },
+    "editable_and_protected_sources_unchanged": true,
+    "ledger_sha256": "b9865bd1280359bc36db9347c1b1548b6bac2ed99c157b029f2a9768355d4011",
+    "ledger_unchanged_on_replay": true,
+    "replayed_without_dispatch": true,
+    "source_sha256": {
+      "app.js": "6ca6a34624a88e8bcb587b19519ac03ec861b1413a5507fcab9fb1fb32916a3a",
+      "browser-harness.cjs": "8a5cac22c18d198d82b6b903e8cf75671a8e2eb54bcb32cfa318bebe0315100a",
+      "index.html": "6492ae95ebe42ece4b3360f05e82af25e58a2cadb6086b4af184dd678d265696",
+      "probe.json": "eefb8a743cfc3556b5a714eb3905e103d04d73f8a6f3fc23d8952d3cdfd59f63",
+      "style.css": "8800da7d0439fb1458bcef5de5c6c9d50bcadb6f579f18248987cd5013fa2ec7"
+    }
+  },
+  "version": "browser-game-live-result@v1"
+}

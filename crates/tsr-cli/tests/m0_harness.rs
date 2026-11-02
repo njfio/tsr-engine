@@ -204,10 +204,99 @@ fn structural_trace_of_fixture(path: &Path) -> Vec<StructuralEvent> {
         .collect()
 }
 
+// Explicit local prerequisite for the synthetic self-test; never pulled or used as
+// the production default. The test must fail if this installed image is unavailable.
+const SELFTEST_IMAGE: &str =
+    "sha256:cff6dcceb8b9d203a818b7ff104b89a6aaa353f8576850ca4f58903539417945";
+
+fn prepare_parser(cwd: &Path, broken: bool) {
+    std::fs::create_dir_all(cwd.join(".cargo")).unwrap();
+    std::fs::write(cwd.join(".cargo/config.toml"), "[term]\nquiet = true\n").unwrap();
+    std::fs::write(
+        cwd.join("Cargo.toml"),
+        r#"[package]
+name = "parser"
+version = "0.0.0"
+edition = "2021"
+autotests = false
+[[test]]
+name = "contract"
+path = "contract.rs"
+harness = false
+"#,
+    )
+    .unwrap();
+    let source = r#"fn parse(input: &str) -> Result<i64, std::num::ParseIntError> {
+    input.parse()
+}
+fn main() {
+    assert_eq!(parse("42"), Ok(EXPECTED));
+    assert_eq!(parse("-7"), Ok(-7));
+    assert!(parse("not-a-number").is_err());
+    assert!(parse("").is_err());
+    print!("test result: ok");
+}
+"#;
+    std::fs::write(
+        cwd.join("contract.rs"),
+        source.replace("EXPECTED", if broken { "43" } else { "42" }),
+    )
+    .unwrap();
+}
+
+#[test]
+fn synthetic_parser_failure_cannot_emit_success_marker() {
+    if exec::Runtime::detect().is_none() {
+        eprintln!("no runtime; synthetic parser negative control not executed");
+        return;
+    }
+    let cwd = scratch("parser-negative");
+    prepare_parser(&cwd, true);
+    let out = Command::new(tsr_bin())
+        .args(["hook", "--stage", "SessionStart"])
+        .env("TSR_DB", cwd.join("tsr.db"))
+        .env("TSR_SESSION", "parser-negative")
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Session identity is supplied explicitly; create the task through the CLI hook.
+    let mut child = out;
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"session_id":"parser-negative","hook_event_name":"SessionStart"}"#)
+        .unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+    let out = Command::new(tsr_bin())
+        .args(["exec", "--", "cargo", "test", "--offline", "-p", "parser"])
+        .current_dir(&cwd)
+        .env("TSR_DB", cwd.join("tsr.db"))
+        .env("TSR_SESSION", "parser-negative")
+        .env("TSR_EXEC_IMAGE", SELFTEST_IMAGE)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("test result: ok"));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("assertion"),
+        "{:?}",
+        out
+    );
+    let store = store_path::open_store_at(&cwd.join("tsr.db")).unwrap();
+    assert!(store.by_task(&store_path::task_for_session("parser-negative")).unwrap().iter()
+        .any(|(_, event)| matches!(event.kind, EventKind::Executed { exit_code: Some(code), .. } if code != 0)));
+}
+
 /// Run `tsr hook --selftest` with `cwd` as the working directory, returning the produced fixture.
 fn run_selftest(cwd: &Path) -> Vec<u8> {
+    prepare_parser(cwd, false);
     let out = Command::new(tsr_bin())
         .args(["hook", "--selftest"])
+        .env("TSR_EXEC_IMAGE", SELFTEST_IMAGE)
         .current_dir(cwd)
         .output()
         .expect("run tsr hook --selftest");
@@ -253,12 +342,12 @@ fn selftest_is_reproducible_structurally_excluding_duration_ms_by_name() {
 
     // Two independent real runs in two scratch directories must agree structurally with each other
     // and with the FakeRunner replay. A wall-clock timestamp in the id input would break this.
-    let _ = run_selftest(&scratch("run1"));
-    let first =
-        structural_trace_of_fixture(&scratch("run1").join("fixtures/m0/session.events.jsonl"));
-    let _ = run_selftest(&scratch("run2"));
-    let second =
-        structural_trace_of_fixture(&scratch("run2").join("fixtures/m0/session.events.jsonl"));
+    let run1 = scratch("run1");
+    let _ = run_selftest(&run1);
+    let first = structural_trace_of_fixture(&run1.join("fixtures/m0/session.events.jsonl"));
+    let run2 = scratch("run2");
+    let _ = run_selftest(&run2);
+    let second = structural_trace_of_fixture(&run2.join("fixtures/m0/session.events.jsonl"));
 
     assert_eq!(
         first, second,

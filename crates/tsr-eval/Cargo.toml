@@ -1,0 +1,21 @@
+[package]
+name = "tsr-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Baseline evaluation for the M3 corpus: paired numbers, cluster bootstrap, INCONCLUSIVE (PRD B9, B10, Appendix A)"
+
+[dependencies]
+tsr-batch = { path = "../tsr-batch" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3"

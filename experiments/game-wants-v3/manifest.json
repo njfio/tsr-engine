@@ -1,0 +1,26 @@
+{
+  "version": "game-wants-offline@v3",
+  "status": "unadmitted_cumulative_evidence_transport_blocked",
+  "paid_dispatch": false,
+  "live_admissions": 0,
+  "files": {
+    "experiments/game-wants-v3/protocol.json": "64344485df503539d4ea3ec56233b056faa33246618e1cfb2914e94c91077ce2",
+    "experiments/game-wants-v3/mapping.py": "9bf0a2cbb975a2d7f48f91f805ea3dd3b5c3f99f52296c5136e7235f927164aa",
+    "experiments/game-wants-v3/README.md": "eae62249a55c5417f7c7d434c02cafc65588cf2dda846a2903465bfce7f9aaee",
+    "docs/game-wants-registration-result.md": "00e3f8cfb736dc5e40903ac2ac828a25bd7de751b978bf0477d1b156ae8df527",
+    "docs/game-wants-registration-result.json": "75fb2fc3edf0d4edcf62b27ab86c29a135129c73e5c24d1cd5bdffc83676078d",
+    "scripts/test_game_wants_mapping.py": "8eb008957df9605be737ba3bbb4cea6d2fe3043f60117fb9a9caca02cf1533b1",
+    "scripts/test_browser_supplemental_controls.py": "b4ff899c8ce0aca0f0aeab2f684b70ff8716f4c976b0cba20444de054eff91d5",
+    "scripts/test_criterion_control_observations.py": "015c6ae5b26ebbb1d320c053f5b9100ada2fbd9397755c3940475466008a0863",
+    "scripts/engine-browser-project.py": "25e030b3612f9314006208cd1621b1bdffb6a967c82be0bdb3c47f4ae3e4d0e3",
+    "scripts/engine-criterion-return.py": "9e57bcb166f1010dc50cee9a43f97fe642bb4ab4c7489cad4ef2b2df7c38be3a",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/supplemental.rs": "2f5fa22f3c2846efaa9cec912757cb5bdbd10a69860c5697f83e3bf067291f09",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/typed.rs": "005312a700613831a4b514e8e41a9b9e4bdbd20c9b619885ef155e462904e894",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/criterion_return.rs": "0d7427a2baeef477223788fa547db34d3d57e02512c1e14240b96f3befa63b84",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/relational.rs": "ee44809bce6955fb5fecf244f34a1b17e421077f54666821196bf5298ae23991"
+  },
+  "base_packets": {
+    "experiments/game-wants-v1/manifest.json": "13d1a67409ce707c7ee1b0d28c4cbf761086c7d3cff9a49708dab7d51d59ba2a",
+    "experiments/game-wants-v2/manifest.json": "2d5649a838c8d2e1c075a869ac38bce0c5243382f599b4ea8d5de5cc2613194c"
+  }
+}

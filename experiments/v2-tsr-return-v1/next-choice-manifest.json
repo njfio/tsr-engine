@@ -1,0 +1,13 @@
+{
+  "version": "same-session-next-choice-packet@v1",
+  "files": {
+    "adapter-admission.json": "ab42768c5137e341ed04c4aef964bcaf2a11a297c52224f43d309b06b0ad1a38",
+    "cycle-admission.json": "6cf38ed2671e15f7177e93592880da8235fdd89ca1ce4635b9c26c89ee48e65d",
+    "scope-grant.json": "b3b5ecbfe5421ec6b2db84d237ca2456fff953db8da9a5afebd0c7e77afb76cd",
+    "source-lineage.json": "deaff292abd8d84251641ae4349293b09ef4d78f9923d629c9cd660d1ef82ef5",
+    "scope-authority.json": "4d3c258a9d682c6d150329f907511cc9ded5dcc46da68df85342638a3537fbe9",
+    "continuation-instruction.json": "62eb3270dab4155a0dbba27a884ccd695b8c93d3717c30709ec3514df58c8fb5",
+    "continuation-issued.json": "37ea100f07c2ddafc829498bc09c365c5c55fcf3ec5ea1d26ada7b327101f0f7"
+  },
+  "prepare_sha256": "7037e784283df6177708c450521eb7e0a49cc96b63f1478013c07187146b010d"
+}

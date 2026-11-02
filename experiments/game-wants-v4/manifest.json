@@ -1,0 +1,26 @@
+{
+  "version": "game-wants-offline@v4",
+  "status": "prepared_unadmitted_operator_assisted",
+  "paid_dispatch": false,
+  "live_admissions": 0,
+  "files": {
+    "experiments/game-wants-v4/protocol.json": "eb35fb8f0c63ece2d285731c3490a52a4d386f701bd1ddaf8959f81111b556f2",
+    "experiments/game-wants-v4/README.md": "5563895b0efc68cfa88e1760a33b8771d4479d226ecf567e3da0d62ff2971eae",
+    "experiments/game-wants-v3/mapping.py": "9bf0a2cbb975a2d7f48f91f805ea3dd3b5c3f99f52296c5136e7235f927164aa",
+    "docs/game-wants-cumulative-result.md": "15d98fd3a6465fab71686ef19b29d4395bb032e43ac71759be18c903b74ca6bc",
+    "docs/game-wants-cumulative-result.json": "9fc69c0f3d3d96c878b5be3aa732a183c91beba44b2bf9439972b522a7de9950",
+    "scripts/engine-criterion-return.py": "38145ee07212c8144d27db7917d5ec78402c2bd12586a04204bbed1f48c513bc",
+    "scripts/test_browser_supplemental_controls.py": "8d70df290f2f98587b2fcd453e92e6c76cee1a40310e1a7a1badd31cc5eeab05",
+    "scripts/test_criterion_control_observations.py": "b1c430e9e100735c6d604683793cc402098f396c1c0bb5e5e6648114e9c72561",
+    "scripts/test_engine_criterion_consistency.py": "6096763c9e5d68b144707a8f7313c63dea3f3adae1a2b400ab8b53cf8491a999",
+    "crates/tsr-cli/src/engine_project_cmd.rs": "e4d7327db5defa65278d0607c0d88a0035a2ef79752f66760e702c8577b6c5c6",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/criterion_return.rs": "355e9175aa9651960d643b0b6d5933ce1336aee0b3b94d14d1712879ae4113d6",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/typed.rs": "5fd85d3db9f2a21b43e13797d407945f89c2350dc83b6a6e2f6567787298b100",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/acceptance/reviewer/supplemental.rs": "ee72505603fdc26a55d3ff0826b49371d3bf4c53d10c59143ad735f8d7281c63"
+  },
+  "base_packet": {
+    "path": "experiments/game-wants-v3/manifest.json",
+    "sha256": "eaac20e69df42b32588295195cf8fb0c6ebfe3d40c2fd2aa6b9e8dcb4114ebae"
+  },
+  "independent_review": "binding_review: source, capacity and final exact six-observation payload audit passed; registered/imported completeness and operator-assistance limits retained"
+}

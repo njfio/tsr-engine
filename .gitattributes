@@ -1,0 +1,4 @@
+# Content-addressed evidence must retain exact bytes, including captured whitespace.
+docs/m3-native-admission/**/cas/* -text -diff
+docs/m3-native-screen/**/cas/* -text -diff
+docs/m3-preparations/**/cas/* -text -diff

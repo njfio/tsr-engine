@@ -1,0 +1,11 @@
+# Source-bound browser review handoff
+
+Prospective browser adapter v5 removes the contradictory review_id response example. Trusted transport still supplies host-owned metadata only after exact invocation/source/settlement association. Explicit review_format_regeneration rejects the entire malformed response and permits a newly counted full response under the shared correction allowance; it never strips or repairs an identifier. Semantic rejection is not a format correction.
+
+An independently owned valid rejection is recorded in the adapter's persistent journal as an attributed, fallible judgment, with candidate/source/reviewer bindings and no execution or acceptance authority. The existing cycle counts this as a decision and requests a fresh ordinary proposal. Three such continuations are permitted; unknown and abstention remain terminal. Identical complete semantic candidates (excluding host metadata) stop. Correcting an unsupported rationale with unchanged otherwise suitable code remains possible and requires a new independent review.
+
+Historical live4 criticism remains separate: the old review was invalid and is not admitted retrospectively. Preparation verifies its exact retained bytes and predecessor admission/source; the independently confirmed criticism is pinned as advisory assessment. Projection requires matching admitted parents/scope/source and suppresses it after the source changes. The admitted shared-board relationship and contributing history remain in native state.
+
+This is a reusable adapter/controller connection, not a game-specific solution. Rejection memory is currently adapter-journal context, not a new native desire or native acceptance record. Interrupted outer operations remain fail-closed; no automatic uncertain replay is added.
+
+Verification: 15 authored native/browser tests passed, including malformed review → fresh review and valid rejection → revised proposal → separate review → actual isolated browser execution → inert terminal replay. One additional source/cross-request/duplicate rejection control passed. Earlier broad run failed because implementation pins changed during independent review; preserved log, then code frozen and full conclusive run passed. No paid calls occurred during these checks; fixture code is not engine game output.

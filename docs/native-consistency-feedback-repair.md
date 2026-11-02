@@ -1,0 +1,19 @@
+# Native consistency rejection as choice feedback
+
+The fresh live validation's first reflection was correctly rejected: it omitted `proposed_development` while changing relationship, aspiration and discriminator. The exported contract and native validator both require verbatim retention when no development is declared. This was a model consistency error, not malformed JSON, missing evidence or a permission failure. The one call settled at$0.001585; no meaning, code or execution was admitted. Original evidence remains in `target/harness-feedback-cycle-live-v2`.
+
+The harness previously routed independent reviewer rejection but terminated at this pre-admission consistency error. The generic browser path now retains its authenticated response/source/settlement association and returns the exact native constraint to a fresh proposal decision. It does not repair the response or invoke the format-correction mechanism. Retention, explicit justified development, another permitted possibility and abstention remain open. Separate independent review is still required before any valid proposal is admitted.
+
+Only `no_insight_meaning_drift` is eligible. Stale source, invalid parents/ancestry, authority failures and unknown effects remain terminal. Native and reviewer rejections share one counter, including an inherited rejection. Identical invalid candidates stop. Restart verifies the standard transport envelope, exact source and known settlement before continuing with recorded feedback; a fourth rejection cannot expand a three-rejection allowance. The final fresh choice after the third recorded rejection has identical behavior before and after restart.
+
+The same-session derivative imports the original critique as independently assessed preparation evidence, not a native admission. Preparation verifies original journal chains/admissions, source, measured settlement, exact campaign trial/request/bill joins, retained content and reproducible native error. It pins the diagnostic, its script and the provenance manifest. The campaign request-body digest remains opaque; an unsuccessful attempt to reconstruct it from an earlier preparation projection was rejected, not rewritten or claimed authentic.
+
+Verification:
+- Six native/duplicate/security/inherited/shared-budget tests passed in373.587s (`target/native-consistency-feedback-tests-v2.log`).
+- Five final provenance/budget/restart checks passed in130.660s (`target/native-consistency-feedback-final-clean.log`).
+- Seven transient-recovery unit tests passed, plus the composed native format-error→503→restart→review test passed in43.373s (`target/native-consistency-transient-unit.log`, `target/native-consistency-transient-compatibility.log`).
+- Independent source and final packet review passed. Compilation and diff checks passed.
+
+Preserved local failures include an authored test using a checkpoint with no eligible lineage, a fake test object's missing controller stub, and two rejected preparation identity assertions. These were local checks, not provider calls or gameplay observations. No validation was relaxed to accept the live response.
+
+The repair and derivative preparation count as one manual intervention episode with multiple local fixes; a later successful suffix must not be presented as a hands-off full validation. Remaining scope is199calls/100operations/$9.998415, original18:34:03.866190UTC deadline,19format corrections and one120second exact-failed-zero retry. Prior1call/$0.001585 remains counted. The final reviewed derivative is `target/harness-feedback-cycle-live-v2-repaired-4`, manifest `2f40085a3fc01cdfd8c282fc5196dc2f3027cfe2091da9f71a71a3faa15431f1`. It preserves the authentic v2 lineage, source and16-check assessment, plus the unadmitted rejection. This document records preparation and local evidence, not a successful live result.

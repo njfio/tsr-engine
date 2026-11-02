@@ -1,0 +1,17 @@
+{
+  "id": "gpt-6-luna",
+  "context_length": 1050000,
+  "max_output_tokens": 128000,
+  "endpoint": "/v1/chat/completions",
+  "supports_reasoning": true,
+  "reasoning_capability_mode": "auto",
+  "input_per_million": "0.065000",
+  "output_per_million": "0.325000",
+  "cache_read_per_million": "0.013000000000000000000000",
+  "cache_write_per_million": "0.162500000000000000000000",
+  "source": "https://api.cheaperinference.com/public/models/gpt-6-luna",
+  "retrieved_at": "2026-10-29T05:39:39.985378+00:00",
+  "catalog_sha256": "000b26c4819658e59c01ad772eb52f2a1ee0f5ce7d8c053d4df94ff9475461ca",
+  "configured_completion_tokens": 32768,
+  "reasoning_effort": "not configured; model-specific values unverified"
+}

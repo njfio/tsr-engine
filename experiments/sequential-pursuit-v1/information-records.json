@@ -1,0 +1,18 @@
+{
+  "records": [
+    {
+      "attribution": "An illustrative starting collection with a previous selection. Evaluator-authored fictional input example.",
+      "digest": "22896a9885727bc12a6822fa13ba699d636a2784500076c6e3becfc35fe3081c",
+      "id": "initial-collection",
+      "path": "condition-a.json",
+      "uncertainty": "Illustration only; not a program outcome or established real-world truth."
+    },
+    {
+      "attribution": "An illustrative availability change retaining the same task obligations. Evaluator-authored fictional input example.",
+      "digest": "f164dbfff17dd05984099a5fc9e11fb59e75dbfcb046eded18a5a393878622af",
+      "id": "changed-availability",
+      "path": "condition-b.json",
+      "uncertainty": "Illustration only; not a program outcome or established real-world truth."
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "goal": "Correct invoice subtotal and discount arithmetic while preserving the ledger check.",
+  "image": "sha256:f4ac0e0b42b4188fa2e645566edcc84c51de05aea0a2947ff06f23e6052100b6",
+  "user": "501:20",
+  "cargo": true,
+  "probe_entry": "",
+  "editable": {
+    "src/pricing.rs": "",
+    "src/discount.rs": ""
+  },
+  "protected": {
+    "Cargo.toml": "",
+    "Cargo.lock": "",
+    "src/lib.rs": "",
+    "tests/invoice.rs": "",
+    "ledger/Cargo.toml": "",
+    "ledger/src/lib.rs": "",
+    "ledger/tests/ledger.rs": ""
+  },
+  "cases": [
+    {
+      "id": "subtotal",
+      "args": [],
+      "expected_stdout": ""
+    },
+    {
+      "id": "discount",
+      "args": [],
+      "expected_stdout": ""
+    },
+    {
+      "id": "floor",
+      "args": [],
+      "expected_stdout": ""
+    },
+    {
+      "id": "ledger_identity",
+      "args": [],
+      "expected_stdout": ""
+    }
+  ],
+  "timeout_ms": 20000
+}

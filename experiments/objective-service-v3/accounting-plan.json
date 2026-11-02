@@ -1,0 +1,58 @@
+{
+  "applied": false,
+  "counterfactual_only": {
+    "known_plus_reservation_microusd": 1395539,
+    "remaining_calls": 24,
+    "remaining_groups": 5,
+    "reservation_microusd": 1200000
+  },
+  "current_prefix_head": "cfc5839c701a64c54f18dce6b824c18b467304c0e963509e538fdb9c96b99601",
+  "current_status": {
+    "calls": 234,
+    "committed_microusd": 195539,
+    "effective_max_calls": 252,
+    "effective_max_execution_groups": 68,
+    "evaluation_suite_sha256": "4873220a8eb94d2b31ef0b0b47a66051fc27953df8e31c63a1f8d61f4a4e50e1",
+    "execution_groups": 65,
+    "fixture_only": false,
+    "known_cost_microusd": 195539,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 6,
+    "remaining_calls": 18,
+    "remaining_execution_groups": 3,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "grant_template": {
+    "authority_sha256": null,
+    "cap_microusd": 5000000,
+    "ledger_prefix_head": "d8455e2be72e374b4ccc480e1273eaebeda4a0ce5aa50710aebf87ec0a78904b",
+    "manifest_sha256": "7df4975d8cc5f99c2e847ced4969923e4fa5d40e98e9b664388fcb217642acfb",
+    "max_calls": 258,
+    "max_execution_groups": 70,
+    "previous_max_calls": 252,
+    "previous_max_execution_groups": 68,
+    "reservation_microusd": 50000,
+    "reviewer": null,
+    "source_class": "newly-authored-nonprivate-finite-service-objective",
+    "suite_manifest_sha256": "7c7ebc0feec01786d42634506c70dd30c8984efcd7ddd5beff7a1337ee0eca12",
+    "version": "native-objective-extension@v3"
+  },
+  "ledger_sha256": "7b7d532c0060edb35d8726ee4d2d1f942764e2135437ed4e2dfa2089d484ce6a",
+  "manifest_sha256": "7c7ebc0feec01786d42634506c70dd30c8984efcd7ddd5beff7a1337ee0eca12",
+  "prospective_post_upgrade_head": "d8455e2be72e374b4ccc480e1273eaebeda4a0ce5aa50710aebf87ec0a78904b",
+  "required": "New user approval digest and independent grant review; fresh prefix/head/rates/deadline recheck; apply nothing from preparation.",
+  "upgrade_sha256": "183a2e1e6fe9896a2166007490cb004025f461ad0848c42f903479e0c3ab8340",
+  "upgrade_template": {
+    "ledger_prefix_head": "cfc5839c701a64c54f18dce6b824c18b467304c0e963509e538fdb9c96b99601",
+    "new_implementation_sha256": "7eb074c2591d60b103165803d62d12f55743c1bb79c938b0fcc30f9973ad7824",
+    "old_implementation_sha256": "ad5410332a20c3e87ccb923b9be278b300573c9e49110e839eb467d8ea479b5b",
+    "old_manifest_sha256": "7df4975d8cc5f99c2e847ced4969923e4fa5d40e98e9b664388fcb217642acfb",
+    "reason": "Prospective exact252-to258call/68-to70group validator only. No grant or upgrade applied; requires new explicit batch approval.",
+    "reviewer": "/root/binding_review",
+    "version": "b91-campaign-upgrade@v1"
+  },
+  "version": "objective-v3-accounting-preparation@v1"
+}
