@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     container: rust:1.90-bookworm
     timeout-minutes: 45
+    env:
+      # Retain debug assertions/overflow checks; omit full DWARF variable detail.
+      # Native admission hashes the exact binary under its existing 128 MiB bound.
+      CARGO_PROFILE_DEV_DEBUG: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Use the Debian image's interpreter: Cargo and sealed transports sanitize
@@ -21,7 +25,9 @@ jobs:
       - name: Rust workspace (no nested container runtime)
         run: cargo test --locked --workspace --no-fail-fast
       - name: Build native CLI for authored transport tests
-        run: cargo build --locked -p tsr-cli
+        run: |
+          cargo build --locked -p tsr-cli
+          python3 -c 'from pathlib import Path; p=Path("target/debug/tsr"); print("native binary bytes:", p.stat().st_size); assert p.stat().st_size <= 128 * 1024 * 1024'
       - name: Contract and recovery tests (no provider)
         env:
           PYTHONPATH: .:scripts

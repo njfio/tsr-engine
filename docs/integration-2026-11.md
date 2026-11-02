@@ -113,3 +113,10 @@ passes the same decoder locally. D4/R1 tests now select their own scratch stores
 assertions and production locking remain unchanged; all four targeted D4/R1 tests
 pass locally (2.84 seconds), and rustfmt/diff checks pass. The failed CI is preserved,
 and a new exact-head run must pass before merge.
+
+Replacement CI 41470974098 passed the complete Rust workspace, then the authored
+Python admission fixture rejected target/debug/tsr at the existing 128 MiB hashing
+bound. CI now uses limited debug information (CARGO_PROFILE_DEV_DEBUG=1) throughout
+the job and explicitly checks binary size after build. Optimization level, debug
+assertions, overflow checks and production admission bounds are unchanged. This
+build-only adjustment received independent review; final CI remains the merge gate.
