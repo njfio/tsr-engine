@@ -1,0 +1,28 @@
+{
+  "version": "v2-tsr-post-action-new-evidence@v1",
+  "prepared": "target/v2-tsr-post-action-2",
+  "files": {
+    "adapter-admission.json": "ca7a28915570d1636d8e1cef8b0bf798f8746f2a32bc621653b19184c50403ff",
+    "cycle-admission.json": "5fad16035e57202abc7a07d8a2a9341327d31b10621f698948ff6d36496dfbd5",
+    "scope-authority.json": "901445a376edfff3b58d98bcc38026f7ccc1282505233e87cbddd110c4a5425a",
+    "scope-grant.json": "a0b3e21de3918c9a1ab3cbe7d549c9ce8e29201ddc2d23606beb35a4dd83701c",
+    "public-preview.json": "3eea8e60ef859eddb2147e751a9e6272d96b9dee1a7473a23c0eaa022bb521a8",
+    "recovery-proof.json": "aaf3f3e9c2b473ced728e4730bdeb8af319153ecfbae5ec131f2c1e2dbc89a83",
+    "independent-review.json": "c7a45f49c4b327c73beeee7658033a273346825266953804226353e43b395a8f"
+  },
+  "baseline": {
+    "calls": 298,
+    "operations": 83,
+    "microusd": 301510
+  },
+  "deadline": "2026-10-29T13:59:32.822861+00:00",
+  "purpose": "Reflect on new independently verified outcome; no prescribed meaning or next action",
+  "limits": {
+    "calls": 8,
+    "operations": 1,
+    "microusd": 500000,
+    "shared_corrections_remaining": 4
+  },
+  "historical_preview_response": "Lost before retention; not reconstructed or reused",
+  "operator_intervention": "Third routing/assessment bridge; prior interrupted journal preserved"
+}

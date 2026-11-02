@@ -1,0 +1,21 @@
+{
+  "cargo": false,
+  "cases": [
+    {
+      "args": [],
+      "expected_stdout": "",
+      "id": "abi_smoke_only"
+    }
+  ],
+  "editable": {
+    "lib.rs": "#[derive(Clone, Debug)]\npub struct Note { pub id: u32, pub tag: u8 }\npub fn shortlist(notes: &[Note], _previous: &[u32], capacity: usize) -> Vec<u32> {\n    notes.iter().take(capacity).map(|n| n.id).collect()\n}\n"
+  },
+  "goal": "Operate a three-round fictional shortlist service with dependable continuity and distinct perspective coverage. Artifact smoke success is not objective completion.",
+  "image": "sha256:cff6dcceb8b9d203a818b7ff104b89a6aaa353f8576850ca4f58903539417945",
+  "probe_entry": "service.rs",
+  "protected": {
+    "service.rs": "// Immutable independent fixture entry. No winning output or implementation.\ninclude!(\"lib.rs\");\nuse std::collections::BTreeSet;\nfn main() {\n    let args: Vec<String> = std::env::args().skip(1).collect();\n    if args.is_empty() { return; } // ABI smoke only, never a service outcome.\n    assert_eq!(args.len(), 2, \"exact condition and prior-output arguments\");\n    let (cap, body) = args[0].split_once('|').expect(\"condition delimiter\");\n    let cap: usize = cap.parse().expect(\"capacity\");\n    let notes: Vec<Note> = if body.is_empty() { vec![] } else {\n        body.split(',').map(|s| {\n            let (id, tag) = s.split_once(':').expect(\"record delimiter\");\n            Note { id: id.parse().expect(\"id\"), tag: tag.parse().expect(\"tag\") }\n        }).collect()\n    };\n    let previous: Vec<u32> = if args[1].trim().is_empty() { vec![] } else {\n        args[1].trim().split(',').map(|s| s.parse().expect(\"prior actual output\")).collect()\n    };\n    assert!(notes.len() < 20, \"bounded independent enumeration\");\n    assert_eq!(notes.iter().map(|n|n.id).collect::<BTreeSet<_>>().len(), notes.len());\n    let output = shortlist(&notes, &previous, cap);\n    // Record the actual candidate before reporting finite oracle failure.\n    println!(\"{}\", output.iter().map(u32::to_string).collect::<Vec<_>>().join(\",\"));\n    assert_eq!(output, shortlist(&notes, &previous, cap), \"repeatability\");\n    let k = cap.min(notes.len());\n    let coverage = k.min(notes.iter().map(|n|n.tag).collect::<BTreeSet<_>>().len());\n    let prior: BTreeSet<_> = previous.iter().copied().collect();\n    let mut optimum = 0;\n    for mask in 0u64..(1u64<<notes.len()) {\n        if mask.count_ones() as usize != k { continue; }\n        let subset: Vec<_> = notes.iter().enumerate().filter(|(i,_)|mask&(1<<i)!=0).map(|(_,n)|n).collect();\n        if subset.iter().map(|n|n.tag).collect::<BTreeSet<_>>().len() != coverage { continue; }\n        optimum = optimum.max(subset.iter().filter(|n|prior.contains(&n.id)).count());\n    }\n    assert_eq!(output.len(), k, \"cardinality\");\n    assert_eq!(output.iter().collect::<BTreeSet<_>>().len(), k, \"unique IDs\");\n    assert!(output.iter().all(|id|notes.iter().any(|n|n.id==*id)), \"available IDs\");\n    assert_eq!(output.iter().map(|id|notes.iter().find(|n|n.id==*id).unwrap().tag).collect::<BTreeSet<_>>().len(), coverage, \"coverage\");\n    assert_eq!(output.iter().filter(|id|prior.contains(id)).count(), optimum, \"retention subject to coverage\");\n}\n"
+  },
+  "timeout_ms": 20000,
+  "user": "501:20"
+}

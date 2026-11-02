@@ -1,0 +1,11 @@
+{
+  "runtime_commit": "210b0d5c0a3c34c76eb16b98328bbeb4c145998d",
+  "source_packet_sha256": "69314718a7831f1f2cb9c18547ecde60d4b3e1aef3649f0e1b108b7dc0eeaa2c",
+  "files": {
+    "docs/validation/game-wants-paired-completion/accounting.json": "c0649b4e4af2c836ceb8e96522e36e935ceac2f39b614a8603fc87e3481afb44",
+    "docs/validation/game-wants-paired-completion/independent-outcome-review.json": "07547a34082703b9218c9340d7f111b2b450abed6ac3e0fb70f42e8395a521dd",
+    "docs/validation/game-wants-paired-completion/ordinary-artifact.json": "a908896b2e02137f85152ac7e152491779a2b5287ce757d04ab40f3dc83b80e6",
+    "docs/validation/game-wants-paired-completion/ordinary-inert-replay.json": "78219f58318f1437578bdf97386206e161b59fbbccb7f94c1d7a36a673656b0d",
+    "docs/validation/game-wants-paired-completion/ordinary-observations.json": "5c5630a679530dc199bd783b27e71254946b75cffd7cf95ac53268fcd7c794c6"
+  }
+}

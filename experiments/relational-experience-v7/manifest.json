@@ -1,0 +1,17 @@
+{
+  "version": "relational-experience-representation-recovery-packet@v1",
+  "implementation_commit": "f0b8f3613e359d607c3b885c43656d1f7d2ccd60",
+  "prepared_manifest_sha256": "8e857dcdd23430d590cfeeaf30e296a46bee392586471264ec5ee3d0757ef569",
+  "adapter_sha256": "80ee320c016765dfba8476ea123f026efa139508278de378aa50d8b707497a7b",
+  "scope_grant_sha256": "d3e4ff40dcc508fc9ada38ea4c17c71b241fbdf3cea7eb508a404effe5a6fca6",
+  "files": {
+    "README.md": "4f5c734eee86fdb10104264852d2252df609c1b3a415f226d520f2a010d571d3",
+    "observe.cjs": "26ae78b6c89302050610d5337952da99441fa890b413e9f004274be3e8a6cf5f",
+    "prepare.py": "023129214c63114db72d3b601655f1b225d5f56e375a38c2a823840486bce94a"
+  },
+  "original_packet_sha256": "55a3f499f056e27789cb640378f03f0cfc6bad9ce4b1025d8e544c86e1c1334c",
+  "recovery_proof_sha256": "0200a5f9009c0e8496a99991f66b93ebca67712b749b18f63405b0f5fa88d280",
+  "review": "independent-agent:/root/contrast_bridge_review; no blocker; native wiring/restart verification passed",
+  "scope": "Fresh final-condition decision in same approved evaluation; prior independent rejections preserved; no feedback or execution replay",
+  "launch_pending": true
+}

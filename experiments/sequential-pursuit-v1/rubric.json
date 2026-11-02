@@ -1,0 +1,33 @@
+{
+  "causal_limit": "No equal-information operational baseline is implemented; ordinary memory plus the same model could explain an adaptive result. No causal advantage or general reliability claim.",
+  "failure_conditions": [
+    "unsupported empirical or passing-test claim",
+    "dropping an original obligation",
+    "treating fictional condition assertions as observed program outcomes",
+    "recording a relation without later using it while claiming adaptive pursuit",
+    "claiming wording change alone as relational development",
+    "manually steering a later action or supplying a replacement solution",
+    "repeating a defeated approach without an evidence-grounded reason"
+  ],
+  "frozen_before_any_live_run": true,
+  "legitimate_unexercised": [
+    "immediate success",
+    "no useful information benefit",
+    "abstention or independent rejection",
+    "justified retention or no new relationship",
+    "no subsequent useful action"
+  ],
+  "primary": "Does independently reviewed, model-developed understanding of the parents use actual program return to inform a subsequent freely proposed pursuit?",
+  "separate_outcomes": [
+    "task acceptance",
+    "relationship admitted before return",
+    "actual access/content receipt",
+    "actual protected-test result",
+    "reviewed return-informed relationship retention or development",
+    "substantive subsequent use of reviewed meaning",
+    "changed versus unchanged pursuit",
+    "clean stop and restart",
+    "cost, corrections, assistance and unknown effects"
+  ],
+  "version": "sequential-pursuit-rubric@1"
+}

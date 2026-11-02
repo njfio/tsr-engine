@@ -1,0 +1,21 @@
+# Confirmed pre-exec failure recovery
+
+The Pond assessment failed at Python Popen's executable ENOENT boundary before Docker launched. Exact retained log, adapter/cycle journals, reserved command identity, unchanged source, absent assessment outputs and dead worker were independently reviewed. Evidence: `target/pond-not-started-proof/evidence.json`; review: `target/pond-not-started-proof/independent-review.md`.
+
+The new campaign disposition is append-only. It preserves the original unknown return and consumed operation count, exposes `execution_not_started`, and removes only that exact proven non-start from blocking uncertainty. It creates neither a successful execution receipt nor gameplay observations. Same-key execution remains prohibited. A separate closure tool preserves reviewed journal prefixes and appends an unavailable stop, retaining the actual native unavailable result. Fresh pins/admission are required afterward; original failed work is never reopened.
+
+Future Studio starts verify the existing Docker executable and exact pinned image before model dispatch. Assessment preflight checks executable availability before reservation; a rare executable disappearance between check and Popen is recorded as a typed pre-exec non-start with no observations. Post-spawn timeouts and unrelated errors remain unknown and blocked. Outer isolation is unchanged.
+
+Verification: 66 campaign regressions passed, 2 pre-existing skips; 5 focused campaign disposition tests passed. Six authored proof-shape tests and seven checks of the retained actual evidence passed. Four closure tests cover normal replay and interruption after each closure append. Seven frozen native assessment tests passed (14.666s), including missing-executable versus post-spawn uncertainty. Nineteen Studio startup/recovery tests and 17 server compatibility tests passed. An earlier broader native test run overlapped edits and had two pin-drift failures; its logs are retained and the affected frozen suite passed. Independent final source/evidence/closure reviews passed.
+
+No manual game changes. The original model proposal and review remain retained; no aesthetic or gameplay success is implied by disposition or recovery.
+
+The exact disposition and closure were applied without changing counts: 349 calls/103 operation reservations, known $0.408081. The prior unknown generation remains retained. The next preparation exposed duplicate unlimited admission against a newer native root; preparation now preserves a matching existing policy and rejects a mismatch. Three native UI unlimited tests passed, including preparation twice with zero model calls; independent delta review passed. The failed preparation copy is retained and made no paid call.
+
+## Resumed live result and visual evidence
+
+The resumed Studio session `0393fd8e-b8f2-438f-997a-186787d36552` completed an engine-authored CSS presentation edit, independent review, browser execution, three bounded interface checks and an ordinary subsequent abstention. It consumed returned evidence and explicitly declined to infer aesthetic satisfaction from smoke checks. Source snapshot: `19e368e9ae41e7b6872bc5d78b273f4e47667b4da7fc0f7fb5eb857d2bec1bae`. At this checkpoint accounting was 352 calls/105 operations, known $0.416499 plus the retained $0.05 uncertain estimate (not a verified maximum). No unknown executions remain; the proven non-start remains separately visible.
+
+Independent screenshot critique found improved scale/framing but only partial fulfillment of the substantial visual transformation. Report: `target/pond-not-started-proof/visual-review-19e368e9.md`, SHA-256 `8c6a9fc92d083d3100dac5a1e77f176813d9536054eb208c5f6e629c192b27d5`. A minimal local intake now carries this attributed assessment in the public brief without rewriting user desires or fabricating native receipts. Stale versions are explicitly historical. Four authored tests passed, including altered report hash rejection and stale-source labeling; independent delta review passed. This is trusted local evidence intake, not authentication of arbitrary clients.
+
+Continuation `9bf0ec59-3a41-4f25-874c-2862c6f80ece` is separate and uses the same actual user task plus that exact critique. Its result is pending at this writing. Historical artifacts and failed journals are unchanged.

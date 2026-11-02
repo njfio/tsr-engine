@@ -111,6 +111,84 @@ impl<'a> Ledger<'a> {
         Ok(expansion.produced)
     }
 
+    /// Stage a generated expansion for typed review. Unlike the legacy text constructor,
+    /// this accepts the controller's bounded project text; it grants no eligibility.
+    pub fn propose_generated(
+        &self,
+        task: &TaskId,
+        parents: Vec<EventId>,
+        expansion: Expansion,
+        recorded_at: impl Into<String>,
+    ) -> Result<EventId, LedgerError> {
+        let c = self.contrast_in_log(&expansion.from_contrast)?;
+        if !self.store.by_task(task)?.iter().any(|(_,e)| matches!(&e.kind,
+            EventKind::Observed{observation:tsr_domain::Observation::Return{contrast:Some(found),..}}
+            if found==&c && crate::reviewed::return_source(e.source))) {
+            return Err(LedgerError::InvalidReview("cross-task or untrusted Contrast"));
+        }
+        if c.unmet.is_empty() {
+            return Err(LedgerError::ContrastWithoutUnmet(c.id));
+        }
+        let p = Preference::from_admitted_text(
+            expansion.text.clone(),
+            expansion.scope.clone(),
+            expansion.parents.clone(),
+            Source::Generator,
+        )?;
+        if expansion.origin != Source::Generator || expansion.produced != p.id {
+            return Err(LedgerError::InvalidReview(
+                "noncanonical generated expansion",
+            ));
+        }
+        let e = Event::new(
+            *task,
+            parents,
+            Source::Generator,
+            EventKind::Expanded { expansion },
+            recorded_at,
+        );
+        self.store.append(&e)?;
+        Ok(e.id)
+    }
+
+    /// Admit only an exact independently reviewed generated expansion. Caller owns the
+    /// transaction containing staging, authenticated evidence and this final admission.
+    pub fn admit_reviewed(
+        &self,
+        task: &TaskId,
+        expected_head: tsr_domain::Hash,
+        review: tsr_domain::PreferenceAdmissionReview,
+        evidence: EventId,
+        recorded_at: impl Into<String>,
+    ) -> Result<EventId, LedgerError> {
+        if self.store.head_root()? != expected_head {
+            return Err(LedgerError::InvalidReview("stale admission head"));
+        }
+        let events = self.store.all()?;
+        let pref = crate::reviewed::validate(&events, *task, &review, evidence)?;
+        let view = self.collective()?;
+        if view.get(&pref.id).is_some_and(|e| {
+            e.status.is_some() || e.preference != pref || e.expanded_by != Some(review.expansion)
+        }) {
+            return Err(LedgerError::InvalidReview("already admitted preference"));
+        }
+        if pref.parents.iter().any(|id| view.get(id).is_none()) {
+            return Err(LedgerError::InvalidReview("unknown contributor lineage"));
+        }
+        let e = Event::new(
+            *task,
+            vec![evidence],
+            Source::Council,
+            EventKind::ReviewedPreferenceAdmission {
+                review: Box::new(review),
+                evidence,
+            },
+            recorded_at,
+        );
+        self.store.append(&e)?;
+        Ok(e.id)
+    }
+
     /// Record a Contrast as an `Observed` event, so a later [`Ledger::expand`] may name it.
     ///
     /// The Filter's write rule (PRD §B2.1) admits an expansion only from a Contrast the log

@@ -1,0 +1,14 @@
+{
+  "wants": [
+    {"text":"Understand which decision mechanisms actually operate in the current engine.","aim":{"predicate":"understand","topic":"decisions"}},
+    {"text":"Maintain an evidence-backed account of the decision mechanisms for collaborators.","aim":{"predicate":"account","topic":"decisions"},"parents":[0]},
+    {"text":"Keep the account concise enough to inspect quickly.","aim":{"predicate":"concise","max_words":100},"parents":[1]}
+  ],
+  "notes": [
+    {"id":"selection","topic":"decisions","text":"Ledger selection diffuses scope-seeded mass through preference parent and catalyst links; its horizon and attention limit are explicit settings."},
+    {"id":"commitment","topic":"decisions","text":"A candidate becomes a commitment only after the controller records a forecast and selects it within existing authority."},
+    {"id":"return","topic":"decisions","text":"Observed returns record forecast residual separately from named unmet desires; generated preference refinements remain pending admission."}
+  ],
+  "max_cycles":8,
+  "attention_limit":3
+}

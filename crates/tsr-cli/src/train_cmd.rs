@@ -12,17 +12,33 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use tsr_domain::{Event, Hash};
-use tsr_learn::dataset::{
-    build_dataset, read_labels, read_task_index, write_dataset, SplitBy, SplitConfig,
-    SplitFractions, TaskIndexRow,
-};
+use tsr_learn::dataset::{read_labels, read_task_index, SplitBy, SplitConfig, SplitFractions};
 use tsr_learn::LearnError;
 
 /// The `tsr train` subcommands.
 #[derive(Subcommand)]
 pub enum TrainCmd {
+    /// Canonical content pin for an existing report; not validation or activation authority.
+    ReportPin {
+        #[arg(long)]
+        report: PathBuf,
+    },
+    /// Build a receipt-schema dataset from validated inventories; unknown labels remain absent.
+    ReceiptDataset {
+        #[arg(long, default_value = "operator")]
+        operator: String,
+        #[arg(long, required=true, num_args=1..)]
+        artifacts: Vec<PathBuf>,
+        #[arg(long)]
+        as_of: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Build the dataset, its split and its manifests from the log (B8, B9).
     Dataset {
+        /// RFC3339 maturity cutoff. Omit only for a diagnostic snapshot that cannot be fitted.
+        #[arg(long)]
+        as_of: Option<String>,
         /// The store to read the log from (defaults to `TSR_DB` / `.tsr/tsr.db`).
         #[arg(long)]
         store: Option<PathBuf>,
@@ -102,7 +118,85 @@ pub enum TrainCmd {
 /// Run a `tsr train` subcommand, returning the process exit code.
 pub fn run(cmd: TrainCmd) -> std::process::ExitCode {
     match cmd {
+        TrainCmd::ReportPin { report } => {
+            let result = (|| -> Result<_, LearnError> {
+                use std::io::Read;
+                let mut bytes = vec![];
+                std::fs::File::open(report)?
+                    .take(1_048_577)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() > 1_048_576 {
+                    return Err(LearnError::Invalid("report byte limit".into()));
+                }
+                let report: tsr_learn::report::Report = serde_json::from_slice(&bytes)?;
+                Ok(Hash::of(&[&serde_json::to_vec(&report)?]))
+            })();
+            match result {
+                Ok(pin) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"report_digest":pin,"validated":false})
+                    );
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::ExitCode::from(2)
+                }
+            }
+        }
+        TrainCmd::ReceiptDataset {
+            artifacts,
+            as_of,
+            out,
+            operator,
+        } => {
+            let result = (|| -> Result<_, LearnError> {
+                let mut input = tsr_learn::schema::Input {
+                    artifacts: vec![],
+                    eligibility: vec![],
+                };
+                for path in &artifacts {
+                    let bytes = std::fs::read(path)?;
+                    if let Ok(part) = serde_json::from_slice::<tsr_learn::schema::Input>(&bytes) {
+                        input.artifacts.extend(part.artifacts);
+                        input.eligibility.extend(part.eligibility);
+                    } else {
+                        input
+                            .artifacts
+                            .push(tsr_learn::project_receipts::Artifact::load(path)?);
+                    }
+                }
+                input.write_dataset(
+                    &as_of,
+                    SplitConfig {
+                        by: SplitBy::Repo,
+                        fractions: SplitFractions {
+                            calibrate: 0.25,
+                            holdout: 0.25,
+                        },
+                        seed: 0,
+                    },
+                    &operator,
+                    &out,
+                )
+            })();
+            match result {
+                Ok(ds) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"rows":ds.rows.len(),"resolved":ds.rows.iter().filter(|r|r.label.is_some()).count(),"schema":ds.spec.version,"data_root":ds.data_root})
+                    );
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::ExitCode::from(2)
+                }
+            }
+        }
         TrainCmd::Dataset {
+            as_of,
             store,
             events,
             tasks,
@@ -113,6 +207,7 @@ pub fn run(cmd: TrainCmd) -> std::process::ExitCode {
             seed,
             out,
         } => run_dataset(
+            as_of.as_deref(),
             store.as_deref(),
             events.as_deref(),
             &tasks,
@@ -188,31 +283,6 @@ fn source_root(store: Option<&Path>, events: Option<&Path>) -> Result<Hash, Stri
     store
         .head_root()
         .map_err(|e| format!("cannot read store head_root: {e}"))
-}
-
-/// Write the log and the task index into the dataset directory, so `fit` can re-run the probes.
-fn write_log_into(
-    dir: &Path,
-    events: &[(i64, Event)],
-    index: &[TaskIndexRow],
-) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let mut ev_text = String::new();
-    for (seq, ev) in events {
-        let line = serde_json::json!({ "seq": seq, "event": ev });
-        ev_text.push_str(&serde_json::to_string(&line).map_err(|e| e.to_string())?);
-        ev_text.push('\n');
-    }
-    std::fs::write(dir.join("events.jsonl"), ev_text)
-        .map_err(|e| format!("cannot write events.jsonl: {e}"))?;
-    let mut idx_text = String::new();
-    for row in index {
-        idx_text.push_str(&serde_json::to_string(row).map_err(|e| e.to_string())?);
-        idx_text.push('\n');
-    }
-    std::fs::write(dir.join("tasks.jsonl"), idx_text)
-        .map_err(|e| format!("cannot write tasks.jsonl: {e}"))?;
-    Ok(())
 }
 
 /// F9/B3 (c): an `--out` that cannot be a directory is bad input -- exit 2 naming it, rather than a
@@ -366,6 +436,7 @@ fn refuse_store_that_is_not_a_sqlite_file(store: &Path) -> Option<std::process::
 
 #[allow(clippy::too_many_arguments)]
 fn run_dataset(
+    as_of: Option<&str>,
     store: Option<&Path>,
     events: Option<&Path>,
     tasks: &Path,
@@ -456,7 +527,28 @@ fn run_dataset(
         fractions: SplitFractions { calibrate, holdout },
         seed,
     };
-    let ds = match build_dataset(&log, &index, &labels, tsr_learn::synth::OPERATOR, cfg, src) {
+    let construction = match as_of {
+        Some(cutoff) => tsr_learn::maturity::build(
+            &log,
+            &index,
+            &labels,
+            tsr_learn::synth::OPERATOR,
+            cfg,
+            src,
+            cutoff,
+        )
+        .map(|(ds, proof)| (ds, Some(proof))),
+        None => tsr_learn::dataset::build_dataset(
+            &log,
+            &index,
+            &labels,
+            tsr_learn::synth::OPERATOR,
+            cfg,
+            src,
+        )
+        .map(|ds| (ds, None)),
+    };
+    let (ds, maturity) = match construction {
         Ok(ds) => ds,
         Err(LearnError::NonOperatorLabel { reviewer }) => {
             eprintln!("tsr: label record names reviewer {reviewer:?}, who is not the operator (B8: labels only after review)");
@@ -478,7 +570,13 @@ fn run_dataset(
     {
         let families = tsr_learn::features::families_from_spec(&ds.spec);
         let extractor = tsr_learn::probes::default_extractor(&ds.spec, &families);
-        let report = tsr_learn::probes::run_all(&ds, &log, &index, &ds.spec, &extractor, None);
+        let available = match as_of {
+            Some(cutoff) => tsr_learn::maturity::available_events(&log, cutoff)
+                .expect("dataset validated snapshot"),
+            None => log.clone(),
+        };
+        let report =
+            tsr_learn::probes::run_all(&ds, &available, &index, &ds.spec, &extractor, None);
         if !report.is_clean() {
             for leak in &report.leaks {
                 eprintln!(
@@ -496,13 +594,32 @@ fn run_dataset(
             return std::process::ExitCode::from(2);
         }
     }
-    if let Err(e) = write_dataset(&ds, out) {
+    let written = match &maturity {
+        Some(proof) => tsr_learn::maturity::write(&ds, proof, &log, &index, &labels, out),
+        None => tsr_learn::maturity::write_diagnostic_snapshot(&ds, &log, &index, &labels, out),
+    };
+    if let Err(e) = written {
         eprintln!("tsr: cannot write dataset: {e}");
         return std::process::ExitCode::from(1);
     }
-    if let Err(e) = write_log_into(out, &log, &index) {
-        eprintln!("tsr: {e}");
-        return std::process::ExitCode::from(1);
+    if let Some(maturity) = maturity {
+        println!(
+            "maturity_policy={} as_of={}",
+            maturity.policy, maturity.as_of
+        );
+        for status in ["mature_reviewed", "pending_horizon", "open", "censored"] {
+            println!(
+                "maturity_{status}={}",
+                maturity
+                    .eligibility
+                    .iter()
+                    .filter(|e| e.status == status)
+                    .count()
+            );
+        }
+    } else {
+        eprintln!("tsr: --as-of omitted: diagnostic snapshot only; maturity unknown, fitting refused. Rebuild with an explicit evidence cutoff for maturity validation.");
+        println!("maturity=unknown as_of=unspecified fit_eligible=false");
     }
     println!("dataset {}", out.display());
     println!("rows={}", ds.rows.len());
@@ -594,6 +711,16 @@ fn run_verify(bundle: &Path, rebuild: Option<&Path>) -> std::process::ExitCode {
     match tsr_learn::bundle::verify_bundle(bundle, rebuild) {
         Ok(()) => {
             println!("bundle {} verified", bundle.display());
+            if let Ok(loaded) = tsr_learn::bundle::load_bundle(bundle) {
+                println!(
+                    "maturity={}",
+                    if loaded.manifest.maturity_digest.is_some() {
+                        "versioned evidence digest bound; fit revalidated at declared cutoff"
+                    } else {
+                        "unknown (legacy artifact; hash verification is not maturity validation)"
+                    }
+                );
+            }
             // P1: `code_commit` is recorded provenance, not a verified property. Print it with the
             // label the operator chose, so a reader never mistakes it for a checked value.
             if let Ok(b) = tsr_learn::bundle::load_bundle(bundle) {
@@ -644,6 +771,9 @@ fn run_apply(bundle: &Path, dataset: &Path, side: &str) -> std::process::ExitCod
             return std::process::ExitCode::from(2);
         }
     };
+    if b.manifest.maturity_digest.is_none() {
+        eprintln!("tsr: legacy bundle maturity unknown; historical calibration output is not seven-day-validated evidence");
+    }
     let ds = match tsr_learn::bundle::load_dataset(dataset) {
         Ok(ds) => ds,
         Err(e) => {
@@ -729,6 +859,9 @@ fn run_report(bundle: &Path, dataset: &Path, seed: u64, json: bool) -> std::proc
             return std::process::ExitCode::from(2);
         }
     };
+    if b.manifest.maturity_digest.is_none() {
+        eprintln!("tsr: legacy bundle maturity unknown; historical calibration output is not seven-day-validated evidence");
+    }
     let ds = match tsr_learn::bundle::load_dataset(dataset) {
         Ok(ds) => ds,
         Err(e) => {

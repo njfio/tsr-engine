@@ -1,0 +1,1 @@
+{"alternatives": [{"edits": [{"path": "app.js", "old_text": "// authored obsolete source span absent from current file", "new_text": "// authored proposed replacement"}], "rationale": "Authored reproduction of a zero-match stale span."}]}

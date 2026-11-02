@@ -1,0 +1,82 @@
+{
+  "status": "offline_design_not_admitted",
+  "user_input": {
+    "text": "ok, do a new game, frogger and snake please",
+    "attribution": "verbatim historical user request reused for a proposed experiment, not a new player report",
+    "message_id": "Sentinel_61f54657df5481919087d5287e34f738"
+  },
+  "operational_roots": {
+    "attribution": "experiment-authored operational interpretations, not spontaneous model desires or additional user preferences",
+    "crossing": "Make progress through a field of hazards using controllable movement.",
+    "growth": "Acquire growth and navigate with the resulting body."
+  },
+  "feedback": {
+    "text": "These are source-bound observations from authored control sequences, not player preferences. Review the results against your prior expectations and the existing task. Decide what, if anything, they warrant next. Retention and abstention remain valid.",
+    "attribution": "authored harness feedback accompanying actual observations only"
+  },
+  "observation_batches": [
+    "crossing-first",
+    "growth-first",
+    "mixed-pursuit"
+  ],
+  "criteria": {
+    "crossing": "Controls produce crossing progress, hazards have consistent inspectable consequences, and an observed control sequence can reach the advertised crossing objective.",
+    "growth": "Acquisition changes body state and subsequent control-driven movement reflects the advertised body rules."
+  },
+  "unknown_rule": "An unsuccessful finite search or missing observation is unknown, not proof of impossibility or unmet desire. A witnessed defect may support not_met only against the exact frozen criterion and source.",
+  "shared_consequences": "Record interactions if observed; neither coupling nor a new relationship is a pass requirement. Independent games and zero-growth crossing are valid outcomes.",
+  "minimum_obligations": [
+    "Truthful controls and outcomes",
+    "Start and restart",
+    "Preserve root identities, history and permission boundaries"
+  ],
+  "excluded_claims": [
+    "human enjoyment",
+    "human fulfillment",
+    "final acceptance",
+    "causal TSR advantage from one pair"
+  ],
+  "model": {
+    "provider": "CheaperInference",
+    "model": "gpt-6-luna",
+    "max_completion_tokens": 32768,
+    "stream": false,
+    "response_format": {
+      "type": "json_object"
+    },
+    "temperature": "omitted",
+    "reasoning_effort": "omitted"
+  },
+  "parity": {
+    "user_messages": "identical bytes",
+    "initial_source": "same blank project; no previous game implementation or embellished fusion brief",
+    "semantic_history": "same facts and provenance; ordinary-memory representation versus native TSR organization",
+    "shared_tools": "same source inspection, edits, native preview, protected execution, independent review and observation access",
+    "shared_review": "identical artifact evidence and review standards",
+    "formal_difference": "TSR can propose independently reviewed relationships, same-identity development and native Preferences; ordinary memory cannot admit these formal records",
+    "resources": "same prospective policy and recovery affordances; no transfer between arms",
+    "confounds": [
+      "different state organization and formal transitions",
+      "token and invocation counts",
+      "stochasticity",
+      "backend version not immutable or exposed",
+      "diverging trajectories yield different later evidence"
+    ]
+  },
+  "stop": [
+    "one completion or justified retention after each observation batch",
+    "abstention",
+    "human Stop",
+    "unknown external effect or safety blocker"
+  ],
+  "admission": "none; new explicit paid authorization and independently reviewed live binding required",
+  "observation_policy": {
+    "attribution": "authored prospective tester policy; not player preference",
+    "discovery": "Read visible instructions and current source only to map advertised controls and readouts to each root. Record source hashes, mapping and uncertainty before testing. No code edits, injected state, external assets or desired relationship supplied. Ambiguous or absent mapping is unknown, not not_met. The same blinded mapping reviewer and rules serve each arm; count mapping work as operator setup.",
+    "search": "For each batch start via advertised restart. For each trace length 1, 2, 4, 8, 16, 32 enumerate up to 64 canonical traces, including each repeated direction, then lexicographic combinations, using the same source-independent order Up, Right, Down, Left when those meanings exist. Crossing-first uses mapped crossing controls; growth-first uses mapped growth controls; mixed alternates the sets, deduplicating shared controls. Use 100ms between inputs and the same viewport. This finite coverage limit is not a model/task budget or failure threshold. Stop each trace at advertised terminal state. Include every attempted trace and early termination, not selected successes.",
+    "unsupported": "Analog, timing-sensitive or unmappable controls are marked partial/unknown; no claim of universal game coverage. Do not add a favorable hand-crafted route after seeing results. A different search policy requires a new predeclared observation phase applied symmetrically.",
+    "selection": "No outputs are scored for coupling, novelty, failure or a third desire. Outcomes remain unknown until actual control traces run.",
+    "repeatability": "Record clock/randomness conditions. Fixed controllable timing/seed is synthetic environmental input, never state injection. If source exposes no controllable seed, record nondeterminism; do not claim matched random outcomes.",
+    "binding": "Freeze each exact source-local control/readout mapping and protected checker plan before execution. Mapping identities differ by artifact but policy and coverage are identical. A changed artifact invalidates prior source binding."
+  }
+}

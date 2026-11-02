@@ -1,0 +1,74 @@
+{
+  "version": "paired-completion-audit@v1",
+  "runtime_commit": "210b0d5c0a3c34c76eb16b98328bbeb4c145998d",
+  "ledger_sha256": "f287f4bd462c5e9ac3976a4ce9c1138807ce0d38fdb8e1882b97e0c688df0dcf",
+  "arms": {
+    "tsr": {
+      "calls": 11,
+      "execution_groups": 19,
+      "known_cost_microusd": 61578,
+      "unsettled_call_keys": [],
+      "request_settings": {
+        "{\"max_completion_tokens\": 32768, \"model\": \"gpt-6-luna\", \"response_format\": {\"type\": \"json_object\"}, \"stream\": false}": 11
+      },
+      "retained_provider_receipt_count": 11,
+      "retained_provider_elapsed_seconds": 263.6685953329725,
+      "stages": {
+        "continuation-crossing-first": {
+          "status": "proposal_retention",
+          "source_snapshot": "1a4120c7cbf3ca7255227d929fcb755a0504de8d87a8948a289cda0e67f3d78a",
+          "outcome_sha256": "cd24d102a8ec136bac673b084a5e7e3674ffa16e1ed615130a807de76a056315",
+          "file_elapsed_seconds": null
+        },
+        "continuation-growth-first": {
+          "status": "proposal_retention",
+          "source_snapshot": "1a4120c7cbf3ca7255227d929fcb755a0504de8d87a8948a289cda0e67f3d78a",
+          "outcome_sha256": "99a56dc68e45a8c5c8784690038e64b1a52d872a54592da2d36e1e67e93c4057",
+          "file_elapsed_seconds": null
+        },
+        "continuation-mixed-pursuit": {
+          "status": "proposal_retention",
+          "source_snapshot": "1a4120c7cbf3ca7255227d929fcb755a0504de8d87a8948a289cda0e67f3d78a",
+          "outcome_sha256": "a12a075a69921767206874a41dace1e736bb6ab6fa899f4e295f1fe7f5c0024c",
+          "file_elapsed_seconds": null
+        }
+      }
+    },
+    "ordinary": {
+      "calls": 17,
+      "execution_groups": 20,
+      "known_cost_microusd": 69659,
+      "unsettled_call_keys": [],
+      "request_settings": {
+        "{\"max_completion_tokens\": 32768, \"model\": \"gpt-6-luna\", \"response_format\": {\"type\": \"json_object\"}, \"stream\": false}": 17
+      },
+      "retained_provider_receipt_count": 16,
+      "retained_provider_elapsed_seconds": 343.53198704100214,
+      "stages": {
+        "continuation-crossing-first": {
+          "status": "proposal_retention",
+          "source_snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+          "outcome_sha256": "087df08d69e901c6160d0e9a3e25efe4b7392324f32799d62e5a6dc8884347ff",
+          "file_elapsed_seconds": 1279.736
+        },
+        "continuation-growth-first": {
+          "status": "proposal_retention",
+          "source_snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+          "outcome_sha256": "4e7a1547668e278a9eb2166499ec972dfcbbe2a32fb87cb7f00893ec8b60f0b7",
+          "file_elapsed_seconds": 735.866
+        },
+        "continuation-mixed-pursuit": {
+          "status": "proposal_retention",
+          "source_snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+          "outcome_sha256": "51fcb93c8b56f5eef69e34654e2a99bf5380abd0614336900c356c0ad0dcf17d",
+          "file_elapsed_seconds": 1478.81
+        }
+      }
+    }
+  },
+  "pair_calls": 28,
+  "pair_execution_groups": 39,
+  "pair_known_cost_microusd": 131237,
+  "historical_uncertain_estimate_microusd": 50000,
+  "limits": "Historical quarantine is not reconciled or provider-bounded. Provider elapsed sum uses retained receipts, not wall-time or a matched speed comparison. Stage elapsed uses output-file creation/modification metadata. TSR output files were copied after completion, so their file intervals are not stage durations and are omitted. Ordinary provider elapsed coverage is 16 retained unique receipt records for 17 counted calls; it is not a complete timing total."
+}

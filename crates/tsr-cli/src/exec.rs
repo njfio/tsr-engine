@@ -170,7 +170,7 @@ pub trait Runner {
     fn available(&self) -> Result<(), ExecRefusal>;
 
     /// Run `argv` in `workspace`, returning the exit code and the combined log bytes. `Err` means
-    /// the runtime was present but the container could not be started.
+    /// the runtime was present but startup or completed execution could not be confirmed.
     fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal>;
 }
 
@@ -204,18 +204,109 @@ impl Runner for RealRunner {
     }
 
     fn run(&self, workspace: &Path, argv: &[String]) -> Result<RunOutput, ExecRefusal> {
-        let args = container_argv(self.runtime, workspace, argv);
-        let out = Command::new(&args[0])
-            .args(&args[1..])
-            .output()
-            .map_err(|e| ExecRefusal::StartFailed(e.to_string()))?;
-        let mut log = out.stdout;
-        log.extend_from_slice(&out.stderr);
-        Ok(RunOutput {
-            exit_code: out.status.code().unwrap_or(-1),
-            log,
+        run_container(self.runtime, workspace, argv, &mut |args| {
+            Command::new(&args[0]).args(&args[1..]).output()
         })
     }
+}
+
+// Inject only the runtime transport for deterministic lifecycle regressions.
+fn run_container(
+    runtime: Runtime,
+    workspace: &Path,
+    argv: &[String],
+    launch: &mut dyn FnMut(&[String]) -> std::io::Result<std::process::Output>,
+) -> Result<RunOutput, ExecRefusal> {
+    // Keep the container until its daemon-owned lifecycle has been inspected. Exit codes
+    // from the runtime CLI alone cannot distinguish startup failure from command failure.
+    let mut args = container_argv(runtime, workspace, argv);
+    args[1] = "create".into();
+    args.remove(2); // --rm: cleanup happens after inspection, not before evidence collection.
+    args.insert(2, "--pull=never".into());
+    let created = launch(&args).map_err(|e| ExecRefusal::StartFailed(e.to_string()))?;
+    if !created.status.success() {
+        return Err(ExecRefusal::StartFailed(format!(
+            "container creation failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        )));
+    }
+    let id = String::from_utf8_lossy(&created.stdout).trim().to_string();
+    if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(ExecRefusal::StartFailed(
+            "creation returned no valid container identity; outcome unknown".into(),
+        ));
+    }
+    let result = (|| {
+        let out = launch(&[
+            runtime.binary().into(),
+            "start".into(),
+            "--attach".into(),
+            id.clone(),
+        ])
+        .map_err(|e| ExecRefusal::StartFailed(format!("start outcome unknown: {e}")))?;
+        let state = launch(&[
+            runtime.binary().into(),
+            "inspect".into(),
+            "--format".into(),
+            "{{json .State}}".into(),
+            id.clone(),
+        ])
+        .map_err(|e| ExecRefusal::StartFailed(format!("lifecycle inspection unavailable: {e}")))?;
+        if !state.status.success() {
+            return Err(ExecRefusal::StartFailed(
+                "lifecycle inspection failed; execution unknown".into(),
+            ));
+        }
+        let exit_code = completed_exit(&state.stdout)?;
+        // A detached/disrupted client must not turn partial logs into a completed receipt.
+        if out.status.code() != Some(exit_code) {
+            return Err(ExecRefusal::StartFailed(
+                "client and lifecycle outcomes differ; log completion unknown".into(),
+            ));
+        }
+        let mut log = out.stdout;
+        log.extend_from_slice(&out.stderr);
+        Ok(RunOutput { exit_code, log })
+    })();
+    let cleanup = launch(&[
+        runtime.binary().into(),
+        "rm".into(),
+        "--force".into(),
+        id.clone(),
+    ]);
+    if !matches!(cleanup, Ok(ref out) if out.status.success()) {
+        return Err(ExecRefusal::StartFailed(format!(
+            "container cleanup unconfirmed for {id}; execution receipt withheld"
+        )));
+    }
+    result
+}
+
+/// Trust daemon lifecycle metadata, never candidate stdout or a magic exit-code range.
+fn completed_exit(bytes: &[u8]) -> Result<i32, ExecRefusal> {
+    let state: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| {
+        ExecRefusal::StartFailed("invalid lifecycle metadata; execution unknown".into())
+    })?;
+    let time_present = |key: &str| {
+        state[key]
+            .as_str()
+            .is_some_and(|t| !t.is_empty() && !t.starts_with("0001-"))
+    };
+    if state["Status"].as_str() != Some("exited")
+        || state["Running"].as_bool() != Some(false)
+        || state["Error"].as_str() != Some("")
+        || !time_present("StartedAt")
+        || !time_present("FinishedAt")
+    {
+        return Err(ExecRefusal::StartFailed(
+            "no confirmed completed command lifecycle; startup failure or execution unknown".into(),
+        ));
+    }
+    state["ExitCode"]
+        .as_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .filter(|n| (0..=255).contains(n))
+        .ok_or_else(|| ExecRefusal::StartFailed("missing valid lifecycle exit code".into()))
 }
 
 /// A runner that returns a scripted exit code and log instead of running a container. Exported (not
@@ -400,7 +491,7 @@ pub fn run_with(
                 Source::Rules,
                 EventKind::Unresolved {
                     candidate: cid,
-                    reason: format!("container runtime failed to start: {e}"),
+                    reason: e.to_string(),
                 },
             )?;
             Ok(ExecOutcome {
@@ -419,7 +510,7 @@ pub enum ExecRefusal {
     NoRuntime,
     /// The runtime was present but the container could not be started. This is *not* a refusal to
     /// run at all: the dispatch is recorded `Unresolved`.
-    #[error("container runtime failed to start: {0}")]
+    #[error("container execution unresolved: {0}")]
     StartFailed(String),
 }
 
@@ -513,6 +604,138 @@ fn append(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn lifecycle_transport_preserves_seal_and_fails_closed() {
+        use std::os::unix::process::ExitStatusExt;
+        for rt in [Runtime::Docker, Runtime::Podman] {
+            for mode in [
+                "success", "failure", "127", "startup", "attach", "inspect", "cleanup",
+            ] {
+                let code = match mode {
+                    "127" | "startup" => 127,
+                    "failure" => 1,
+                    _ => 0,
+                };
+                let mut stages = Vec::new();
+                let result =
+                    run_container(rt, Path::new("/work"), &["command".into()], &mut |args| {
+                        let stage = args[1].as_str();
+                        stages.push(stage.to_string());
+                        let mut status = 0;
+                        let stdout = match stage {
+                            "create" => {
+                                let mut expected =
+                                    container_argv(rt, Path::new("/work"), &["command".into()]);
+                                expected[1] = "create".into();
+                                expected.remove(2);
+                                expected.insert(2, "--pull=never".into());
+                                assert_eq!(args, expected);
+                                "a".repeat(64).into_bytes()
+                            }
+                            "start" => {
+                                status = if mode == "attach" { 125 } else { code };
+                                b"command output".to_vec()
+                            }
+                            "inspect" => {
+                                if mode == "inspect" {
+                                    status = 1;
+                                }
+                                let mut state = lifecycle(code);
+                                if mode == "startup" {
+                                    state["Status"] = serde_json::json!("created");
+                                }
+                                serde_json::to_vec(&state).unwrap()
+                            }
+                            "rm" => {
+                                if mode == "cleanup" {
+                                    status = 1;
+                                }
+                                vec![]
+                            }
+                            _ => panic!("unexpected stage"),
+                        };
+                        Ok(std::process::Output {
+                            status: std::process::ExitStatus::from_raw(status << 8),
+                            stdout,
+                            stderr: vec![],
+                        })
+                    });
+                assert_eq!(stages, ["create", "start", "inspect", "rm"]);
+                if matches!(mode, "success" | "failure" | "127") {
+                    assert_eq!(result.unwrap().exit_code, code);
+                } else {
+                    assert!(result.is_err(), "{mode}");
+                }
+            }
+        }
+    }
+
+    fn lifecycle(code: i32) -> serde_json::Value {
+        serde_json::json!({"Status":"exited", "Running":false, "Error":"",
+            "StartedAt":"2026-10-22T22:00:00Z", "FinishedAt":"2026-10-22T22:00:01Z", "ExitCode":code})
+    }
+
+    #[test]
+    fn lifecycle_confirms_real_success_failure_and_command_127() {
+        for code in [0, 1, 125, 126, 127, 137] {
+            assert_eq!(
+                completed_exit(&serde_json::to_vec(&lifecycle(code)).unwrap()).unwrap(),
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn lifecycle_rejects_startup_failure_and_uncertain_completion() {
+        for (key, value) in [
+            ("StartedAt", serde_json::json!("0001-01-01T00:00:00Z")),
+            ("FinishedAt", serde_json::json!("0001-01-01T00:00:00Z")),
+            ("Error", serde_json::json!("OCI executable not found")),
+            ("Status", serde_json::json!("created")),
+            ("Running", serde_json::json!(true)),
+            ("ExitCode", serde_json::json!(null)),
+        ] {
+            let mut state = lifecycle(127);
+            state[key] = value;
+            assert!(
+                completed_exit(&serde_json::to_vec(&state).unwrap()).is_err(),
+                "{key}"
+            );
+        }
+        assert!(completed_exit(b"not JSON").is_err());
+        assert!(completed_exit(b"{}").is_err());
+    }
+
+    #[test]
+    fn confirmed_command_127_is_executed_not_unresolved() {
+        let store = Store::open_in_memory().unwrap();
+        let task = TaskId(Hash::of(&[b"command127"]));
+        let runner = FakeRunner::new(
+            completed_exit(&serde_json::to_vec(&lifecycle(127)).unwrap()).unwrap(),
+            vec![],
+        );
+        run_with(
+            &store,
+            &task,
+            Path::new("/work"),
+            &["command".into()],
+            &runner,
+        )
+        .unwrap();
+        let events = store.by_task(&task).unwrap();
+        assert!(events.iter().any(|(_, e)| matches!(
+            e.kind,
+            EventKind::Executed {
+                exit_code: Some(127),
+                ..
+            }
+        )));
+        assert!(!events
+            .iter()
+            .any(|(_, e)| matches!(e.kind, EventKind::Unresolved { .. })));
+    }
 
     #[test]
     fn default_image_when_unset() {

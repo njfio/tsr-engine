@@ -1,0 +1,36 @@
+{
+  "provider": "CheaperInference",
+  "endpoint": "https://api.cheaperinference.com/v1/chat/completions",
+  "original_request_evidence": [
+    {
+      "record": "bound_output_b602daac06a440b240980017b43dd7967f8e58f87e1b3be547c4d0dc046e74fd",
+      "settings": {
+        "model": "gpt-6-luna",
+        "max_completion_tokens": 32768,
+        "response_format": {
+          "type": "json_object"
+        },
+        "stream": false,
+        "temperature": null,
+        "seed": null,
+        "reasoning_effort": null
+      }
+    },
+    {
+      "record": "bound_output_5f7bd706f91a54d7373a3bfe2f85767aaa8a53ba64851f493def0ac660a76a5e",
+      "settings": {
+        "model": "gpt-6-luna",
+        "max_completion_tokens": 32768,
+        "response_format": {
+          "type": "json_object"
+        },
+        "stream": false,
+        "temperature": null,
+        "seed": null,
+        "reasoning_effort": null
+      }
+    }
+  ],
+  "generator": "same Adapter.body implementation in recorded source pins",
+  "backend_revision": "not exposed; alias equality only"
+}

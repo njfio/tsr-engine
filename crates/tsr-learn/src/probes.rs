@@ -625,6 +625,18 @@ pub fn default_extractor<'a>(
     }
 }
 
+/// Same dispatch as dataset construction. Missing evidence creates a mismatching
+/// empty vector; the probe refuses it rather than imputing numeric observations.
+pub fn schema_extractor<'a>(
+    spec: &'a FeatureSpec,
+    input: Option<&'a crate::schema::Input>,
+) -> impl Fn(&[(i64, Event)], &TaskIndexRow, ActionKind, Option<f64>) -> FeatureVector + 'a {
+    move |before, index, action, raw| {
+        crate::schema::extract(spec, before, index, action, raw, input)
+            .unwrap_or(FeatureVector { values: vec![] })
+    }
+}
+
 /// Append a line to `<dir>/holdout-access.jsonl` for every read of a held_out row (B9).
 ///
 /// The split digest covers assignments only, so this logging never changes it.

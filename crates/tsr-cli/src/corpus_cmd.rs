@@ -1,0 +1,359 @@
+//! `tsr corpus` — corpus tooling (PRD v0.3.1, §B9, §B11 M3).
+//!
+//! `mine` walks a repository's first-parent history and writes the red→green flip tasks. The suite
+//! runs through the configured [`tsr_corpus::sealed::SealedRunner`] Docker/Podman worker;
+//! nothing here runs a repository's tests on the host.
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use tsr_corpus::mine::{mine, MineOptions};
+use tsr_corpus::mutants::{mutants, MutantsOptions};
+use tsr_corpus::Runner;
+
+/// `tsr corpus mine <repo> --out <dir> [--since <rev>] [--suite <cmd>]`.
+pub fn mine_cmd(
+    repo: String,
+    out: PathBuf,
+    since: Option<String>,
+    suite: Option<String>,
+) -> ExitCode {
+    let mut opts = MineOptions::default();
+    if let Some(suite) = suite {
+        opts.suite = suite.split_whitespace().map(str::to_string).collect();
+    }
+    opts.since = since;
+
+    let runner = match crate::worker_config::configured() {
+        Ok(runner) => runner,
+        Err(error) => {
+            eprintln!("tsr: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    match mine(std::path::Path::new(&repo), &out, &opts, &runner) {
+        Ok(report) => {
+            println!(
+                "mined {}: {} commits walked, {} tasks, {} refactors, {} regressions",
+                report.repo,
+                report.commits_walked,
+                report.tasks,
+                report.skipped_no_flip,
+                report.skipped_regression
+            );
+            println!("wrote {}", out.join("tasks.jsonl").display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus mine failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `tsr corpus mutants <repo> --out <dir>`.
+///
+/// Drives the diff-bearing list and kill run through the configured sealed worker;
+/// nothing here runs a repository's tests on the host.
+pub fn mutants_cmd(
+    repo: String,
+    out: PathBuf,
+    package: Option<String>,
+    file: Option<String>,
+    mutant: Option<String>,
+    screen_target: Option<String>,
+) -> ExitCode {
+    let mut opts = MutantsOptions::default();
+    let mut filters = Vec::new();
+    for (flag, value) in [("--package", package), ("--file", file), ("--re", mutant)] {
+        if let Some(value) = value {
+            filters.extend([flag.to_string(), value]);
+        }
+    }
+    opts.list_argv=vec!["sh".into(),"-c".into(),"mkdir -p mutants.out && cargo mutants --no-config --list --json --diff \"$@\" > mutants.out/mutants.json".into(),"tsr-list".into()];
+    opts.list_argv.extend(filters.clone());
+    opts.run_argv.extend(filters);
+    if let Some(target) = screen_target {
+        opts.run_argv.push(format!("--cargo-arg=--{target}"));
+    }
+    opts.run_argv.extend([
+        "--timeout=60".into(),
+        "--build-timeout=240".into(),
+        "--no-shuffle".into(),
+    ]);
+    opts.run_argv.extend([
+        "--cargo-arg=--locked".into(),
+        "--cargo-arg=--offline".into(),
+        "--jobserver-tasks=2".into(),
+    ]);
+    let runner = match crate::worker_config::configured() {
+        Ok(runner) => runner,
+        Err(error) => {
+            eprintln!("tsr: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    match mutants(std::path::Path::new(&repo), &out, &opts, &runner) {
+        Ok(report) => {
+            println!(
+                "mutants {}: {} listed, {} run, {} tasks, {} not caught",
+                report.repo,
+                report.mutants_listed,
+                report.mutants_run,
+                report.tasks,
+                report.skipped_not_caught
+            );
+            if report.skipped_unsafe_descriptor > 0 {
+                println!(
+                    "warning: {} caught mutant(s) had an untrusted descriptor file (absolute or \
+                     containing `..`); skipped without reading source or emitting a task",
+                    report.skipped_unsafe_descriptor
+                );
+            }
+            println!("wrote {}", out.join("tasks.jsonl").display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus mutants failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `tsr corpus materialize --snapshot <sha> --out <dest> [--repo <dir>]`.
+///
+/// Materialises a snapshot into a disposable copy. The batch runner provisions the copy it drives a
+/// session in by asking the sealed sandbox to run this command, so the argv it builds names a real
+/// subcommand (D4). The checkout is a `git worktree` detached at the snapshot; `git` reads history
+/// and writes the working tree, it executes nothing from the repository.
+pub fn materialize_cmd(
+    repo: Option<&std::path::Path>,
+    snapshot: &str,
+    out: &std::path::Path,
+) -> ExitCode {
+    let repo = repo.unwrap_or_else(|| std::path::Path::new("."));
+    match tsr_corpus::mine::materialize(repo, snapshot, out) {
+        Ok(dest) => {
+            println!("materialized {snapshot} at {}", dest.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus materialize failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `tsr corpus oracle --snapshot <dir> --tests <csv> | --full-suite [--suite <cmd>]`.
+///
+/// Runs the oracle in a materialised copy and reports pass/fail: the named tests (the flipped tests)
+/// or the full suite (the regression check). The batch runner runs the oracle by asking the sealed
+/// sandbox to run this command, so the argv it builds names a real subcommand (D4). The suite runs
+/// through the [`tsr_corpus::sealed::SealedRunner`], which invokes `tsr exec -- <argv>` in the sealed sibling sandbox;
+/// nothing here runs a repository's tests on the host.
+pub fn oracle_cmd(
+    snapshot: &std::path::Path,
+    tests: Option<&str>,
+    full_suite: bool,
+    suite: Option<&str>,
+    exact: bool,
+) -> ExitCode {
+    let argv = match oracle_argv_exact(tests, full_suite, suite, exact) {
+        Some(argv) => argv,
+        None => {
+            eprintln!("tsr: corpus oracle needs --tests <csv> or --full-suite");
+            return ExitCode::from(2);
+        }
+    };
+
+    let runner = match crate::worker_config::configured() {
+        Ok(runner) => runner,
+        Err(error) => {
+            eprintln!("tsr: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let result = runner.run(snapshot, &argv, &tsr_corpus::Limits::new(600_000, 1 << 20));
+    if !result.succeeded() {
+        println!("oracle: fail (exit {})", result.exit);
+        return ExitCode::from(1);
+    }
+    // D3 (item 2): a filter that matches no test is a failure, not a pass. `cargo test -- zz_moved`
+    // exits 0 having run nothing, so a session that renames the flipped test would otherwise be
+    // accepted with the bug still present. The run's stdout is read back from the CAS by digest and
+    // must carry a cargo test summary with at least one test run.
+    if let Some(tests) = tests {
+        if !ran_a_test(&result, tests) {
+            println!("oracle: fail (the filter matched no test)");
+            return ExitCode::from(1);
+        }
+    }
+    println!("oracle: pass (exit 0)");
+    ExitCode::SUCCESS
+}
+
+/// Whether a run's stdout shows the named tests actually ran (D3, P3).
+///
+/// The run's *real* stdout is read — not a CAS nothing writes. With `--exact` the run must carry
+/// `test <name> ... ok` for each named test; without it, a cargo test summary with at least one
+/// test run is enough. A filter that matched nothing is a failure.
+fn ran_a_test(result: &tsr_corpus::RunResult, tests: &str) -> bool {
+    let text = String::from_utf8_lossy(&result.stdout);
+    let names: Vec<&str> = tests.split(',').filter(|t| !t.is_empty()).collect();
+    if names.is_empty() {
+        return false;
+    }
+    names.iter().all(|name| {
+        text.lines()
+            .any(|l| l.trim() == format!("test {name} ... ok"))
+    })
+}
+
+/// The argv the oracle runs: the suite command, then the flipped tests after `--`.
+///
+/// R3: the flipped tests are passed to the suite *after* `--`, one argument each. Cargo accepts
+/// only one positional TESTNAME before `--`; `cargo test a b` fails with `unexpected argument 'b'`,
+/// so a task with two flipped tests could never be accepted. `cargo test -- a b` runs both (each is
+/// a substring filter, and the union is what the oracle wants: every flipped test must pass).
+///
+/// Returns `None` when neither `--tests` nor `--full-suite` was given.
+pub fn oracle_argv(
+    tests: Option<&str>,
+    full_suite: bool,
+    suite: Option<&str>,
+) -> Option<Vec<String>> {
+    oracle_argv_exact(tests, full_suite, suite, false)
+}
+
+/// As [`oracle_argv`], but with `--exact` appended after the test names when `exact` is set (D3,
+/// P3): `cargo test -- <name> --exact` runs that one test and fails the filter when it is absent.
+pub fn oracle_argv_exact(
+    tests: Option<&str>,
+    full_suite: bool,
+    suite: Option<&str>,
+    exact: bool,
+) -> Option<Vec<String>> {
+    let mut argv: Vec<String> = suite
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
+    if let Some(tests) = tests {
+        let names: Vec<&str> = tests.split(',').filter(|t| !t.is_empty()).collect();
+        if !names.is_empty() {
+            argv.push("--".to_string());
+            for t in names {
+                argv.push(t.to_string());
+            }
+            if exact {
+                argv.push("--exact".to_string());
+            }
+        }
+    } else if !full_suite {
+        return None;
+    }
+    Some(argv)
+}
+
+/// `tsr corpus split <dir> --by time|repo --holdout <fraction> --seed <n>`.
+///
+/// Reads `tasks.jsonl` and the CAS under `dir`, groups near-clones, assigns sides under the rule,
+/// runs the three leakage probes, and writes `<dir>/split.json`. A caught probe is a refusal: the
+/// manifest is written with the verdicts and the command exits non-zero.
+pub fn split_cmd(dir: PathBuf, by: String, holdout: f64, seed: u64) -> ExitCode {
+    let rule = match tsr_corpus::split::SplitRule::parse(&by) {
+        Ok(rule) => rule,
+        Err(e) => {
+            eprintln!("tsr: corpus split failed: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let opts = tsr_corpus::split::SplitOptions {
+        rule,
+        holdout,
+        seed,
+        command: format!(
+            "tsr corpus split {} --by {by} --holdout {holdout} --seed {seed}",
+            dir.display()
+        ),
+        ..Default::default()
+    };
+    match tsr_corpus::split::split(&dir, &opts) {
+        Ok(manifest) => {
+            println!(
+                "split by {}: {} train, {} holdout, {} clone groups, {} holdout accesses",
+                manifest.rule,
+                manifest.train.len(),
+                manifest.holdout.len(),
+                manifest.clone_groups.len(),
+                manifest.holdout_access.len()
+            );
+            println!("wrote {}", dir.join("split.json").display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: corpus split failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Explicitly record owner-provided generated-lock preparation; no dependency resolver runs.
+pub fn prepare_cmd(request: PathBuf, out: PathBuf) -> ExitCode {
+    let result = (|| -> Result<String, String> {
+        let meta = std::fs::symlink_metadata(&request).map_err(|e| e.to_string())?;
+        if !meta.file_type().is_file() || meta.len() > 1_048_576 {
+            return Err("request must be a bounded regular file".into());
+        }
+        let bytes = std::fs::read(request).map_err(|e| e.to_string())?;
+        tsr_corpus::preparation::record(
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            &out,
+        )
+    })();
+    match result {
+        Ok(id) => {
+            println!("preparation {id}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: preparation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+pub fn qualify_cmd(tasks: PathBuf, out: PathBuf) -> ExitCode {
+    let result = crate::worker_config::configured()
+        .and_then(|runner| tsr_batch::admission::qualify(&tasks, &out, &runner));
+    match result {
+        Ok(n) => {
+            println!(
+                "independently admitted {n} mutant tasks; evidence {}",
+                out.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tsr: qualification failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(test)]
+mod oracle_evidence_regression {
+    use super::*;
+    #[test]
+    fn missing_or_wrong_output_cannot_accept() {
+        for output in ["", "oracle: pass", "test other ... ok"] {
+            let result = tsr_corpus::RunResult::from_output(0, output.as_bytes(), b"", 0);
+            assert!(!ran_a_test(&result, "tests::check"));
+        }
+        assert!(!ran_a_test(&tsr_corpus::RunResult::exit_only(0), ""));
+    }
+    #[test]
+    fn every_exact_test_needs_evidence() {
+        let result = tsr_corpus::RunResult::from_output(0, b"test a ... ok\n", b"", 0);
+        assert!(ran_a_test(&result, "a"));
+        assert!(!ran_a_test(&result, "a,b"));
+    }
+}

@@ -7,5 +7,14 @@
 *.db-shm
 .DS_Store
 /.cargo-home
+/.check-wt
+/.evidence
+/mutants.out.old
 .tsr/
 /target-fresh
+
+# Local runtime evidence and generated caches are not public source.
+__pycache__/
+*.py[cod]
+/artifacts/
+/docs/**/cas/

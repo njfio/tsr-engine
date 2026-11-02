@@ -1,0 +1,17 @@
+{
+  "version": "native-browser-session@v1",
+  "manifest_sha256": "7df4975d8cc5f99c2e847ced4969923e4fa5d40e98e9b664388fcb217642acfb",
+  "ledger_prefix_head": "061d01ee2247cd8bbebc32a3e9e8e98df6040cd889dd8ea6d6c79a2fc2aaf69b",
+  "previous_max_calls": 272,
+  "max_calls": 462,
+  "previous_max_execution_groups": 74,
+  "max_execution_groups": 172,
+  "cap_microusd": 10225523,
+  "reservation_microusd": 50000,
+  "authority_sha256": "b272ca13f3b5ba112618a9953bb112ed9cf33bd3c4064e5b5194e83b59d3dcdc",
+  "reviewer": "independent-agent:/root/binding_review",
+  "suite_manifest_sha256": "d15ed9927a837379b32b175e6b459fe31c802b75d4f03e00de14a8b240cb66e5",
+  "source_class": "newly-authored-nonprivate-browser-project",
+  "session_trial_sha256": "5353eb4a5d71380463222b57d4ffc0e4cd5a3e07e1c18c99e8ee5932edaf25d4",
+  "session_admission_sha256": "5a763ec42a56df3c6b498837529d33eff1dcae52d760e1b28af84355c41de5f5"
+}

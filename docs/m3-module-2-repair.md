@@ -1,0 +1,13 @@
+# M3 resolver and pricing repair
+
+The first four-task cohort remains immutable and unavailable: six pre-inference price failures, one trusted-test identity error, one skipped arm. No inference spending occurred.
+
+The saved catalog changed from list rates $0.15/$0.60 per million input/output tokens at 2026-10-14T13:20:32.201919Z to $0.30/$1.20 at 2026-10-15T02:27:58.687550Z. Both catalogs use list prices; discounted prices are half those values. This is a provider price increase, not a unit conversion. Owner approved the higher ceilings for the same four tasks. The maximum calculated request cost is $0.1121184; a $2 reservation preserves the tenfold margin. The shared $100 aggregate cap and prior $0.045569 spending remain unchanged. Unknown charges remain reserved; invalid/nonfinite/negative/over-limit prices fail before reservation.
+
+The module-v1 resolver rejected RTS daemon main.rs because it contains `#![deny(unsafe_code)]`. Module-v2 recognizes only this exact built-in inner attribute alongside existing doc attributes. Entire ancestor bytes remain frozen. Conditional attributes, unrelated lints, extra arguments, redirections and macros remain unsupported. No candidate permission or TSR policy changed.
+
+The new regression first failed on the old resolver (one passed, one failed), then all tsr-batch tests passed after the fix. Independent review found no resolver blocker. Broker tests:15 passed. Scheduling/revalidation identity tests:6 passed. Full Rust verification results are captured under docs/m3-validation/m3-module-2-*.log. Two known M0 runtime-dependent tests are explicitly filtered; frozen M0 files remain unchanged. Lefthook is unavailable, so hooks are not claimed as passed.
+
+Attempt2 uses a separate plan, state, engine, broker snapshot, task directories and exports. Same four IDs, model, prompts, profile bytes, selection snapshot and analysis policy; original attempts are not pooled or replaced. Before paid work, the affected outline task must pass full strict admission under module-v2. The paid gate binds the accepted receipt to the exact task, engine digest, strict protocol and clean completed process. Failed revalidation retains task-local CAS and run records. Local original workers drain before revalidation; paid arms then serialize. The original queue timeout and100GiB disk floor remain enforced. Additional32-task evaluation is not authorized or launched.
+
+M3 is still incomplete:42 admissions are exported, below the150-task criterion; the four-task attempt has no observed pairs yet. Local pipeline implementation and regressions do not substitute for operational qualification or observed outcome evidence.

@@ -1,0 +1,29 @@
+{
+  "campaign_calls": 228,
+  "campaign_groups": 63,
+  "campaign_usd": "0.187888",
+  "independent_review": "/root/objective_transition_review",
+  "live_effects": 0,
+  "logs": {
+    "objective-fix-build3.log": "739781111fe8d85d75e2ea591f87fc97a3fe80e798d7f4cf5ba03108776c76db",
+    "objective-fix-cycle.log": "79e0c2641ff650268c6453bc4d7e396738fbea23faf9a03cbd33d284a59ce4fc",
+    "objective-fix-fullflow.log": "56d632e5fb6a61f6ded72df98d1cbeb2018d93c2c564a7c5ffa977e29cc161f3",
+    "objective-fix-fullflow2.log": "f33776dd81c63270e824bf24429da1ce3acf2e39c10c245b0617406993cd56aa",
+    "objective-fix-fullflow3.log": "ffcbe5779bfaac163a5f58b9cb63103f0e07985a11e32a84aa794413261881cf",
+    "objective-fix-lifecycle.log": "e8c17c6f6e5ebe940c2574d42c1f1e78ef947a6d347bf7be45b0570c364fcf33",
+    "objective-fix-native-final3.log": "b07d26df7f075f7b84066dc25166e38d08e5ab39638c9a2c176c6e4a5ffd2c45",
+    "objective-fix-oracle.log": "57693a43260c49a14a2e69818ae414923ecb35532ccec2c65f5b6c27246dbdd5"
+  },
+  "manifest_sha256": "4873220a8eb94d2b31ef0b0b47a66051fc27953df8e31c63a1f8d61f4a4e50e1",
+  "tests": {
+    "authored_groups": 4,
+    "authored_requests": 20,
+    "cycle": 9,
+    "lifecycle": 3,
+    "max_request_bytes": 27096,
+    "native": 10,
+    "oracle": 4,
+    "serialized_fullflow": "passed",
+    "serialized_seconds": 717.303
+  }
+}

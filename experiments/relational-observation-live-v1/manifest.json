@@ -1,0 +1,8 @@
+{
+  "version": "relational-observation-live-binding@v1",
+  "frozen_packet_sha256": "68adc58dcb9c23f4a0cbb9453c64d5bacc4bc6faae087c19c3f34727eb492c18",
+  "launch_manifest_sha256": "afe446a5c8ceacdd3398498c6bab70f83bec7983030d80e0ed6be0854d6ba712",
+  "prepared_manifest_sha256": "cb415c675a0b1f0daa1ea017286a9c392840f3e0da9c0f76a7f286af5c537935",
+  "scope_grant_sha256": "4c332602a0220e3baaddcba33cc521b969451eeba7223c88060c2ea60f1751d6",
+  "status": "prospective; dispatch only after final independent review"
+}

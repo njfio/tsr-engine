@@ -1,0 +1,43 @@
+{
+  "attribution": "Evaluator-authored illustration; not an executed result",
+  "condition": "A possible changed availability; not a secretly applied runtime change",
+  "kind": "fictional_input_example",
+  "limit": 3,
+  "notes": [
+    {
+      "available": false,
+      "id": 11,
+      "perspective": 1
+    },
+    {
+      "available": true,
+      "id": 12,
+      "perspective": 1
+    },
+    {
+      "available": true,
+      "id": 21,
+      "perspective": 2
+    },
+    {
+      "available": true,
+      "id": 31,
+      "perspective": 3
+    },
+    {
+      "available": true,
+      "id": 32,
+      "perspective": 3
+    },
+    {
+      "available": true,
+      "id": 41,
+      "perspective": 4
+    }
+  ],
+  "previous": [
+    11,
+    21,
+    31
+  ]
+}

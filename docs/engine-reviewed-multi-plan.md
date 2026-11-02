@@ -1,0 +1,13 @@
+# Reviewed multi-cycle synthetic run — preregistration
+
+This profile uses the unchanged frozen workshop or garden scenario, evaluator-authored parent desires, visible report assertions, measurement limits, and action authority. It introduces no private input or new desired outcome. The simulator does not establish social understanding, consent, scientific truth, or fulfillment of rich desires.
+
+The normal driver generates an initial relational aspiration, possibilities and assessments, applies at most two permitted simulated operations, and generates return-informed relational revisions. Runtime review uses separate Luna invocations and input contexts before relational/assessment application and after each actual operation. Same-model errors may be correlated. Review acceptance permits only the already-admitted transition; it grants no authority or formal semantic acceptance.
+
+Bounds: at most ten generator calls, nine reviewer calls, nineteen total calls, and two simulated operations. Each call is limited to 32 KiB input, 8192 completion tokens and 240 seconds. Every call and operation uses the existing shared campaign ledger. Bounds are ceilings, not required activity. No final proposal or retry is forced after native idle/satisfaction, invalid output, inability, withdrawal, expiry or exhausted admission.
+
+The runner pauses once after durable generator outcome two and resumes in a fresh process against the same journal. An acknowledged outcome is not permission to repeat an action. Uncertain dispatch/application or unknown cost blocks continuation. No scripted desire withdrawal occurs in this profile.
+
+At most one source-bound reconsideration may follow a valid, settled runtime rejection or semantic unknown. Original reports remain immutable and attributed, not tool observations or truth. Fresh generation may disagree with the review. Mechanical exact-content repetition stops. Post-action rejection permits reviewed reflection only, then stops without undoing or repeating the action. Malformed, stale, uncertain, or resource-invalid reports never trigger recovery.
+
+Success evidence requires two distinct permitted operations with independently recorded useful simulator effects, grounded revisions, persisted review bindings, verified process restart and no duplicate effects. A stop is reported honestly; fewer than two useful cycles does not satisfy the two-cycle demonstration. No candidate, winning aspiration, reviewer verdict or semantic conclusion is prescribed. Deterministic authored fixtures verify mechanics only; live semantic claims require separate review of actual outputs.

@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "tsr_cli"
 path = "src/lib.rs"
 
+[[test]]
+name = "d3_session_copy"
+path = "tests/d3_session_copy.rs"
+
 [dependencies]
 tsr-domain = { path = "../tsr-domain" }
 tsr-store = { path = "../tsr-store" }
@@ -23,14 +27,21 @@ tsr-policy = { path = "../tsr-policy" }
 tsr-learn = { path = "../tsr-learn" }
 tsr-ledger = { path = "../tsr-ledger" }
 tsr-forecast = { path = "../tsr-forecast" }
+tsr-corpus = { path = "../tsr-corpus" }
+tsr-batch = { path = "../tsr-batch" }
+tsr-eval = { path = "../tsr-eval" }
 clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+toml.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
-toml = { workspace = true }
+tempfile = "3"
 tsr-forecast = { path = "../tsr-forecast" }
 
 [lints]

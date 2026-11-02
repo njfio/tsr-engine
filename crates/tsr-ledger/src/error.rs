@@ -37,6 +37,8 @@ pub enum LedgerError {
         produced: PreferenceId,
         expected: PreferenceId,
     },
+    #[error("reviewed preference admission: {0}")]
+    InvalidReview(&'static str),
     /// The domain contract refused the value. Exit 2.
     #[error("contract: {0}")]
     Contract(#[from] tsr_domain::ContractError),

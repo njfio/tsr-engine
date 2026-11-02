@@ -1,0 +1,92 @@
+{
+  "acceptance": "inapplicable: no admitted repair or passing receipt; no review copy acceptance recorded",
+  "allowed_replacement_utf8_bytes": 2048,
+  "authority_user_message": "Sentinel_e97c033136748191b8489c1cc1dbc0c6",
+  "calls": 1,
+  "campaign_after": {
+    "calls": 223,
+    "campaign_unknowns": [],
+    "groups": 61,
+    "max_calls": 238,
+    "max_groups": 64,
+    "max_microusd": 5000000,
+    "settled_microusd": 181596
+  },
+  "deadline": "2026-10-28T05:41:06.073597+00:00",
+  "evidence_directory": "/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/native-information-live-1",
+  "evidence_sha256": {
+    "adapter-admission.json": "0f02f84d90ced001df6ecac2f66de66b3c15a9fa87a9728d9eec65e8e81ea588",
+    "adapter/adapter.jsonl": "8d74c2436b25453cf3ac6a3c19d6c0c8d5f551a67bb0d71f9a9c4527e87bfaf1",
+    "adapter/output-0/failed-response-1/content.bin": "72622dfecd10476ac92bef9dc96b87df2d7b20d07e99fbcd214f2519a5eb7b79",
+    "adapter/terminal-output.json": "104c625341426f3c45ddecdf9b9b57b9766a52899510618106e00f95ab4ac8e3",
+    "authority.json": "07bff9c993457e51e5eff402fc962071d8fecb142d14e9112e67af75bb7b410c",
+    "cycle-admission.json": "07d3289ef9d16ee801268992e147476987d1a56f8b4a3b186684985e082bc1e8",
+    "cycle/cycle.jsonl": "17d1ea2765cd69709dbb1f9fd9915823ea7150201b0b8d5048433c8a15c48047",
+    "launch.json": "ff3ecf5b1059d39354eaba8a938b2a7d60fc68a6cd288a5eb2798a3044d0f929",
+    "launch.stderr": "21b32dc04084a4abcebf2522ade8b6a06a4e5b89152bd9a21b7103acfab68f93",
+    "launch.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "origin.json": "1096a28897d5e8d4eb13850cc7c8d210a83d9cba3628406fbc124e6b5650cb98",
+    "post-upgrade-grant.json": "7a1c0fcfaf4393578fed1abcd06cb8ba7c0a970b6fe5f1d46f51f5d3c0e9f79b",
+    "price-before.json": "da459e15f438b1684bfdae29e026d5dbd821a852be9f977d01edbb14e792e7ea",
+    "prospective-grant.json": "542ca843937f85bb20dd24dc7f2a8ba4815e2a28db45221fef8c664ba83c777b",
+    "release.json": "a7b5858cc5c0e42bd4eab0fef679f2a5bce48cb75415cbf9d41e688349d92201",
+    "replay.stderr": "73bedf7ef7ad4ae0f5e106a4a905ff90030da209bb86a6e188b620f823728c8a",
+    "replay.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "upgrade.json": "87dfc93a1d37e522df935a39cb492b318cceb8fbfa621368c5a05832278cc7e9",
+    "verification.json": "683f3c0a45a42f780e0ce44bbbde6a45e7a1424380b17e4ab7e7e297da3d8b4d"
+  },
+  "http_status": 200,
+  "implementation_commit": "8cca23a8",
+  "independent_result_reviewer": "/root/reader_integration_review",
+  "information_reads": 0,
+  "last_rejection_at": "2026-10-28T04:14:37.087123+00:00",
+  "model": "gpt-6-luna",
+  "not_demonstrated": [
+    "repair correctness",
+    "information access",
+    "reviewed relationship development",
+    "return-informed changed pursuit",
+    "TSR causal benefit"
+  ],
+  "older_unknown": "Older Garden Trial1 unknown reservation remains separate and unchanged.",
+  "outcome": "closed_before_native_admission",
+  "preflight_note": "Original prospective grant was refused after upgrade changed ledger head; separately recorded source-bound grant differed only by prefix and was independently reviewed before dispatch. No call occurred during that preparation refusal.",
+  "program_execution_groups": 0,
+  "provider": "CheaperInference",
+  "provider_request_id": "c2960157-28f3-42e0-bfb1-795eaab09e9b",
+  "reason": "patch_bytes_exceed_admission",
+  "release_file_sha256": "a8d6c76768c5934ca20915b492663e10fc3fa6ef60acfe3a6489167e7c0fadc3",
+  "replacement_utf8_bytes": 2600,
+  "runtime_reviews": 0,
+  "semantic_observation": "Model proposed a direct source edit with rationale addressing coverage and continuity. Its correctness was not reviewed or tested; no relation or information action was admitted.",
+  "settled_usd": "0.001201",
+  "shared_corrections_used": 0,
+  "started_at": "2026-10-28T04:14:01.203269+00:00",
+  "unknown_charges": [],
+  "unknown_operations": [],
+  "unused_allowances_expired": true,
+  "usage": {
+    "completion_tokens": 2307,
+    "completion_tokens_details": {
+      "reasoning_tokens": 1500
+    },
+    "prompt_tokens": 3463,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 5770
+  },
+  "verification": {
+    "checked_at": "2026-10-28T04:16:47.276416+00:00",
+    "fresh_process_replay_exit": 1,
+    "guard_detail": "Uncompleted outer proposal journal prevents re-entry; model request itself is settled with no unknown charge.",
+    "initial_source_unchanged": true,
+    "ledger_sha256": "76e81803dd8989377273c3ed8d719357e85ec8c26b4ed525836a3711e22d42f9",
+    "ledger_unchanged_by_replay": true,
+    "no_replay_dispatch": true,
+    "old_live2_files_unchanged": 67,
+    "protected_files_unchanged": true,
+    "replay_guard": "uncertain recorded effect; no retry"
+  },
+  "version": "native-information-live-result@v1"
+}

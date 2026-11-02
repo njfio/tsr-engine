@@ -1,0 +1,12 @@
+{
+  "version": "v2-gameplay-return-packet@v1",
+  "files": {
+    "scripts/engine-browser-adapter.py": "f9109f0ad6170632ffc4983cb45a3851b4edb64a78ab03b42014d411c6342203",
+    "scripts/test_engine_browser_retained_verifier.py": "eb67cb7e772e04b4ba1aa40e1ba95f8fa09b8fdf3e310f436401e6af5fb252aa",
+    "experiments/v2-tsr-return-v1/prepare.py": "3e46793dd631c0978fc78a77e163366b755c5d9a75a250c499bc05147c467c58",
+    "docs/v2-tsr-gameplay-return-plan.md": "0981957457bdbab1a8646c12c839ba6512df3aa315974d1e10cd7b6884e45879"
+  },
+  "admission_sha256": "ab900a58a2c870863aa98a88531592ae51e8f4095b6e79dc8ffa7da26a66c861",
+  "scope_grant_sha256": "41ee7f0d447b6a932bdcf32040c0b1ede319c293bff6a4846c1bc3a5efa77548",
+  "source_lineage_sha256": "780a566cf3e258a154b6ea29519f5e1ab195f5111b58eb3a585edc5a39082b14"
+}

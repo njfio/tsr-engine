@@ -1,0 +1,44 @@
+{
+  "version": "prospective-pursuit-evaluation@1",
+  "status": "design-frozen-not-dispatch-admission",
+  "base_commit": "2199eda6",
+  "files": {
+    "README.md": "56b82e7ac3b4bfac45bc057dd2cd6769e545df7c06c8ab6c522a121780591e59",
+    "contract.rs": "14f4734a6a0c5c7f0d3bbe4a275cf1b743e3c2b3037ae79f8f9b73ad4ed87ca9",
+    "project-spec.json": "de0815c71b023c071eb7f4abdf4914cb38f52946b0a42a21e8493a4f67051cae",
+    "public.json": "acf91908468b643f9acf884f007b36b2e8e6dc1d6335e76d6d41111edd9691b1",
+    "seed.rs": "180088adaa659052e74b9a70ccdc74baf92cbb81451cb43613e4a9a3b2ffd19e"
+  },
+  "provider": "CheaperInference",
+  "model": "gpt-6-luna",
+  "baseline": {
+    "calls": 218,
+    "groups": 60,
+    "settled_usd": "0.176124"
+  },
+  "proposed_envelope": {
+    "ordinary_calls": 8,
+    "shared_format_corrections": 2,
+    "total_calls": 10,
+    "execution_groups": 2,
+    "completion_tokens_per_call": 8192,
+    "request_bytes": 32768,
+    "seconds_per_call": 240,
+    "total_seconds": 3600,
+    "aggregate_worker_seconds": 240,
+    "reservation_usd": "0.50"
+  },
+  "required_total_caps": {
+    "calls": 228,
+    "groups": 62,
+    "usd": "5.00"
+  },
+  "launch_blockers": [
+    "Explicit new call/operation scope approval required.",
+    "Native live launcher remains release-blocked; migrate existing adapter to shared output boundary and shared correction admission, then independently review.",
+    "Existing reconsideration callback is fixture-only and terminates after advance; reuse separate native relational admission and continue ordinary request with exact reviewed bindings before live readiness.",
+    "New fixture origin/export profile must be allowlisted and independently reviewed; existing origin validator only admits prior tasks.",
+    "Validate Rust project/oracles locally without target dispatch before live readiness; no compilation/execution is claimed here.",
+    "Fresh runtime/image, source/binary, model-price and campaign admission pins are required at launch."
+  ]
+}

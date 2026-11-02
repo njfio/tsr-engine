@@ -144,8 +144,10 @@ limitations) says so; do not cite main's behaviour as permission.
 6. **No stored weights.** Any strength shown anywhere is a fold over the hashed history with a
    named kernel. Nothing persists a weight.
 7. **Two records from one return.** `Surprise` (forecast residual) updates calibration;
-   `Contrast` (desired minus actual, against named open criteria) is the only input to expansion.
-   Never add them, never swap them.
+   `Contrast` (desired minus actual, against named open criteria) supplies the original expansion route.
+   The author-approved October 31 PRD amendment adds optional independently reviewed scoped-success
+   expansion with separate provenance. Surprise alone never expands wanting. Never fabricate Contrast
+   from success or treat scoped artifact success as human fulfillment.
 8. **Admission by source.** Operator statements, including rejection reasons, enter the ledger
    directly; generated statements wait for review. The failed strategy is never a positive example.
 9. **Unchosen candidates are not negatives.** They stay in the log as possibilities not realized.

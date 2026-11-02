@@ -1,6 +1,53 @@
 # tsr-engine
 
-On main, `tsr` records a Claude Code session into an append-only event log (`tsr hook`, with
+## Current integration (November 2026)
+
+The native engine now supports persistent browser-project cycles, independent review,
+source-bound execution and returned evidence, optional reviewed development alongside
+artifact edits or retention, and preserved contributor ancestry. See the
+[integration and verification record](docs/integration-2026-11.md) and the
+[latest live result](docs/continuous-game-live-v2-result.md). The latest test
+completed construction and evidence handling; it did **not** demonstrate spontaneous
+new desire formation or an unassisted whole test.
+
+This public tree contains code, authored fixtures and reports. Private runtime
+archives, delivered games, credentials and local campaign state are not included.
+The [local Studio](ui/engine/README.md) requires operator configuration before paid
+execution; cloning or browsing this repository grants no spending authority.
+
+The milestone descriptions and historical evidence below retain their original
+context; they are not a complete current capability inventory.
+
+For common-event training, see the [versioned maturity gate](docs/engine-maturity.md):
+new datasets require `--as-of`, and fitting rechecks close-plus-seven-days evidence.
+
+## Run a persistent local cycle
+
+For standing desires that drive their own next direction, use the
+[ledger-driven local decision cycle](docs/engine-ledger-directions.md). It connects
+ledger selection, [evidence-grounded refinements](docs/engine-refinements.md), generated alternatives, commitment, learned expectation and observed
+returns in a bounded evidence notebook, without supplying the next task. Its numerical
+rules are engineering proxies; it does not establish general autonomous coding or TSR
+benchmark superiority. The coding workflows below remain separate domain adapters.
+
+Start with the [unified project workflow](docs/engine-project-workflow.md):
+`tsr engine --directory RUN project init|prepare|run|resume|status|export`.
+[Editable windows and protected assets](docs/engine-protected-windows.md) keep inline test bytes immutable without filling proposal context with large lockfiles.
+
+For a bounded Cargo workspace, use [scoped Cargo initialization, repair, resume and patch export](docs/engine-cargo.md). The local examples exercise actual offline Cargo tests without paid model calls, including [checksum-locked dependencies from a prepared image](docs/engine-cargo-locked.md). A [separate download/preparation helper](docs/engine-dependency-download.md) handles locked crates missing from that image.
+
+The [proposal-provider slice](docs/engine-proposal-provider.md) accepts bounded model-shaped JSON via local replay, evaluates existing actions or defers new candidates, and feeds observed returns back through the same store. No provider calls are enabled.
+
+For your own goal and observed results, use the [configured next/observe loop](docs/engine-configured-loop.md). It reads JSON goals and action menus, persists pending commitments, and updates the next choice from supplied outcomes without recompiling Rust.
+
+Start with the [verified runnable local quickstart](docs/engine-local-quickstart.md) and [functional completion audit](docs/engine-functional-audit.md).
+
+For the current operator workflow, see [requirements, local generation, independent review, correction and accepted export](docs/engine-operator-workflow.md). Actual installed-model evidence is recorded for the [invoice correction/carryover cycle](docs/engine-local-correction.md) and [real RTS repair](docs/engine-rts-local-correction.md). These are bounded operator-assisted capabilities; [practical completion limits](docs/engine-practical-completion.md) remain separate from M3 and benchmark claims.
+
+`tsr engine` now connects proposals, evidence-based commitment, frozen forecasts, returns and preference accumulation across durable cycles. Start with the [three-cycle CLI demo](docs/engine-demo.md) and its [captured output](docs/engine-demo-output.txt). The deterministic queue domain runs locally without a provider; it is a working engine slice, not completion of M3 or a general coding agent.
+
+
+At the original M0–M4 baseline, `tsr` records a Claude Code session into an append-only event log (`tsr hook`, with
 commands run in a sealed container by `tsr exec`), records the forecast the agent makes with
 `tsr forecast` before a gated action (nothing yet makes it forecast), lets you label the returns
 afterwards and renders one closed episode (`tsr review`, `tsr reflect`). It does not yet block actions, calibrate forecasts, choose actions or
@@ -41,14 +88,14 @@ More: [`AGENTS.md`](AGENTS.md) (rules for contributors and agents), [`specs/lane
 (lane briefs), evidence in [`docs/m0-evidence.md`](docs/m0-evidence.md),
 [`docs/m1-evidence.md`](docs/m1-evidence.md) and [`docs/m2-evidence.md`](docs/m2-evidence.md).
 
-## Status
+## Historical milestone status
 
 | Milestone (PRD §B11) | State | What main has |
 | --- | --- | --- |
 | M0 Record | on main; known limitations below | `tsr hook`, `tsr exec`, `tsr forecast`, `tsr task open/status/export`, `tsr_cli::reconstruct` |
 | M1 Gate | on main | `crates/tsr-policy`, `tsr policy check`; the hook does not call the gate |
 | M2 Reflect | on main | `tsr review`, `tsr reflect`, `tsr note`, `tsr task reconcile`; `crates/tsr-ledger`, `crates/tsr-forecast`; 30 synthetic episodes |
-| M3 Corpus | not on main (in development) | `tsr corpus` is a placeholder |
+| M3 Corpus | incomplete on this branch | corpus/batch/eval pipeline, defensive oracle, sealed worker, selection, reviewed tensions and broker implemented; real corpus and live provider evidence pending |
 | M4 Calibrate | on main; synthetic corpus only | `tsr train dataset/fit/verify/report/apply`, `crates/tsr-learn`, `fixtures/m4`, `scripts/m4-evidence.sh`; `tsr data` and `tsr eval` are placeholders |
 | M5 Decide | not started | `tsr model` is a placeholder |
 | M6 Extend | not started | — |
@@ -305,3 +352,7 @@ docs/                 the PRD, the profile format, evidence pages
 ## License
 
 `Cargo.toml` declares `license = "MIT OR Apache-2.0"`. The repository has no LICENSE file.
+
+This M3 development branch integrates the corpus lane with M2/M4. See
+[the acceptance assessment](docs/m3-status.md) and [captured local validation](docs/m3-evidence.md).
+It is not ready for real evaluation or milestone acceptance.

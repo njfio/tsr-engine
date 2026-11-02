@@ -1,0 +1,50 @@
+{
+  "assessment": "Existing scoped final source and authenticated-receipt assessment from live2; no new model review",
+  "authority_user_message": "Sentinel_9ef545a954a88191be4bc79edcdf0aa2",
+  "campaign": {
+    "calls": 222,
+    "groups": 61,
+    "max_calls": 230,
+    "max_groups": 62,
+    "max_microusd": 5000000,
+    "settled_microusd": 180395
+  },
+  "decision": {
+    "accepted": true,
+    "decision_record": "ca821d96f32b4cd919473d149798992831f647cf5e3c1b1de63234033fa607ca",
+    "desire_status": "fulfilled",
+    "requirements_revision": "26b3f3840698da37e2e104bd02f8e3d5b20e96ca3fe1704e1fbdd9f598904cf1",
+    "semantic_completeness": "accepted_by_operator",
+    "snapshot": "8fe646e55adc4af6c79ec7612353af27f59f7413bbfcbbfc9341701af31fe3f8",
+    "status": "accepted",
+    "test_receipt": "c166ccbcbdac162387700b7542fa649ce04c5c0ccb487145e31b6a0ba546dd5b",
+    "test_verdict": "passed"
+  },
+  "derivative": "/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/native-pursuit-live-2-acceptance/state",
+  "evidence_sha256": {
+    "acceptance-review.json": "9d4c2d15093c9ad1607f09f420b2dd925dfc2c853c74ceae07ab31ba43d665c9",
+    "accepted.json": "bf3b344f37f059e14c40ec61ec36493da0b37d515f0d7ad9e05ca9d2fcab7b24",
+    "after-inspect.json": "43058b8b874f6eee5c3cf2f352c9c9e60b54322afa8e54f97c683fd6f46afe7e",
+    "before-inspect.json": "21d42403ad336583a903ec47602091b13ad87439ccab7e3b9a88b6d37b5b6f23",
+    "next-choice.json": "017569e4acdd807328c921710c1d92a21669cd3035b3aa97c718317ecc8f2791",
+    "provenance.json": "68db8eb6e928e250d94b86790eb67417b26759b7a4b52ad16491bbc8f537da78",
+    "verification.json": "939c72fec67319bea5f2c43296d5e0af5499b40c27d5e65a71d9c15eb35484fc"
+  },
+  "independent_assessor": "/root/inquiry_review",
+  "new_execution_groups": 0,
+  "new_provider_calls": 0,
+  "next_branch": "stop",
+  "next_reason": "closed_or_accepted",
+  "not_demonstrated": [
+    "relationship revision",
+    "return-informed second pursuit",
+    "adaptive TSR benefit",
+    "general reliability"
+  ],
+  "original": "/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/native-pursuit-live-2",
+  "original_files_verified_unchanged": 67,
+  "restart_identical_and_inert": true,
+  "source_and_receipts_unchanged": true,
+  "transcriber": "/root using operator acceptance API under explicit user approval",
+  "version": "native-pursuit-linked-acceptance-result@1"
+}

@@ -4,6 +4,86 @@
 
 Oct 10, 2026 · @Nicholas
 
+## Author clarification · November 1, 2026: continuous optional development
+
+At 20:42 UTC the author asked whether the implementation was preventing development
+and stated that it should be possible on “just about every pass”
+(`Sentinel_379add18b6d0819196905efc95f95b77`). Development remains optional; this does
+not authorize fabricated success, Contrast, user preferences or new permissions.
+The earlier empirical expansion routes below retain their distinct provenance.
+
+A reviewed generated contributor may develop its own public meaning while keeping
+its native identity, immutable originating text/ancestry and original obligations.
+Meaning development can refer to currently eligible root or generated contributors;
+source binding, independent review, lineage and restart checks apply equally.
+The provisional-wanting and separate artifact/meaning decision paths are implemented
+and verified offline in the isolated continuous-development branch. One deliberation
+can retain or change the artifact while independently proposing development. Browser
+reconsideration can propose a new relationship or wanting rather than only revising
+an existing lineage. Exact reviews, native admission receipts, preserved obligations
+and unknown-effect blocking remain mandatory. See `continuous-deliberation-verification.md`
+for the tested boundaries and retained failures; authored fixtures are not live emergence
+or a demonstration of general autonomy.
+
+### Prospective interpretation: reviewed provisional wanting
+
+The continuous-development clarification is implemented prospectively as a separate
+optional route, not by relabeling unknown experience as success or unmet Contrast.
+A generator may propose wanting grounded in one or more current task contributors,
+including a generated child, with an explicit rationale and unknown fulfillment.
+Independent semantic review may admit it as a native Preference with Council
+provenance. No prior empirical outcome or reviewed aspiration is required for this
+route. It is attributed to the generator, never invented user testimony. All
+original obligations, contributing identities and permissions remain unchanged.
+This is an explicit implementation interpretation of the new clarification, not a
+claim about what the original book or earlier PRD already required.
+
+The generic ledger authenticates the exact Council attestation, event order,
+content identity, task scope and eligible parent lineage. It does not independently
+prove a rationale true or reconstruct source files from their hash. The project
+controller binds the exact current contributors, source snapshot, requirements and
+reviewed response before atomic admission. Fulfillment stays unknown; selectable
+desire does not imply executable permission. Retention and abstention remain valid.
+
+## Approved amendment · October 31, 2026: optional success-derived wanting
+
+The author approved this explicit behavior change at 21:38 UTC (message
+`Sentinel_d92a7ebf70fc8191820993de4b00d302`, “Yes”, in response to whether
+successful fulfillment may also generate a new desire while preserving its
+contributors and requiring independent review). This amendment supersedes the
+**exclusive** “only Contrast” expansion wording below and in the repository
+invariants; the original text remains as design history. It is not a claim that
+the original book already specified this implementation.
+
+An authenticated, independently assessed successful return may support an optional
+new generated `Preference`, with its contributing identities and history preserved.
+Generation and independent admission remain separate. Retention, abstention and
+successful work without novelty remain valid. The existing unmet-Contrast route
+and its provenance remain unchanged; Surprise alone still cannot expand wanting.
+
+For the current browser-project implementation, success is restricted to exact
+published **artifact** criteria, current source and receipt, and the explicitly
+partitioned assessment scope. It does not establish human fulfillment, enjoyment,
+final user acceptance, or that a successor has been fulfilled. A separately reviewed
+aspiration must connect the contributors to the proposed new wanting; a second
+independent review decides identity admission. The native append-only ledger records
+success provenance separately from Contrast and admits the same `Preference` type
+with Council provenance, never fabricated Operator approval. Existing obligations,
+permissions and parent identities are unchanged. An admitted successor participates
+in ordinary selection/composition, including later composition with satisfied
+contributors; no admission grants action authority.
+
+The generic ledger trusts a typed Council success attestation and verifies its
+causal references. The project controller additionally verifies the complete current scoped
+assessment and deterministically records all and only its met artifact criteria.
+Every root contributing to a success-derived identity must map to a met criterion;
+unrelated unmet or unknown criteria remain visible, open obligations. Neither the
+generator nor reviewer may select a convenient evidence subset or promote an
+unknown/unmet contributor to success. Overall reject/unknown verdicts can therefore
+coexist with success in a separate contributing scope; abstention produces no
+success attestation. Neither boundary authenticates semantic truth by itself;
+independent model review can be wrong and must remain inspectable.
+
 ## Read this first
 
 v0.1 has the right skeleton and the wrong proportions. Its best idea — freeze the expectation before acting, record the return separately, learn only from the difference — is the TSR cycle made mechanical, and it is already the protocol in Chapter 19 of *The Sovereign Mirror*. Around that idea v0.1 wraps enterprise governance for a one-person lab, a learning design (an imitation classifier on 500 reviewed labels) that will barely beat its own rules, and roughly forty disclaimers that make the spec read as apologetics.

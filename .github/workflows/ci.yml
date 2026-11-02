@@ -1,0 +1,55 @@
+name: Engine verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  authored-engine:
+    runs-on: ubuntu-latest
+    container: rust:1.90-bookworm
+    timeout-minutes: 45
+    env:
+      # Retain debug assertions/overflow checks; omit full DWARF variable detail.
+      # Native admission hashes the exact binary under its existing 128 MiB bound.
+      CARGO_PROFILE_DEV_DEBUG: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Use the Debian image's interpreter: Cargo and sealed transports sanitize
+      # loader variables, so an external toolcache Python must not depend on them.
+      - name: Verify image Python without loader environment
+        run: |
+          env -u LD_LIBRARY_PATH python3 -I -c 'import json, sqlite3, ssl; print(__import__("sys").version)'
+          env -u LD_LIBRARY_PATH python3 -I scripts/test_m3_edit_broker.py
+      - name: Rust workspace (no nested container runtime)
+        run: cargo test --locked --workspace --no-fail-fast
+      - name: Build native CLI for authored transport tests
+        run: |
+          cargo build --locked -p tsr-cli
+          python3 -c 'from pathlib import Path; p=Path("target/debug/tsr"); print("native binary bytes:", p.stat().st_size); assert p.stat().st_size <= 128 * 1024 * 1024'
+      - name: Contract and recovery tests (no provider)
+        env:
+          PYTHONPATH: .:scripts
+        run: >-
+          python3 -m unittest
+          scripts.test_engine_wanting_presentation
+          scripts.test_engine_deliberation_restart
+          scripts.test_engine_criterion_consistency
+          scripts.test_engine_criterion_reassessment
+          scripts.test_engine_criterion_migration
+          scripts.test_engine_browser_return_schema
+          scripts.test_engine_browser_predispatch
+          scripts.test_engine_browser_recovery_pair
+      - name: Native development and interrupted admission (authored transport)
+        env:
+          PYTHONPATH: .:scripts
+          TSR_BROWSER_ADAPTER_AUTHORED: '1'
+        run: >-
+          python3 -m unittest
+          scripts.test_engine_browser_provisional.BrowserProvisional.test_initial_single_contributor_recursive_identity_and_inert_restart
+          scripts.test_engine_browser_deliberation.BrowserDeliberation.test_lost_native_component_result_recovers_without_second_admission
+      - name: Local UI HTTP and state tests (authored transport)
+        env:
+          PYTHONPATH: ui/engine:.:scripts
+        run: python3 -m unittest discover -s ui/engine -p 'test_*.py'

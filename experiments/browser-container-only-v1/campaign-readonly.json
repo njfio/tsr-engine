@@ -1,0 +1,22 @@
+{
+  "ledger_sha256": "b0b86fdc3f9cae48832212c21c800d0e2f8850186c3806f124f0d9e78a765d02",
+  "unchanged": true,
+  "status": {
+    "calls": 259,
+    "execution_groups": 72,
+    "known_cost_microusd": 222740,
+    "committed_microusd": 222740,
+    "unknown_calls": [],
+    "unknown_executions": [],
+    "overrun": false,
+    "stopped": false,
+    "effective_max_calls": 272,
+    "remaining_calls": 13,
+    "remaining_execution_groups": 2,
+    "effective_max_execution_groups": 74,
+    "evaluation_suite_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+    "reconciled_bills": 7,
+    "fixture_only": false,
+    "provider_hard_cap": false
+  }
+}

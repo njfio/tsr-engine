@@ -1,0 +1,11 @@
+# Retained criterion evidence refresh
+
+Before the approved paired launch, preparation found that replacing acceptance requirements to update observation bindings would replace contributor identities. The new append-only `CriterionPolicyRefreshed` path keeps the exact original requirements revision, criterion text and assessment scope. It requires the latest policy predecessor, its authentic Council assessment, changed cumulative evidence bindings, no pending action and no unresolved resource/effect state. It cannot change goals or grant permissions.
+
+When additional registered observations or changed source make a frozen cumulative policy inapplicable, that policy remains historical. The current frame becomes unavailable until an explicitly reviewed source-bound refresh. Complete current observations, including adverse/partial results, remain required. Corrupt provenance still errors rather than becoming unknown.
+
+The authored real-browser retained-project regression passed in 534.492 seconds. It completed the original six-bundle assessment, added a seventh bundle on the same source, and assessed a changed source with a fresh receipt. All three assessments and exact payloads persist; original contributor IDs and requirements revision survived. Unknown remained unknown. Changed criteria/scope, wrong predecessor, missing bindings and duplicate refresh were rejected. Inert replay caused no new assessment or execution. These are authored transport judgments, not Luna results or live emergence.
+
+Independent review identified one omitted unknown-external-charge check. It was added after the full browser test; final native tests (9 passed, 15.07 seconds) and build passed with the tightened guard. The complete browser fixture was not repeated for that one additional fail-closed guard. Earlier build failure from a missing Context import is retained in /tmp/game-pair-refresh-build.log. No historical trial or frozen packet was modified.
+
+The full eighteen-bundle two-criterion policy is 11,866 bytes, within the existing policy-reader bound. Observer mapping remains operator-assisted. This repair does not supply a gameplay mapping or claim finite traces prove universal reachability. No paid calls or live campaign grants were made during this repair.

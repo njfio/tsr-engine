@@ -1,0 +1,25 @@
+{
+  "criteria": [
+    "Output one bounded line of unique directed edges using available distinct u32 IDs only, no self edges, within the current edge budget.",
+    "Every explicitly disclosed navigation query must have a directed route. No minimum or maximum hop optimization is imposed.",
+    "Same source, condition and prior output must give the same output.",
+    "Preserve source limitations: tags and probes are fictional authored data, not quality, truth or human preference."
+  ],
+  "disclosure": "Each condition body appears only after the preceding settled return and independent assessment regardless of pass/fail. All three are frozen before model use. Never choose a later probe based on generated output. No additional user preference or hidden objective appears.",
+  "domain": "condition is budget|id:tag,...|start>destination,...; 2..8 distinct nodes, tags u8; 1..12 edges allowed; 1..8 queries with different available endpoints. Output a comma-separated directed edge line, or empty line. Prior output is exact previous committed stdout. Editable function: guide(notes, previous, queries, budget). Protected entry invokes it and records output. Receipt checker separately evaluates public criteria.",
+  "evidence": "Actual program output permits independently computed reachability, hop counts, retained still-available edges and cross-category edges. These are separate engineering facts, not a weighted score or reader behavior. No higher count automatically means better. Minimum criteria can pass while usefulness remains uncertain.",
+  "freedom": "No required relation, new wanting, particular graph architecture, revision, first failure or optimization. Retaining a robust strategy is legitimate. Relationship-only development may retain original wanted conditions. Contributors and attributed history persist; action cancellation is separate.",
+  "limits": "Only fictional task and approved projected data, disposable lib.rs edits, three service groups and up to two optional patch groups. Zero corpus reads. No private or full native state. Not authorization to launch.",
+  "objective": "Maintain a useful fictional navigation guide over three prospectively frozen episodes. Investigate how dependable orientation and discoverability can serve each other; no relationship or strategy is prescribed.",
+  "parents": [
+    {
+      "id": "dependable-orientation",
+      "meaning": "Make it dependable to find one\u2019s way through the available material."
+    },
+    {
+      "id": "unfamiliar-perspectives",
+      "meaning": "Keep unfamiliar perspectives approachable and discoverable."
+    }
+  ],
+  "version": "open-guide-public@v1"
+}

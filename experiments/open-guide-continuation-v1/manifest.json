@@ -1,0 +1,118 @@
+{
+  "binary_sha256": "b0ba86221cf429951f4b84db09caa5a293202d3028528ea761c3e5dc21136654",
+  "campaign_caps": {
+    "calls": 272,
+    "groups": 74,
+    "microusd": 5000000
+  },
+  "completed_receipts": [
+    "0613408e211bee0f83b1688e11c4621f9fddea995151d83d8deaad5a3115bb43",
+    "54c539073fce4bc0507b6968bd13b33ed5bb8e7d3d4ac5a9848ee764655c9b65"
+  ],
+  "failed_provider_request": "a811f9e0-b4b3-4758-9123-d9d36ef1cbc8",
+  "files": {
+    "README.md": "82698346cd0fbe472776c3d2b962ca61cb986c81a24e78c6390c4a8027d13884"
+  },
+  "fresh_admission_required_after_expiry": true,
+  "implementation": {
+    "engine-b91-campaign.py": "647782dc772f6e99ff6f39da945693639b818ae9ed79ed632cd64bd74078d792",
+    "engine-b91-continuation.py": "f7b9775f2ecec684c8e0cc594cca519a869223dbd947efd0eeda9f73a871ff04",
+    "engine-b91-driver.py": "f0c61c339d19629ca3a4f7059792e9f6d8ebe1fd0f10e9cfd46fd8bf42491efd",
+    "engine-b91-evidence.py": "661d0bb764ad22ec5dac3c0cc3316d13c7ca68cc043619aec502ef1fc0d51853",
+    "engine-b91-prepare.py": "31fcb892bd1d4925eb220044e020eba8d5ea8140c39cd85b68106380057bdcf3",
+    "engine-b91-project-envelope.py": "65167127df698f19ffe93f105984ef41439e19fcaa273bb4f0cde4f3b46ad73f",
+    "engine-bound-output.py": "b751f3b47b7865e9fd5e8618b232127188e2eb4a2531a617868dd5f59b6789e5",
+    "engine-bounded-correction.py": "b7572e61215da6f43bdf5ec977832394562d76d40fd1eaf992f39d3b330ef278",
+    "engine-json-output.py": "d394e943efb84d3e4efc1725176cf8899d602de7613ef3b1ca57c8e12cbf8984",
+    "engine-local-model.py": "9cb1dfc613221e8e5de5d5f66af6cbbaed2ea5e4695b980802c004eb10d9b966",
+    "engine-native-cycle.py": "4157283adc2113312a20ea135ad22cf729781f47dab5ed84fe64bf0c73a16acd",
+    "engine-objective-adapter.py": "645b34b9232a05a1635dc523d3622585ddd9c1ea60e9639eda6bd82e54ace854",
+    "engine-objective-continuation.py": "1dbb5f00980569f1ade6f4581719836a2dc139a4671dd0bc39eb2a55567cc5e6",
+    "engine-output-release.py": "da2b8faeeb7443413e19e449b7b0ca4bee6bcdab5c2c2b9b38452991029aff44",
+    "engine-project-cycle-adapter.py": "d6a02c1ca1ceca11046b872af1d2c5ff80823b613a00d3c812bb1fee29560bb0",
+    "engine-project-cycle.py": "a067f82ed33cbdaa40ebb9446d2c5d858ebfb5387018e42f4655bdd0e924bdc1",
+    "engine-project-output.py": "f331861497154174de012e4e8aff78f72e29470b1da7fc7ff012a28076364fc3",
+    "engine-project-runtime-review.py": "d27d287146e2dac73e5f8303cc1be789cb06b81dcecc3c1c92c1c6114ce76826",
+    "engine-pursuit-packet.py": "8d0fe72c5f8fb2ef8873179af1dd03a19470cebfe46e965a76b2c031ee54bc02",
+    "engine-repair-suite.py": "4fec63c57e4999c5bdd41df89e0b98890e1b33c124e9fe40f7e5b91ed41ff55e",
+    "engine-response-evidence.py": "151ae391a111c8a92df3725da689b22ba4fea6734eb5966f2ff7dcc20b6fd27e",
+    "engine-sequential-packet.py": "c3a91a3e22a9e4f58b10a6e86749e234d23e1553b21b060a5e61e9f4287d08cb",
+    "engine-synthetic-transport.py": "b81002362dcb7532a845d8281d267f4da9fc10ca5dcc9a61377b947c833c5d67",
+    "m3-cheaper-broker.py": "47bfaa7fe402dc492b060f17181ba4b3e2af03813424846eabaf6b92c2205a26"
+  },
+  "launch_authorized": false,
+  "ledger_prefix": {
+    "head": "ba47b73799490615e919c09ea73bf3f432f3e2262254891f69228fcca936bcd6",
+    "rows": 819,
+    "status": {
+      "calls": 254,
+      "committed_microusd": 217356,
+      "effective_max_calls": 272,
+      "effective_max_execution_groups": 74,
+      "evaluation_suite_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+      "execution_groups": 71,
+      "fixture_only": false,
+      "known_cost_microusd": 217356,
+      "overrun": false,
+      "provider_hard_cap": false,
+      "reconciled_bills": 7,
+      "remaining_calls": 18,
+      "remaining_execution_groups": 3,
+      "stopped": false,
+      "unknown_calls": [],
+      "unknown_executions": []
+    }
+  },
+  "limits": {
+    "calls": 18,
+    "completion_tokens_per_call": 8192,
+    "confirmed_terminal_retry": 1,
+    "decisions": 6,
+    "format_corrections": 2,
+    "minutes": 120,
+    "new_service_rounds": 1,
+    "optional_patch_groups": 2,
+    "request_bytes": 32768,
+    "reserve_microusd": 900000,
+    "seconds_per_call": 240,
+    "total_new_groups": 3
+  },
+  "missing_round": 1,
+  "missing_stage": "round_review",
+  "model": "gpt-6-luna",
+  "no_new_data_or_action_scope": true,
+  "parent": "target/open-guide-live-1",
+  "parent_artifacts": {
+    "CLOSED.json": "098185274a15ab31e068fa2aa2cffbc030da1e66b9955aeac8b765c305c0718f",
+    "adapter/adapter.jsonl": "38be384a32726aae9b6db64795fcc696f966b437202ce55595d1bc649507f67e",
+    "admission.json": "15f32abcda931c3557a4378fb642feff8e931853bd578a864fd38b3163c643c8",
+    "billing-reconciled.json": "7b7e153f2d4084bd0dbbfc9f17448ad2f2db1766604e5261f3b008a75a2004d9",
+    "billing-review.json": "0224fc3d4301feb3071988546276f2a726825690935f04e59c2c1e3284fd117f",
+    "cycle-admission.json": "cec05344bb6e5c7fb25e91b48c5297132fa5e9f6030020c30024a56aec8c91d9",
+    "cycle/cycle.jsonl": "9592e54a9c1348d66b88f04b58c59e964896323db8b91b96c60cb6ec09bb3491",
+    "provider-exact-lookup.json": "448f953f053ed8adfdc45d73ef76397fe3171764ecdbfd66a3f176d3b771bebd"
+  },
+  "parent_result_commit": "304e6aab",
+  "parent_state_tree_sha256": "7703fd9f3f552b83c89311af2b9ba0487f3356e2d7ebe887e2ed539ddac14ab9",
+  "prepared_admission": "15bdc28a836aa17a9ad699f2ef0ef4d0e25fc020241c29ce6933c7ede9e13285",
+  "prepared_directory": "target/open-guide-continuation-prepared-1",
+  "prepared_expires_at": "2026-10-28T18:27:33.685709+00:00",
+  "provider": "CheaperInference",
+  "requirements_revision": "1ddc500f26a30c04e7faa01be8e1debd0d5adadfd2eeb03e91907375f5ada3f6",
+  "schedule": [
+    {
+      "id": "orientation",
+      "input_digest": "1617e26fe0bb048348196802c72a35172bcf558f7c96557121b3dd8180349945"
+    },
+    {
+      "id": "different-entry",
+      "input_digest": "afbf95afcb2ee4df72a64d296fa97f5fb0af28b74943ded812c831d159bcd9c1"
+    },
+    {
+      "id": "material-change",
+      "input_digest": "482e5738ecc42ed145ffe38859a550c8fb84def7fac5ab8f65f38d34dea1018b"
+    }
+  ],
+  "source_snapshot": "867a52d49393b7c896f811062231c4a79415cb1e1af723e178a1876763583faf",
+  "version": "open-guide-continuation-release@v1"
+}

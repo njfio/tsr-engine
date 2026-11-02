@@ -253,6 +253,8 @@ pub struct TaskLabel {
 /// Closing and budget come from the log (`TaskClosed`, `Stop { reason: "budget" }`); criteria-met
 /// and the diff label come from `labels`. A record whose reviewer is not the operator is refused
 /// with [`LearnError::NonOperatorLabel`] (B8: labels only after review).
+/// This legacy view resolves logical labels only. `maturity::build` applies the
+/// versioned availability and seven-day horizon before new training can use them.
 pub fn resolve_labels(
     events: &[(i64, Event)],
     labels: &[LabelRecord],

@@ -1,0 +1,7 @@
+{
+  "exit": 2,
+  "outcome": "completed_local_capability_probe",
+  "image": "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+  "no_workspace_mount": true,
+  "no_campaign_operation": true
+}

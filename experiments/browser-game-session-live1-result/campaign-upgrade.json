@@ -1,0 +1,9 @@
+{
+  "version": "b91-campaign-upgrade@v1",
+  "old_manifest_sha256": "7df4975d8cc5f99c2e847ced4969923e4fa5d40e98e9b664388fcb217642acfb",
+  "old_implementation_sha256": "ad5410332a20c3e87ccb923b9be278b300573c9e49110e839eb467d8ea479b5b",
+  "new_implementation_sha256": "259469bdffbaaaefa1b4b21de244378fa7dfd4df95c1f487759170c022d5927e",
+  "ledger_prefix_head": "6334928a6493919ff01c4db5cf90f6b2de44283ef1fd6cd6f7813fbd409beb3d",
+  "reviewer": "independent-agent:/root/binding_review",
+  "reason": "Reviewed single-trial browser session extension preserving baseline and exact $10 additional allowance."
+}

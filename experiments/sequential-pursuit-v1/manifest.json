@@ -1,0 +1,15 @@
+{
+  "files": {
+    "condition-a.json": "8caf27f189864d082b6fa59abeb13765e1de20e6f4465260b878813e4da49020",
+    "condition-b.json": "1293b51aa54bfac35d3b90e0279942392a1b8a9e20c4082db3170bf3ed642088",
+    "contract.rs": "5f50dc3be1635a1eb6c41a5c0cd6065b5281a8ebd35d3ddecfcff14362f4e5a9",
+    "index.json": "a6fe88e361d4768f911884ee0e3f90fdc7d8be41773a01965bfdad1f3dba1274",
+    "information-records.json": "d3ae54cc5756dc29355c56d1a798060a15f669b5a6eaaae534bd28f36eff6900",
+    "project-spec.json": "231600ab6324d5aacbcfd226561989ba30b3d9527566eb1a1c671263a01e5b2d",
+    "public.json": "0ac8aed94eecbf54e3a3af2b56d54d21e5a8823e47fc81a894266d8d9b6896e9",
+    "rubric.json": "c0808ed096dab6dcb4eca0356e11a4ca5c758dbb8e86893661bd427d00ace494",
+    "seed.rs": "22588ece45d7b1175f320d4036af8e6219887a8b7d17aaec433e69c67c027191"
+  },
+  "status": "local-only-no-dispatch-authority",
+  "version": "sequential-pursuit-packet@1"
+}

@@ -1,0 +1,11 @@
+# Same-session repair continuation
+
+The first fresh validation request was settled successfully at$0.001585 but correctly rejected by native `no_insight_meaning_drift`: it omitted proposed development while changing relationship, aspiration and discriminator. No relationship, code or execution was admitted. The closed journal remains unchanged. This is a genuine semantic consistency failure, not a format error or provider outage.
+
+The generic repair returns this specific consistency violation as attributed feedback for a fresh engine decision. The existing native validation and separate model review remain unchanged. It does not fill fields, restore prior text, endorse the rejected candidate, or retry a reviewer until approval. Identical invalid candidates stop; native and reviewer rejections share a finite budget. Stale source, wrong ancestry, authority violations and uncertain effects remain fail-closed.
+
+A separate source-bound derivative retains the same native history and original authentic16-check gameplay assessment. The additional imported critique is independently assessed, bound to the actual retained response/dispatch/source and clearly labeled as preparation-attested evidence, not a native admission. The prior candidate is still unadmitted. This preparation and code repair count as one manual intervention; the complete live validation is not hands-off even if subsequent stages need no bridges.
+
+Original session baseline307calls/83operations/$0.314198. Consumed1call/0operations/$0.001585. Remaining admission199calls/100operations/$9.998415, same18:34:03.866190UTC deadline. Its19shared format corrections and one exact-failed-zero retry with120second backoff are within the remaining call ceiling. Cumulative ceilings remain507calls/183operations/$10.314198; no budget or deadline reset. The one semantic rejection also counts against the shared rejection allowance.
+
+All original protocol, public export and container restrictions remain. Freeze new source/admission/payload pins and independent review before dispatch. No duplicate effects, fabricated feedback, prescribed game solution, final acceptance or host browser interaction. A valid retained meaning, justified development or abstention is a legitimate result. Report local tests separately from live behavior and preserve all failed checks.

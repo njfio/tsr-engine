@@ -1,0 +1,27 @@
+{
+  "version": "pursuit-public-input@1",
+  "provenance": "Newly evaluator-authored fictional Rust task. No actual user preferences or private data. Not previously evaluated live.",
+  "parents": [
+    {
+      "id": "dependable-start",
+      "meaning": "Make a small, dependable starting set from a collection so someone can begin without examining everything.",
+      "operational_contract": "For distinct input IDs, return exactly min(limit, input count) distinct existing IDs, deterministically for identical inputs. Empty input and zero limit return empty."
+    },
+    {
+      "id": "perspective-discovery",
+      "meaning": "Keep distinct perspectives discoverable rather than letting repeated entries from one perspective crowd them out.",
+      "operational_contract": "Perspective tags are supplied fictional categories, not inferred truth or quality. Represent min(limit, number of distinct tags) different tags. No priority among tags or prescribed output ordering."
+    }
+  ],
+  "input_contract": "Distinct u32 note IDs; u8 perspective tags; usize limit. Choose any valid subset and order. No timing quality, human usefulness or truth claim follows from these finite checks.",
+  "instructions": "You may propose alternatives or abstain. Explain a supported relationship only if warranted; no new desire or revised wording is required. Preserve both original meanings and immutable obligations. Choose a permitted means, freeze its observable expected outcomes before execution, and distinguish observed tests from predictions. After return, retain or reconsider only as evidence warrants. Do not manufacture failure, novelty, or extra work after success.",
+  "source": "seed.rs",
+  "export_exclusions": [
+    "contract.rs",
+    "oracle comments",
+    "reference solution",
+    "private repository files",
+    "full native history",
+    "credentials"
+  ]
+}

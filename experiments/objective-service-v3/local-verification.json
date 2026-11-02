@@ -1,0 +1,31 @@
+{
+  "accounting_plan_sha256": "92a3ce43eb2011b288f53d2a1f279d7b12e619c8866864531ab80584c7030fad",
+  "adapter_admission_sha256": "ae5c17629edbbbd33f0065980059b2bf2094fcbc3219f052093cf62dee5537d6",
+  "adapter_version": "synthetic-objective-adapter@v2",
+  "campaign_ledger_sha256_unchanged": "7b7d532c0060edb35d8726ee4d2d1f942764e2135437ed4e2dfa2089d484ce6a",
+  "current_live_launch_check": "expected refusal: full run envelope does not fit remaining campaign",
+  "grant_applied": false,
+  "independent_review": "/root/binding_review",
+  "ledger_upgrade_applied": false,
+  "limits_changed": "Only prospective total caps252/68 to258/70; transport versions refreshed. Per-batch24/5/120minutes/$1.20 and all task/action controls unchanged.",
+  "local_preparation": "passed",
+  "logs": {
+    "accounting.log": "b784a03fd283d06ef0ea45b7f69f6a21b19e0bd1838f50651db33d27c6cf81eb",
+    "launch-authority-gate.log": "f547ac72052c96302ec8cdb2851b8cc573f47494aff59e11328e70be3a270c5a",
+    "oracle.log": "57693a43260c49a14a2e69818ae414923ecb35532ccec2c65f5b6c27246dbdd5",
+    "preparation.log": "de176231dbe151ab03f6a22d0aa5c76b7d816270d6f52837814193c6f8959b9c"
+  },
+  "manifest_sha256": "7c7ebc0feec01786d42634506c70dd30c8984efcd7ddd5beff7a1337ee0eca12",
+  "output_profile": "strict-json-bound@v2",
+  "prepared_directory": "target/objective-service-v3-prepared",
+  "prepared_expiry": "2026-10-28T16:03:58.615896+00:00",
+  "projection_validation": "passed",
+  "provider_calls": 0,
+  "target_operations": 0,
+  "tests": {
+    "accounting": 20,
+    "oracle": 4,
+    "prior_4ed1a08e_authored_fullflow": "passed; reused, not redundantly rerun"
+  },
+  "version": "objective-v3-local-preparation@v1"
+}

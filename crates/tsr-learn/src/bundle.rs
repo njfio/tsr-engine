@@ -34,6 +34,8 @@ pub const CONTENT_FILES: &[&str] = &[
 /// The bundle manifest: §B8's fields plus the split digest and the source root.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maturity_digest: Option<Hash>,
     /// The data-manifest digest: the data and training roots.
     pub data_manifest: String,
     pub training_root: String,
@@ -69,6 +71,8 @@ pub struct Manifest {
 /// `report`, `apply` and `verify` all exit 2 with `data-manifest.json: <field> ...`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct DataManifest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maturity_digest: Option<Hash>,
     pub feature_schema: String,
     pub data_root: String,
     pub training_root: String,
@@ -95,6 +99,7 @@ impl<'de> Deserialize<'de> for DataManifest {
             .as_object()
             .ok_or_else(|| D::Error::custom("expected a JSON object"))?;
         const KNOWN: &[&str] = &[
+            "maturity_digest",
             "feature_schema",
             "data_root",
             "training_root",
@@ -138,6 +143,10 @@ impl<'de> Deserialize<'de> for DataManifest {
                 .map_err(|_| D::Error::custom(format!("{name}: {n} is out of range for a count")))
         };
         Ok(DataManifest {
+            maturity_digest: obj
+                .get("maturity_digest")
+                .map(|v| serde_json::from_value(v.clone()).map_err(D::Error::custom))
+                .transpose()?,
             feature_schema: string("feature_schema")?,
             data_root: string("data_root")?,
             training_root: string("training_root")?,
@@ -202,10 +211,18 @@ impl Bundle {
     /// `uncalibrated` — `calibrated` is `None`, never a fabricated number. A row whose feature
     /// length differs from the head's is refused rather than zipped.
     pub fn apply(&self, row: &Row) -> Result<Applied, LearnError> {
-        let raw = crate::head::predict_checked(&self.head, &self.spec, &row.features)?;
-        let support =
-            crate::support::support(&self.spec, &self.support_index, &row.family, &row.features);
-        let calibrated = match self.population.get(&row.family) {
+        self.apply_features(&row.family, &row.features)
+    }
+
+    /// Pre-action application without inventing a commitment or outcome row.
+    pub fn apply_features(
+        &self,
+        family: &str,
+        features: &crate::features::FeatureVector,
+    ) -> Result<Applied, LearnError> {
+        let raw = crate::head::predict_checked(&self.head, &self.spec, features)?;
+        let support = crate::support::support(&self.spec, &self.support_index, family, features);
+        let calibrated = match self.population.get(family) {
             Some(_) => {
                 let p = crate::isotonic::apply_isotonic(&self.isotonic, raw);
                 let probability = tsr_domain::Probability::new(p).map_err(|e| {
@@ -277,6 +294,10 @@ fn bundle_id(content_digests: &[(String, Hash)], manifest: &Manifest) -> Hash {
     parts.push(manifest.support_floor.to_string().into_bytes());
     parts.push(manifest.split_digest.clone().into_bytes());
     parts.push(manifest.source_root.clone().into_bytes());
+    if let Some(digest) = manifest.maturity_digest {
+        parts.push(b"maturity@v1".to_vec());
+        parts.push(digest.to_hex().into_bytes());
+    }
     let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
     Hash::of(&refs)
 }
@@ -551,7 +572,7 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
     spec.standardize_std = std;
     let source_root = Hash::from_hex(&manifest.source_root)
         .map_err(|e| LearnError::Invalid(format!("data-manifest.json: source_root: {e}")))?;
-    Ok(Dataset {
+    let ds = Dataset {
         rows,
         split,
         spec,
@@ -564,7 +585,11 @@ pub fn load_dataset(dir: &Path) -> Result<Dataset, LearnError> {
         // F8: the count is written by `dataset` into `data-manifest.json`; `load_dataset` reads the
         // rows, not the index, so it carries the stored count when present.
         uncommitted_tasks: manifest.uncommitted_tasks,
-    })
+    };
+    if ds.spec.version == crate::project_receipts::SCHEMA {
+        crate::maturity::validate(dir, &ds)?;
+    }
+    Ok(ds)
 }
 
 /// B15 test hook: the support index a dataset would produce, so a test can assert it holds only
@@ -640,6 +665,17 @@ pub fn write_bundle(
     out_dir: &Path,
     support_floor: u32,
 ) -> Result<Hash, LearnError> {
+    load_dataset(dataset_dir)?;
+    let maturity = crate::maturity::binding(dataset_dir)?;
+    write_bundle_inner(dataset_dir, out_dir, support_floor, Some(maturity))
+}
+
+fn write_bundle_inner(
+    dataset_dir: &Path,
+    out_dir: &Path,
+    support_floor: u32,
+    maturity_digest: Option<Hash>,
+) -> Result<Hash, LearnError> {
     let ds = load_dataset(dataset_dir)?;
 
     // B9: a bundle is written once. Refuse a non-empty `--out` so a second `fit` cannot overwrite
@@ -654,16 +690,6 @@ pub fn write_bundle(
         }
     }
 
-    // §B8's minimum data: refuse with the counts when fit and calibrate hold fewer than 150 tasks
-    // with resolved labels.
-    let mature = mature_tasks(&ds);
-    if mature < MIN_MATURE_TASKS {
-        return Err(LearnError::Invalid(format!(
-            "too few mature episodes: {mature} tasks with a resolved label on fit+calibrate, \
-             need {MIN_MATURE_TASKS}"
-        )));
-    }
-
     // Re-run every probe over the dataset; refuse when one fails.
     let index = {
         let p = dataset_dir.join("tasks.jsonl");
@@ -674,14 +700,25 @@ pub fn write_bundle(
         }
     };
     let events = read_events(dataset_dir)?;
+    let events = if maturity_digest.is_some() {
+        let proof: crate::maturity::Maturity = parse_structural(dataset_dir, "maturity.json")?;
+        crate::maturity::available_events(&events, &proof.as_of)?
+    } else {
+        events
+    };
     // B3: the probe pass reads every row, held_out included; log each held_out read.
     for r in &ds.rows {
         if r.side == crate::dataset::Side::HeldOut {
             crate::probes::log_holdout_access(dataset_dir, r, "fit")?;
         }
     }
-    let families = crate::features::families_from_spec(&ds.spec);
-    let extractor = crate::probes::default_extractor(&ds.spec, &families);
+    let schema_input = if ds.spec.version == crate::project_receipts::SCHEMA {
+        let proof: crate::maturity::Maturity = parse_structural(dataset_dir, "maturity.json")?;
+        crate::maturity::load_schema_input(dataset_dir, &proof)?
+    } else {
+        None
+    };
+    let extractor = crate::probes::schema_extractor(&ds.spec, schema_input.as_ref());
     let split_json = dataset_dir.join("split.json");
     let probe_report = crate::probes::run_all(
         &ds,
@@ -717,6 +754,26 @@ pub fn write_bundle(
             format!("probe caught a leak: {detail}")
         };
         return Err(LearnError::Invalid(msg));
+    }
+
+    // Eligibility is recomputed before counts or fitting; probes above retain their
+    // precise diagnostics for truncated evidence, using the same as-of view.
+    if let Some(expected) = maturity_digest {
+        if crate::maturity::validate(dataset_dir, &ds)? != expected {
+            return Err(LearnError::Invalid(
+                "maturity evidence changed during fitting".into(),
+            ));
+        }
+    }
+
+    // §B8's minimum data: refuse with the counts when fit and calibrate hold fewer than 150 tasks
+    // with resolved labels.
+    let mature = mature_tasks(&ds);
+    if mature < MIN_MATURE_TASKS {
+        return Err(LearnError::Invalid(format!(
+            "too few mature episodes: {mature} tasks with a resolved label on fit+calibrate, \
+             need {MIN_MATURE_TASKS}"
+        )));
     }
 
     // F3/R2: an empty fit or calibrate slice must be refused, naming the slice. An empty fit slice
@@ -803,6 +860,7 @@ pub fn write_bundle(
     // The manifest. The calibrator is the bundle id's first 12 hex and the feature-schema version,
     // so it is filled after the id is known — but the id does not cover the calibrator field.
     let mut manifest = Manifest {
+        maturity_digest,
         data_manifest: ds.data_root.to_hex(),
         training_root: ds.training_root.to_hex(),
         feature_schema: ds.spec.version.clone(),
@@ -816,6 +874,13 @@ pub fn write_bundle(
         id: String::new(),
         content_digests: BTreeMap::new(),
     };
+    if manifest.feature_schema == crate::project_receipts::SCHEMA
+        && manifest.maturity_digest.is_none()
+    {
+        return Err(LearnError::Invalid(
+            "receipt model lacks required maturity/feature-evidence binding".into(),
+        ));
+    }
     let id = bundle_id(&content_digests, &manifest);
     manifest.calibrator = format!("{} {}", &id.to_hex()[..12], ds.spec.version);
     manifest.id = id.to_hex();
@@ -934,6 +999,13 @@ pub fn load_bundle(dir: &Path) -> Result<Bundle, LearnError> {
     let split: SplitManifest = parse_bundle_file(dir, "split.json")?;
     let support_file: SupportFile = parse_bundle_file(dir, "support.json")?;
 
+    if manifest.feature_schema == crate::project_receipts::SCHEMA
+        && manifest.maturity_digest.is_none()
+    {
+        return Err(LearnError::Invalid(
+            "receipt model lacks required maturity/feature-evidence binding".into(),
+        ));
+    }
     let id = bundle_id(&content_digests, &manifest);
     if manifest.id != id.to_hex() {
         return Err(LearnError::Invalid(id_mismatch(
@@ -1060,14 +1132,11 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
     if let Some(dataset_dir) = rebuild {
         // B9: build in a temporary directory, compare ids, and remove it, so the bundle directory
         // is unchanged and no `rebuild` subdirectory is left behind.
-        let tmp = std::env::temp_dir().join(format!(
-            "tsr-verify-rebuild-{}-{}",
-            std::process::id(),
-            bundle.id.to_hex()
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let rebuilt = write_bundle(dataset_dir, &tmp, bundle.manifest.support_floor);
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = tempfile::Builder::new()
+            .prefix("tsr-verify-rebuild-")
+            .tempdir()
+            .map_err(|e| VerifyError::Learn(LearnError::Io(e)))?;
+        let rebuilt = write_bundle(dataset_dir, tmp.path(), bundle.manifest.support_floor);
         let rebuilt = rebuilt.map_err(VerifyError::Learn)?;
         if rebuilt != bundle.id {
             return Err(VerifyError::IdMismatch {
@@ -1082,6 +1151,16 @@ pub fn verify_bundle(dir: &Path, rebuild: Option<&Path>) -> Result<(), VerifyErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Historical model/digest fixtures have no episode clocks. Exercise the old
+    // numerical machinery explicitly; production entry-point maturity tests live separately.
+    fn write_bundle(dataset_dir: &Path, out_dir: &Path, floor: u32) -> Result<Hash, LearnError> {
+        if dataset_dir.join("maturity.json").exists() {
+            super::write_bundle(dataset_dir, out_dir, floor)
+        } else {
+            write_bundle_inner(dataset_dir, out_dir, floor, None)
+        }
+    }
     use crate::dataset::{SplitBy, SplitManifest};
     use crate::features::{spec_for_families, FeatureVector};
     use tsr_domain::{ActionKind, EventId, TaskId};
@@ -1117,6 +1196,32 @@ mod tests {
         // B2/F7: the id is the real `row_id`, so `load_dataset`'s recompute agrees on a clean row.
         r.id = crate::dataset::row_id_of(&r);
         r
+    }
+
+    fn mature_fixture(dir: &Path) {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/m4");
+        let events = crate::dataset::read_events_records(&fixtures.join("events.jsonl")).unwrap();
+        let index = crate::dataset::read_task_index(&fixtures.join("tasks.jsonl")).unwrap();
+        let labels = crate::dataset::read_labels(&fixtures.join("labels.jsonl")).unwrap();
+        let cfg = crate::dataset::SplitConfig {
+            by: SplitBy::Time,
+            fractions: crate::dataset::SplitFractions {
+                calibrate: 0.25,
+                holdout: 0.25,
+            },
+            seed: 7,
+        };
+        let (ds, proof) = crate::maturity::build(
+            &events,
+            &index,
+            &labels,
+            "operator",
+            cfg,
+            Hash::of(&[b"synthetic"]),
+            "2028-01-01T00:00:00Z",
+        )
+        .unwrap();
+        crate::maturity::write(&ds, &proof, &events, &index, &labels, dir).unwrap();
     }
 
     fn dataset() -> Dataset {
@@ -1305,9 +1410,8 @@ mod tests {
 
     #[test]
     fn verify_rebuild_gives_the_same_id() {
-        let ds = dataset();
         let ddir = tmpdir("ds4");
-        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        mature_fixture(&ddir);
         let out = tmpdir("out4");
         write_bundle(&ddir, &out, 30).unwrap();
         verify_bundle(&out, Some(&ddir)).unwrap();
@@ -1923,6 +2027,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn concurrent_rebuilds_use_distinct_temporary_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let out = dir.path().join("bundle");
+        mature_fixture(&data);
+        write_bundle(&data, &out, 30).unwrap();
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..4)
+                .map(|_| scope.spawn(|| verify_bundle(&out, Some(&data))))
+                .collect();
+            for job in jobs {
+                job.join().unwrap().unwrap();
+            }
+        });
+    }
+
     /// B9: a bundle is written once. `write_bundle` must refuse a non-empty `--out`.
     #[test]
     fn b9_a_non_empty_out_is_refused() {
@@ -1945,9 +2066,8 @@ mod tests {
     /// directory is unchanged and no `rebuild` subdirectory is left behind.
     #[test]
     fn b9_rebuild_leaves_no_temporary_directory() {
-        let ds = dataset();
         let ddir = tmpdir("b9-rb-ds");
-        crate::dataset::write_dataset(&ds, &ddir).unwrap();
+        mature_fixture(&ddir);
         let out = tmpdir("b9-rb-out");
         write_bundle(&ddir, &out, 30).unwrap();
         verify_bundle(&out, Some(&ddir)).unwrap();

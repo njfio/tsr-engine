@@ -1,0 +1,11 @@
+{
+  "version": "same-session-rejection-feedback-packet@v1",
+  "files": {
+    "adapter-admission.json": "41b8d3269f5b6c05c8fe90cc2fb31dc0370c06b290d20e29ca899e95e9c838eb",
+    "cycle-admission.json": "69979f618cb7110ade2008b7b2d11d8287fd1e0bf0cd96abe21635290993e199",
+    "scope-grant.json": "0300727bb874f382b4f45ed2a3ce48543752f9c74371a6cd9674167b7f59251a",
+    "source-lineage.json": "ed398d4660d857f1876f3a5212b0a745e4ae38b000dafb547ff0f52c3986befb",
+    "scope-authority.json": "24f78ff55846357537d0f0fc8d48b3b4c5fd5b146e9da6363baeed4b41e9bb1e"
+  },
+  "prepare_sha256": "15cc295872bc2f9fa87890b96fd001882e1d411623122e4fd93f4805420be4e6"
+}

@@ -1,0 +1,15 @@
+{
+  "version": "continuous-game-v2-launch-binding@v1",
+  "prepared_packet_sha256": "370991226587948b5d8e8de2d8d00e13db66eaaad002d8a1eb59ebf95c77cfcb",
+  "authorization_message": "Sentinel_68a8db545ea48191874b95b15cb66b99",
+  "scope": "ONE fresh corrected-engine test, no cumulative spending/call/time cap; no later experiment",
+  "runtime_sha256": "822c5b8fcbb2f0965296e9c1170008856d8618eb36dd8198904eafb74911ef3b",
+  "files": {
+    "experiments/continuous-game-v2-launch/run.py": "387a4a44098d1c286aaf93696d5443c4f25a53dd0412adb18510bf4458c898e3",
+    "experiments/continuous-game-v2-launch/observe.py": "9aa20efb2dbd5c4b392563321ca2f96daa8a80034062547b8b498f551586eb17",
+    "experiments/continuous-game-v2-launch/continue.py": "b067ddf304dbaaa004ce78a479ceb746ea8764127a65c2bd4ef002c0bd97fa0e",
+    "experiments/continuous-game-v2-launch/stage.py": "a7d07f8494787371c0455c9a1a88207f3bdee8057b1995d721e5f4e6222d80ec",
+    "experiments/continuous-game-v2-launch/prepare.py": "2a8dc29e1d96429f6bbb9a8a76c9353871df7d97e5cbb5e6ad03cdd217d4aa51",
+    "experiments/game-wants-v3/mapping.py": "9bf0a2cbb975a2d7f48f91f805ea3dd3b5c3f99f52296c5136e7235f927164aa"
+  }
+}

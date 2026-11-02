@@ -1,0 +1,44 @@
+{
+  "authored_transport_only": true,
+  "actual_browser_execution": true,
+  "chromium_sandbox": false,
+  "native": {
+    "verdict": "passed",
+    "receipts": [
+      "e8d0d4e1b8b6ec745ba1850c8fb48a6d609356fd64d128ad3d3c66a6a3afd079",
+      "e5a21aa9475e0cd16bb05627df0281aab639db0de403c3f348fb073eacdc9214",
+      "869149b756aa073e2d3386dc50d91c154582a69f17eae8e037778dc428c39829"
+    ],
+    "goal_completion": {
+      "status": "review_required",
+      "accepted": false,
+      "desire_status": "open",
+      "semantic_completeness": "unresolved",
+      "snapshot": "8128c69c05327414df08c7e56c13cf55c7a6b4ca1f93fb684240cdf83680c66b",
+      "requirements_revision": "6b9b3f4c9c5cd64310f5bb9e48ba158111967eb8f344e736924b3f6cde5ce01f",
+      "test_receipt": "40a03cca5c392a308a7c63ff16e61fb244a2198a4d03e400de17aaba7046c848",
+      "test_verdict": "passed",
+      "decision_record": null
+    }
+  },
+  "shared_adapter": {
+    "terminal": "review_required",
+    "calls": 2,
+    "execution_groups": 1,
+    "accepted": false,
+    "receipt_return_count": 1,
+    "feedback_checkpoint_continuation": "authored guidance, same desire IDs, explicit prior evidence whitelist, new adapter admission, zero extra calls/executions"
+  },
+  "source_evidence_sha256": {
+    "native-result.json": "3f5a9759cd4d9620d404784e9c7c83464e91ed1934c27788cad86472162542df",
+    "native-request.json": "57a2fc189f095c10a9aae4a1cc2783319c7334396b65a297da738be6d6fdfa3b",
+    "adapter-report.json": "351c32df582a38d09131a7785f773d37c5b2b61b09b4768d4ffe2d217052c97b",
+    "verified-adapter-report.json": "c734f12381c6d120786c76e6e894f2ce8336549ffd5098a1bbaf1930441a789d"
+  },
+  "campaign": "unchanged: 259 calls / 72 groups / $0.222740",
+  "limitations": [
+    "Authored proposals/reviews are not engine-generated game evidence",
+    "No player satisfaction, game quality or TSR development demonstrated",
+    "Chromium internal sandbox disabled; existing outer controls retained"
+  ]
+}

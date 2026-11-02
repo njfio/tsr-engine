@@ -540,21 +540,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+name = "tsr-batch"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "proc-macro2",
+ "quote",
+ "rustix",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "tempfile",
+ "thiserror",
+ "tsr-corpus",
+ "tsr-domain",
+ "tsr-policy",
+ "tsr-store",
+]
+
+[[package]]
 name = "tsr-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "rustix",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "toml",
+ "tsr-batch",
+ "tsr-corpus",
  "tsr-domain",
+ "tsr-eval",
  "tsr-forecast",
  "tsr-learn",
  "tsr-ledger",
  "tsr-policy",
  "tsr-store",
+]
+
+[[package]]
+name = "tsr-corpus"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tsr-domain",
 ]
 
 [[package]]
@@ -565,6 +601,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "tsr-eval"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tsr-batch",
 ]
 
 [[package]]
@@ -584,6 +631,7 @@ dependencies = [
  "blake3",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "toml",
  "tsr-domain",

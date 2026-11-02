@@ -1,0 +1,9 @@
+# Fuzzy terminal reconciliation and storage pause
+
+Fuzzy completed 2026-10-15 at 22:37:52 UTC: two accepted, zero rejected. All three screening/qualification child receipts completed with exit zero and no orchestration errors. Corpus: 107 distinct admitted groups (79 RTS, 28 AgentID). The final integrity audit passed; at 22:41 UTC all 9,424 exported evidence files were freshly byte-compared with originals. Controller, observer, every qualification-engine process and task container had exited. No anomalies or observer errors remain. Frozen module-v1 digest remains d0d68e14aaa4173b2085769641197977009c05d836e14e0116880ff98b906c2e. Historical outcomes are preserved.
+
+Free space was 215.48 GiB. Syntax requires 248 GiB for its eight-candidate bounded plan, a 32.52 GiB shortfall. No successor launched. The existing 200 GiB guard has not been relaxed. Cleanup approval remains pending; the 37-directory manifest remains byte-identical at d79ed06404b4eaf9255ec2db695ed951be0768b515f386b51982350e06be4363. Nothing deleted or added to that frozen manifest.
+
+Remaining original inventory: syntax eight, typed twelve, reference nine, context seven, totaling 36 candidates. Even perfect yield reaches 143; at least seven supplementary successes are still needed for 150. Seventeen supplementary proposals provide a conditional maximum of 160 if all remaining candidates pass. They remain unadmitted and require their own strict qualification; thirteen nested proposals require the already reviewed module-v2 campaign. Neither capacity ceilings nor this integrity audit establish final M3 acceptance, reserved holdout or outcome performance.
+
+No paid calls, historical retries, deletion, push, merge or deployment. The local queue is idle pending sufficient approved storage and a fresh reviewed continuation/preflight.

@@ -1,0 +1,38 @@
+{
+  "blocked_on": [
+    "approved pinned browser runtime with sandbox preserved",
+    "final reviewed browser transport/admission using that runtime and game brief"
+  ],
+  "browser_runtime": null,
+  "campaign_unchanged": {
+    "calls": 259,
+    "operations": 72,
+    "settled_usd": "0.222740"
+  },
+  "evidence_kind": "authored local fixtures, not engine-generated game or actual browser execution",
+  "launch_enabled": false,
+  "prospective_only": {
+    "calls": 24,
+    "minutes": 120,
+    "new_total_caps": {
+      "calls": 283,
+      "operations": 78,
+      "usd": "5.00"
+    },
+    "operations": 6,
+    "reservation_usd": "1.20"
+  },
+  "sha256": {
+    "crates/tsr-cli/src/engine/adaptive/coding.rs": "401e3b40d003834dd37fac178cbc659cc1e77fe4bdd27adf1ad161ae38868482",
+    "crates/tsr-cli/src/engine/adaptive/coding/project.rs": "ee1f240fcaa7072794a844bb5d2dbac887cb45626d5e70df1f709dcd4eacb034",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/browser.rs": "05078ff6be7784ec8cd9003d034de5dabd71862a628bb5c28d56556884153eac",
+    "crates/tsr-cli/src/engine/adaptive/coding/project/objective.rs": "7ac339ffc928ff9653820349adc7222775a9e136fb48b190ee9782e30b545ff1",
+    "experiments/browser-project-local-v1/README.md": "6722439bcd0f6088ea1df7a567b7a0777253bd624f3dda2e09ede280b97b1c43",
+    "scripts/engine-b91-evidence.py": "500a0d64de30b6ebe8c944a163d8defa11da41a99c2cb19895ad9416854e21ae",
+    "scripts/engine-browser-harness.cjs": "80be79fc5b0fd81558836b16405205f88c8a9b7d5dfc2665a64dd5a34fa9c643",
+    "scripts/engine-browser-project.py": "884e152e2b88b14506e1a8a503b5e1da087595bfedeceaa3ea3bbdb5888da499",
+    "scripts/test_engine_browser_harness.cjs": "3652a4a9914da273299a6793d819380a850c7d8d1a08b9cf5ebfa81cbedd1159",
+    "scripts/test_engine_browser_project.py": "9698c3e3c489e1b98435031beeddb6a065ff8c30a000bb4486e99561f933f85f"
+  },
+  "version": "browser-project-local-preparation@v1"
+}

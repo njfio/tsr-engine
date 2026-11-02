@@ -1,0 +1,18 @@
+{
+  "version": "browser-session-authority@v1",
+  "user_messages": [
+    "Sentinel_87d64dee445c8191b880d20622acf423",
+    "Sentinel_e8b4e67546c081919db79ee9e04830e9"
+  ],
+  "user_text": [
+    "yes and it can be up to 10 dollars each run",
+    "how about 200 or more call, 26 is silly low"
+  ],
+  "parent_scope": "One finite session, 200 total calls, 100 isolated groups, 120 minutes, $10 per run; same game task/provider/export/isolation; no provider-failure retry.",
+  "baseline": {
+    "calls": 262,
+    "operations": 72,
+    "settled_microusd": 225523
+  },
+  "packet_sha256": "f6fda0d1cdac8921ed5ba1447a23c77e4db734b0777d5ddf93dad82b6ad6af24"
+}

@@ -1,0 +1,9 @@
+# Browser request context and reservations
+
+The valid live5 reviewer unknown exposed a packaging defect: a 12 KiB review projection omitted all source bodies and the 32 KiB wire cap prevented raising it enough. Frozen evidence remains unchanged. The v6 browser adapter uses the provider catalog's 1,050,000-token context with 32,768 output tokens, conservative byte-based input estimation and 4,096 framing headroom. This is not a tokenizer guarantee or unlimited context. Final serialized bodies, including corrections, drive each request's monetary reservation. Usage beyond the estimate stops usable output. Legacy profiles retain prior limits.
+
+The source projection remains allowlisted and source-bound. Complete current source is sent when it fits; explicit windows and omissions remain visible otherwise. Review cannot infer missing code. The prior unknown is retained with its exact owned report hash and attribution. This does not adopt its candidate or weaken review.
+
+Validation: 42 existing accounting/transport/correction tests passed, one opt-in native test skipped in that unit command. 10 capacity/price tests passed. Full native browser suite and independent review results are recorded alongside the run preparation. Authored fixtures are not model or gameplay evidence. No historical receipts are modified.
+
+Final local verification: 16 native adapter tests passed with two sealed tests skipped in that invocation; both sealed tests then passed through approved Docker access (79.679 seconds). Default-sandbox attempts could not access the Docker socket and are preserved as failed verification attempts, not game evidence. The exact live5 candidate was serialized read-only through the shared review builder: 32,532 bytes, all three current source files complete, zero dispatch/adoption. Independent source and provenance review passed.

@@ -1,0 +1,53 @@
+{
+  "name": "missing-forecast",
+  "steps": [
+    {
+      "kind": "inspect",
+      "args": { "arg": "inspect_path", "path": "src/store.rs" },
+      "forecast": 0.9,
+      "forecast_event": "test_pass",
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 0,
+      "tool_minutes": 0,
+      "wall_clock_ms": 0
+    },
+    {
+      "kind": "run_approved_test",
+      "args": { "arg": "test_id", "id": "cargo-test-parser" },
+      "forecast": null,
+      "forecast_event": null,
+      "dispatch": true,
+      "exit_code": 0,
+      "duration_ms": 900,
+      "generator_tokens": 0,
+      "tool_minutes": 1,
+      "wall_clock_ms": 900
+    },
+    {
+      "kind": "propose_patch",
+      "args": { "arg": "patch_bytes", "bytes": 64 },
+      "forecast": 0.6,
+      "forecast_event": "diff_accepted",
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 0,
+      "tool_minutes": 0,
+      "wall_clock_ms": 0
+    },
+    {
+      "kind": "stop",
+      "args": { "arg": "stop" },
+      "forecast": null,
+      "forecast_event": null,
+      "dispatch": false,
+      "exit_code": null,
+      "duration_ms": 0,
+      "generator_tokens": 0,
+      "tool_minutes": 0,
+      "wall_clock_ms": 0
+    }
+  ]
+}

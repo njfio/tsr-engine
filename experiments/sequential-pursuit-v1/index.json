@@ -1,0 +1,16 @@
+{
+  "origin": "Evaluator-authored fictional conditions; no program outcomes or preferred answer supplied.",
+  "records": [
+    {
+      "description": "An illustrative starting collection with a previous selection.",
+      "id": "initial-collection",
+      "path": "condition-a.json"
+    },
+    {
+      "description": "An illustrative availability change retaining the same task obligations.",
+      "id": "changed-availability",
+      "path": "condition-b.json"
+    }
+  ],
+  "version": "public-condition-index@1"
+}

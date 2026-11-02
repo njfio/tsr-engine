@@ -1,0 +1,253 @@
+{
+  "adaptive_pursuit_demonstrated": false,
+  "calls": 6,
+  "campaign_after": {
+    "calls": 234,
+    "committed_microusd": 195539,
+    "effective_max_calls": 252,
+    "effective_max_execution_groups": 68,
+    "evaluation_suite_sha256": "4873220a8eb94d2b31ef0b0b47a66051fc27953df8e31c63a1f8d61f4a4e50e1",
+    "execution_groups": 65,
+    "fixture_only": false,
+    "known_cost_microusd": 195539,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 6,
+    "remaining_calls": 18,
+    "remaining_execution_groups": 3,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "completion_tokens": 15145,
+  "corpus_reads": 0,
+  "evidence_sha256": {
+    "LAUNCH.json": "995d438f4a2f8a5d2eee20a83f5c1bf567779c8251d3cea527ca1add9d2c0671",
+    "adapter/adapter.jsonl": "2801cd30a130d973ea54f09d7bfc21ffb974c14b2768ddd7a22e6f525ba986a5",
+    "adapter/corrections.jsonl": "432fef7c677eaa9451f2664f17f8bd554d34d014cd40b49aa11b052ace9b7408",
+    "adapter/terminal-output.json": "a1de18aa44893e947857a06e43c7eae852debc0526d79da57b88fa7aef64858e",
+    "admission-pin-upgrade.json": "b55d24c348b40b8984ab94d7678a35948a3247ca0358ab27cfa2fea6f7d1d286",
+    "admission.json": "89e9f72de76e290b1092b9b08e91ed71530bf12f017061e97123fdad8496ff98",
+    "campaign-grant.json": "80902fd4874945edea172bdf67a6da90291f7c7f9f5fae3bc2a1a748b4e1f031",
+    "campaign-upgrade.json": "363f3529d8cbc1776b5d50cebd5837970c5cbbb2d5b28b11c9693594aea93473",
+    "cycle-admission.json": "1451a3498988d7c8736727019b4209d05dbaf790daadb89995cf267ba97c6006",
+    "cycle/cycle.jsonl": "3f665838eec914e8c59453ee7b0d47645d4fb0ee1fe435365749ad0d2f69c6a9",
+    "independent-output-check.json": "5e896635a7d3a2528dc986df7a5df7cc8da416d6e7bc6294bd820ef033b6946e",
+    "price-preflight.json": "6e7fe01f26b3f6159db519369d450b8905bb2f79a5a3bfd2db9492ceb8754550",
+    "replay-check.log": "90fba3e4157811fdedad24620222b45c4912869184aed853bef8e94f3592f79d",
+    "run-output.log": "55204b0a9249ee2c4889d58ac0369d4a13d3c70d0237f7613cf801b95ab36d3f",
+    "settled-status.json": "aedbcefb6fe1a009172a20fae842b330c124e0ad254aa66f91546d516dfd5d58"
+  },
+  "execution_groups": 2,
+  "format_corrections": 1,
+  "grant_validator_commit": "e0d3becb",
+  "independent_receipt_data_check": {
+    "facts": {
+      "cardinality": true,
+      "coverage": true,
+      "maximum_feasible_retention": true,
+      "unique_available_ids": true
+    },
+    "finite_selection_valid": true,
+    "repeatability": "not established by one returned output",
+    "scope": "receipt data only; not source review, authority or qualitative fulfillment"
+  },
+  "ledger_after_sha256": "7b7d532c0060edb35d8726ee4d2d1f942764e2135437ed4e2dfa2089d484ce6a",
+  "local_evidence": "target/objective-service-live-2",
+  "native_commit": "32e40dd26dc686b006db1bf292b6fbca78e8a589",
+  "objective_accepted": false,
+  "outcome": "incomplete_round_review_identity_rejected",
+  "packet_sha256": "4873220a8eb94d2b31ef0b0b47a66051fc27953df8e31c63a1f8d61f4a4e50e1",
+  "patch_smoke_groups": 1,
+  "prompt_tokens": 23099,
+  "protected_and_historical_evidence_unchanged": true,
+  "raw_bodies_committed": false,
+  "receipts": [
+    {
+      "body_sha256": "23163189e4c27413079d9d3e17aa3017f66a8020bbb7041fbce1c3eae6a5868c",
+      "elapsed_seconds": 28.608843416906893,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "edc057c2-151b-4b69-9f11-8f4ac1aadf14",
+      "response_request_ids": [
+        "edc057c2-151b-4b69-9f11-8f4ac1aadf14"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2648,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1804
+        },
+        "prompt_tokens": 3079,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5727
+      },
+      "usage_status": "reported",
+      "usd": "0.001294"
+    },
+    {
+      "body_sha256": "42cbd60dcb43af4ad5f85143a8cc3d98b5d58a69c8313e4accf03afc35557fe7",
+      "elapsed_seconds": 31.411863415967673,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "455b8a33-e3a2-4363-9cdd-fcf17eba291a",
+      "response_request_ids": [
+        "455b8a33-e3a2-4363-9cdd-fcf17eba291a"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2673,
+        "completion_tokens_details": {
+          "reasoning_tokens": 2037
+        },
+        "prompt_tokens": 3209,
+        "prompt_tokens_details": {
+          "cached_tokens": 3076
+        },
+        "total_tokens": 5882
+      },
+      "usage_status": "reported",
+      "usd": "0.001048"
+    },
+    {
+      "body_sha256": "2625d9ea349956b9c75f8fa7234d21d7b8dd7dfd247941277ea0d87873e81b83",
+      "elapsed_seconds": 33.62828166689724,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "7633080d-0d2f-4a75-97cd-673a1eb2f5ec",
+      "response_request_ids": [
+        "7633080d-0d2f-4a75-97cd-673a1eb2f5ec"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2604,
+        "completion_tokens_details": {
+          "reasoning_tokens": 2070
+        },
+        "prompt_tokens": 4249,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6853
+      },
+      "usage_status": "reported",
+      "usd": "0.001388"
+    },
+    {
+      "body_sha256": "2d8feb0d8b6f433d2ebfdacc4cc10828aae714c087f152c412b3b368c244833b",
+      "elapsed_seconds": 22.709965833928436,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "581e03b9-27da-402d-8b52-f08b80273a41",
+      "response_request_ids": [
+        "581e03b9-27da-402d-8b52-f08b80273a41"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 1831,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1704
+        },
+        "prompt_tokens": 3481,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5312
+      },
+      "usage_status": "reported",
+      "usd": "0.001022"
+    },
+    {
+      "body_sha256": "91ce3ab79fe750ffe83f6ad785a5baa8322b43d8f6880bd2242da69007b39d35",
+      "elapsed_seconds": 35.181344375014305,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "f2531581-8a07-42a3-93cc-c4ea115a4dfc",
+      "response_request_ids": [
+        "f2531581-8a07-42a3-93cc-c4ea115a4dfc"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2978,
+        "completion_tokens_details": {
+          "reasoning_tokens": 2218
+        },
+        "prompt_tokens": 4138,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7116
+      },
+      "usage_status": "reported",
+      "usd": "0.001519"
+    },
+    {
+      "body_sha256": "3c20393369080d39d38cc1cf9b371a5f1f9fe45966422e5b0a11fe1121f48253",
+      "elapsed_seconds": 29.876984290778637,
+      "finish_reason": "stop",
+      "http_status": 200,
+      "request_id": "ff7d7299-193f-4c19-a8fc-0b5d1c4e2d9c",
+      "response_request_ids": [
+        "ff7d7299-193f-4c19-a8fc-0b5d1c4e2d9c"
+      ],
+      "response_status": "received",
+      "usage": {
+        "completion_tokens": 2411,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1429
+        },
+        "prompt_tokens": 4943,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7354
+      },
+      "usage_status": "reported",
+      "usd": "0.001380"
+    }
+  ],
+  "rejected_review_identity": {
+    "admitted": false,
+    "claimed_decision": "met",
+    "expected_binding": "13b34935475f83fe0db24270cf63142ce6c47a9f2e588a7a2167c5f15564a2c8",
+    "returned_binding": "13b349354f75f83fe0db24270cf63142ce6c47a9f2e588a7a2167c5f15564a2c8",
+    "returned_receipt_matches": true
+  },
+  "relationship_development": false,
+  "remaining_rounds_not_run": 2,
+  "restart": "Fresh-process check refused pending cycle review intent; terminal output prevents correction reuse. Journals and ledger byte-identical; no dispatch. Provider charges and worker effects are all settled, despite generic replay error wording.",
+  "rounds_independently_admitted": 0,
+  "service_groups": 1,
+  "service_receipt": {
+    "attempt": "1b4bbf4e8ede7c6c20171f3eba2b035c7b992a9ee16ff8c2f617b672b4b0d73f",
+    "choice": {
+      "binding": "82575419b8395d6fa803cf82e55a88e1030601d3388616ef0123cfa8faa6aef1",
+      "rationale": "The inspected implementation appears to meet the public shortlist criteria for this condition: it selects distinct available IDs, prioritizes distinct tags, and uses the previous selection for tie-breaking and retention. This is a source-based forecast, not an observed round result; the only recorded passing case is ABI smoke.",
+      "success_probability": 0.98
+    },
+    "complete": true,
+    "condition": {
+      "id": "round-1",
+      "input": "3|11:1,12:1,21:2,31:3,32:3"
+    },
+    "exit": 0,
+    "meaning": "Actual bounded program stdout/exit; domain evidence from frozen protected entry, independent interpretation still required",
+    "output": "11,21,31\n",
+    "prepared": "ad9fbe72cc70dbd1cb09f8d9473045422f505b52c17fb313a6a4b49861053427",
+    "previous_output": "",
+    "previous_output_digest": "9961123332731fb1b85d6104cf166df7313aeae6ffc41ed5ae9fd53dbf538376",
+    "receipt": "3be968ad42ab23b81ddc57137a6c33a80bcb2e5889740c622370483abdb22d2a",
+    "round": 0,
+    "runner_receipts": [
+      "b8b44739b756f1c300f9f6985e85cd1da6eb8a4855c47cf223e53e8ee6cc891f",
+      "15616a177b87cb5817b9367976fba0c45213cf4a4e5eb1ef445798294aef18ec"
+    ],
+    "source_snapshot": "bd530115a8abac0635a8e7428b62ebe0c782b83cb13636250e8cf6d78b890c57"
+  },
+  "settled_usd": "0.007651",
+  "total_tokens": 38244,
+  "unused_allowances": "expired at terminal; no second attempt",
+  "version": "finite-objective-live-result@v2"
+}

@@ -69,6 +69,7 @@ impl FeatureSpec {
     /// name. `head.rs` reads them by index and an empty vector would silently standardize with 0.0,
     /// changing every raw p, so `verify`, `report` and `apply` refuse it naming the field.
     pub fn validate_fitted(&self) -> Result<(), String> {
+        crate::schema::validate_spec(self).map_err(|e| e.to_string())?;
         self.validate()?;
         let n = self.names.len();
         for (field, v) in [

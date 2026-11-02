@@ -1,0 +1,37 @@
+# Independent bounded advisory reconsideration review
+
+Reviewer `/root/suite_review`, 2026-10-27. Offline code and deterministic-fixture review only; no provider calls, target executions or adoption of historical live outputs.
+
+The native branch recognizes actual current-source returns or applicable attributed semantic judgments newer than an existing active aspiration. Its stable consumed key includes lineage, scope, source, requirements and receipt/judgment identities while excluding request binding and resource/head noise. Ordinary accounting changes therefore must not create fresh evidence. Closed/accepted, pending, uncertain and exhausted resource gates remain ahead of reconsideration. No aspiration or no new evidence retains ordinary stop/review behavior.
+
+Preview/advance permits one revision of the exact selected lineage with current relational binding, refusing edits, existing executable actions, experiments and new aspirations. Reviewed advance records consideration; bounded acknowledgment records no-insight, abstention, rejection or unknown without changing acceptance or making a Pending action. Consumption is after a valid terminal advisory result, while an interrupted dispatch remains protected by the existing unresolved reservation and durable outer intent. This is not a guarantee that arbitrary operator-created new journals cannot submit an additional known-invalid attempt.
+
+Python v2 is explicitly local-fixture-only, zero-execution and requires injected transport plus fixture campaign; legacy v1 stops rather than automatically using reconsideration. Public semantic projection contains only published dimension IDs, applicability and attributed review identity, excluding private prose/counts. Unknown is explicitly not negative evidence. Reconsideration terminates after its advisory outcome even if a callback returns a subsequent executable branch.
+
+Independently ran `python3 -m unittest test_engine_project_reconsideration -v`: **8 passed in0.115seconds**. They check fixture branch/replay, abstain/unknown/reject attribution, stale lineage, executable refusal, legacy/no-aspiration stopping, interrupted dispatch, private-prose exclusion and malformed/foreign dimensions. These are mocked Cycle and projection tests, not a real native roundtrip or semantic model evidence.
+
+Requested before final signoff: narrow the advisory system/contracts so they do not simultaneously invite executable/multiple alternatives; mark v2 journals explicitly fixture-only rather than inheriting live metadata; and verify the actual native/Python v2 acknowledgment or revision path with restart. Native five-control/stale-scope tests and their terminal results remain pending at this checkpoint. No broad semantic learning, fulfillment or execution authority is inferred.
+
+## Native controls and documentation inspection
+
+Inspected the five native tests and their terminal log: **5 passed,0 failed in19.71seconds** (`/tmp/cycle-reconsider-tests.log`). They exercise actual native state/receipt folding with authored fixtures: a new receipt creates one question; exact no-insight acknowledgment survives restart and rejects altered keys; only a separately admitted valid revision updates guidance; Unknown remains distinct from unmet and a new review has a new key; withdrawal/restoration preserves lineage without reopening a consumed question; no aspiration, an older receipt and accepted/closed tasks retain their existing stop behavior. Additional resource/source-noise checks and cross-language verification are still pending, not inferred from these results.
+
+Reviewed `docs/engine-project-reconsideration.md`: it accurately describes the local-only opt-in, independent acceptance and the distinction between attributed semantic judgment and observed return. Its proposed two-call comparison is explicitly unadmitted, not an instruction to dispatch or another prerequisite for accepting a repaired program.
+
+## Final source corrections and native controls
+
+Reinspected the corrected source: v2 journals now declare fixture provenance; advisory request contracts/system permit only the selected existing-lineage revision or abstention, with no executable offer or new aspiration. Legacy v1 behavior remains separate. `git diff --check` passed.
+
+Final native reconsideration run: **5 passed,0 failed in24.47seconds** (`/tmp/cycle-reconsider-tests-final.log`). Added checks distinguish a source-only change from an actual new return, reject old source/resource acknowledgments, preserve the stable key across accounting, prevent unrelated bookkeeping from reopening a consumed question, and admit an authored changed development into subsequent guidance while preserving parents/history. This tests propagation, not model-created semantic improvement. No remaining source finding identified in this offline slice; actual Python/native v2 roundtrip terminal verification remains pending before final signoff.
+
+## Cross-language test expectation diagnosis
+
+The first actual native/Python roundtrip failed at its last assertion after53.402seconds: it expected native `review_required`, but observed `propose`. Inspection confirms the fixture had explicitly recorded semantic Reject with one unmet dimension. Subsequent qualitative retention/revision does not erase that attributed rejection, close the desire or accept the task. Native propose is therefore appropriate after the advisory question is consumed; the zero-execution v2 wrapper still terminates durably at `advisory_reconsidered`.
+
+Recommended correction is to the authored test expectation, preserving its checks for zero execution, unchanged rejected/unaccepted state and byte-identical wrapper replay, and explicitly asserting no Pending/dispatch permission. No production behavior change is justified by this failure. The failed log `/tmp/project-reconsideration-native.log` remains historical evidence. The full native cycle module independently reported13 passed in81.37seconds; final affected Python verification remains pending.
+
+## Final verification and signoff
+
+Read the terminal affected Python-suite log: **33 passed in135.508seconds, no skips** (`/tmp/project-reconsideration-full.log`). This includes the actual native v2 roundtrip with authored provider responses and fake-worker return, explicit public negative judgment with private prose excluded, source-bound revision/independent review/separate qualitative admission, guidance persistence, unchanged parent/configuration and no acceptance, zero execution groups, and restart without further dispatch. The corrected final assertion verifies native `propose` with no Pending or dispatch permission while the advisory wrapper stays terminal. The initial failed expectation is preserved at `target/project-reconsideration-validation/initial-native-failure.txt`.
+
+Final review complete: no remaining material source or integration blocker identified for the documented **offline, fixture-only** reconsideration slice. Native cycle module13/13 and affected Python33/33 pass; `git diff --check` passes. No broader workspace-suite pass is claimed, and earlier unrelated aggregate timeout evidence is unchanged. No provider call, target execution, new external export admission or historical live-output adoption occurred. Live semantic quality, useful subsequent model choices and relational causal advantage remain unproven; those are not requirements for accepting this bounded local integration.

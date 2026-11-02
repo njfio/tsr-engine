@@ -1,0 +1,7 @@
+# Approved paired evaluation: prospective binding v5
+
+Original prompt, operational roots, criteria, six-bundle partial observation policy and three batches are byte-identical to v4. The only runtime change is append-only criterion evidence-policy refresh retaining original contributor identities and criteria between batches/source versions. The v4 frozen packet remains unchanged.
+
+This is one separately authorized TSR/ordinary-memory pair, CheaperInference gpt-6-luna with matched settings, no cumulative spending/call/time cap, normal Stop/completion/abstention and unknown-effect safeguards. Artifact mapping and stage binding are operator-assisted and reported. No forced fusion, relationship or identity development. Both arms start from blank identical sources, same original user request and experiment-authored facts. No arm receives the other's output. Existing single-assessment correction/review standards remain equal.
+
+Initial drafts v1 were not admitted or dispatched. Fresh v2 bindings use the final verified native binary and an already attached exact matching campaign implementation upgrade. Each dispatch grant must bind the then-current campaign ledger prefix. Post-build mappings require independent source-specific review, and every observer execution must be prospectively accounted and linked without omissions. Unavailable mapping remains unknown. No subsequent paired experiment is authorized.

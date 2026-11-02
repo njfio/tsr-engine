@@ -1,0 +1,21 @@
+{
+  "cargo": false,
+  "cases": [
+    {
+      "args": [],
+      "expected_stdout": "",
+      "id": "abi_smoke_only"
+    }
+  ],
+  "editable": {
+    "lib.rs": "#[derive(Clone,Debug)]\npub struct Note { pub id:u32, pub tag:u8 }\n// Neutral executable starting organization, not a deliberately broken seed.\npub fn guide(notes:&[Note], _previous:&[(u32,u32)], _queries:&[(u32,u32)], budget:usize)->Vec<(u32,u32)> {\n    if notes.len()<2 { return vec![]; }\n    (0..notes.len()).take(budget).map(|i|(notes[i].id,notes[(i+1)%notes.len()].id)).collect()\n}\n"
+  },
+  "goal": "Operate the fictional guide for three rounds; minimum correctness is distinct from usefulness or culmination.",
+  "image": "sha256:cff6dcceb8b9d203a818b7ff104b89a6aaa353f8576850ca4f58903539417945",
+  "probe_entry": "service.rs",
+  "protected": {
+    "service.rs": "// Protected entry: actual output only; independent receipt checker assesses routes.\ninclude!(\"lib.rs\");\nfn pairs(s:&str)->Vec<(u32,u32)> {\n    if s.trim().is_empty(){return vec![];}\n    s.trim().split(',').map(|v|{let(a,b)=v.split_once('>').unwrap();(a.parse().unwrap(),b.parse().unwrap())}).collect()\n}\nfn main(){\n    let a:Vec<String>=std::env::args().skip(1).collect();\n    if a.is_empty(){return;} // ABI smoke, not an objective outcome.\n    assert_eq!(a.len(),2);\n    let p:Vec<&str>=a[0].split('|').collect();assert_eq!(p.len(),3);\n    let budget:usize=p[0].parse().unwrap();\n    let notes:Vec<Note>=p[1].split(',').map(|v|{let(i,t)=v.split_once(':').unwrap();Note{id:i.parse().unwrap(),tag:t.parse().unwrap()}}).collect();\n    let queries=pairs(p[2]);let previous=pairs(&a[1]);\n    let out=guide(&notes,&previous,&queries,budget);\n    println!(\"{}\",out.iter().map(|(a,b)|format!(\"{}>{}\",a,b)).collect::<Vec<_>>().join(\",\"));\n    assert_eq!(out,guide(&notes,&previous,&queries,budget),\"repeatability\");\n}\n"
+  },
+  "timeout_ms": 20000,
+  "user": "501:20"
+}

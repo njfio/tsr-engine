@@ -1,0 +1,11 @@
+{
+  "source_snapshot": "37f7fe8a995119c5abec89296d8aa258950d2f53938dec974a2b8271225a29fe",
+  "terminal_outcome_sha256": "51fcb93c8b56f5eef69e34654e2a99bf5380abd0614336900c356c0ad0dcf17d",
+  "files": {
+    "index.html": "681bc4ce6e8d5d7307997c54535bb4521e79337babf4d9b2bc2ce8404c03a1a0",
+    "app.js": "7a683b0a6dd3297cd619d61469e1a59f7d7bba2f676dcfe3ab140fb4251bc8f8",
+    "style.css": "678ac49cbff73ecb4edc11f165e914bea2c53bb8782a47e3da532b9d57558cb4"
+  },
+  "authorship": "CheaperInference/gpt-6-luna through ordinary-memory arm; no manual game edits",
+  "fulfilled_or_accepted": false
+}

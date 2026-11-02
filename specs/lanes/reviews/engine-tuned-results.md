@@ -1,0 +1,49 @@
+# Independent tuned-repair result review
+
+Reviewer `/root/suite_review`; prospective implementation `050d786`. These are tuned retries after inspection of the held-out failures. Original evidence and denominator remain unchanged: fresh tasks 0/2, original regression 1/1. This review does not steer the running controller or alter its outcomes. Separate final FileReviewer assessment is performed only if the normal runtime path reaches that gate.
+
+## Singleton clamp
+
+Run: `target/tuned-clamp-1`.
+
+The settled initial relational response preserves both aims, including equal bounds for every i64 input and unequal-bound behavior. Its explanation that the admitted mutant lacks reversed-bound rejection is correctly classified as a source prediction. Its observed evidence lists requested-behavior pass and existing-behavior failure against receipt `eb8eebdd568d4eafd4dce87e69ab6f872f41d4bdb7a7d34b55fb0ab566f305e3`, without claiming the failed assertion or returned value is known. It explicitly leaves universal behavior unproven. This is useful reconciliation of the two requirements, not proof of non-additive semantic emergence.
+
+The initial review checkpoint preceded the terminal outcome below; successful canonical-field copying is assessed separately from the full free-prose interpretation.
+
+The settled generated experiment is substantive and correctly mapped. Its first case checks reversed bounds return the exact error, inclusive ordered clamping at both i64 extremes, and an interior point; its second checks singleton endpoint retention for five representative values. Declared case IDs match Rust test names. Both mapping limits explicitly deny universal proof. A failure of the multi-assertion first case alone does not identify which assertion ran or failed. This review does not promote the test's broad name into universal evidence. Both initial relation and experiment passed their separate runtime gates; these approvals are not final acceptance.
+
+The post-experiment reflection accurately reports the four case outcomes (pass/fail/fail/pass) and also keeps its free interpretation truthful: the missing reversed-bound check is inferred from source, not asserted as observed panic telemetry, and the suggested repair is explicitly unexecuted/unverified at that stage. Its fact-catalog binding is `4b45de07946c7b75b8ec6c6edc5557797c0ff1fa2259c3d749ac8eeb8edd3c8d`; supplemental failing receipt is `a450e53334c055777a66f56332f573efda457839f8a5bd232d81309d7548a6ff`. No misplaced passing claim was found outside the canonical fact field.
+
+The generated boundary patch adds `if lower > upper { return Err("invalid range".to_string()); }` and retains max/min clamping. This addresses the inferred regression without removing singleton behavior or introducing arithmetic overflow. Patch semantics are judged independently of whether the provider obeyed the new schema guidance. Actual final verification and formal acceptance remain separate below.
+
+### Terminal result: correct tested repair, failed full cycle
+
+The normal controller stopped on final runtime review `804f146e9644e7df84b868e9393500b9d10820237d7c2660cdd7b0f31bf9ef68`. Independent review agrees with this rejection. The final canonical fact field and retained meaning accurately describe passing cases and the new explicit error guard. However, its unchanged discriminator still states that the source returns `Ok(upper)` for reversed bounds and proposes adding the already-present check. That present-tense source diagnosis is false for the supplied patched source. This is a concrete contradiction, not a short summary's omission of parent qualifiers.
+
+The final proposal chose `proposed_development:null`, so the existing no-change contract retained its prior discriminator verbatim. The prior discriminator mixed stable intent with transient diagnosis. The result shows a meaningful stale-interpretation failure: mechanical fact-field accuracy does not ensure the whole relational account is current. The model could have expressed a justified development instead of selecting unchanged retention. This report neither rewrites the response nor relaxes the runtime judgment.
+
+Actual protected test receipt `54e3070856c10db9a8adff2d2267be9e37f50cebb0142ff03420c2894befb3d3` passed on repaired snapshot `e7bb52777c10776ccc3d392ddca4ed46c4a8eb787e6a3ed829298c67fc9bc227`; unchanged supplemental experiment receipt `cb2924b76838ef4fc5b1dd9c5529fd834cb431b1dea286da9d3ad310168b8cf8` passed. The reviewer independently compared Cargo.toml, Cargo.lock and tests/contract.rs against frozen copies: all byte-identical. Static patch reasoning supports the requested singleton behavior and preservation of ordered/reversed behavior, but no native acceptance was recorded because the final gate was not reached. There was no reviewer override or substitute model output.
+
+Parent reconciliation reports **11 calls / four execution groups / $0.010490**, all settled, no unknowns; cumulative campaign **176 calls / 54 groups / $0.153223**. Both schema-guided generated experiment and patch were structurally admitted. The tuned clamp full-cycle outcome is **failure**, despite a correct tested repair. Fresh-process zero-effect replay is recorded separately when available.
+
+## Unicode prefix — fresh tuned admission reviewed
+
+Before dispatch, independently validated `target/tuned-unicode-1.admission.json` canonical hash `d9909ef06a8f4ec4bdd6402a4d8aef546c9b9ec95e8138e2468833879fabf01c` and runtime admission `906d0d615cdf14078de2560990e52df1e69a1319a6411c5af4e0174ad9b57e2c`. Current driver/native validation, source/helper pins and criteria binding pass; exact v6 Unicode source and unchanged suite are bound. Seven generator plus seven reviewer calls/four groups fit the reconciled remaining24/six, with expiry01:23:41.806701UTC. No effects occurred during this admission review. The terminal outcome is recorded below.
+
+The settled initial Unicode relation preserves zero-count acceptance and the positive Unicode-scalar-count requirement. Byte-length/scalar-length mismatch is correctly presented as source inference, while failed-case assertion/value details remain unknown. Its discriminator states desired behavior rather than a transient diagnosis. The generated experiment's declared case names match the Rust tests. It checks zero on empty/nonempty UTF-8 strings, a valid scalar prefix, and an unavailable positive count despite sufficient UTF-8 bytes. Assertions have correct expectations, test the stated second aim, and are not vacuous. The mapping explicitly limits these examples to finite evidence.
+
+### Terminal result: invalid revision identity, no patch
+
+The run stopped at `relation_after_experiment` with `unknown_stale_or_withdrawn_revision`. The rejected response was HTTP200 with finish reason `stop`, complete known billing, and candidate digest `aefc74b0d88b902b754cb513ab8b9ff295babd0975230bbbcc006129308c3636`. Bounded quarantine `44ce9bbc8e765c01a6f3f74d00d8aeb95e0c69b7f6fbc53141942600c3e95f26` records all three revision reference strings (`revises`, `original_revision`, `prior_revision`) as **65 UTF-8 bytes**, with the same string digest. Their precise unretained spelling cannot be reconstructed or diagnosed more narrowly.
+
+A read-only native request after termination still has the exact dispatched state root `7c6c33595526e710cedc8d6a065571ccc0372f71e1e324a1f25852dd8023d2a9`. Its contract contains one eligible revision `576ed92c2a350ca068adb06daf76a998cd43d12e75ddbaf4750ac5d778a2f428`, a 64-character hexadecimal identifier; its native history entry is neither withdrawn nor superseded. The existing assembled contract instructs exact lineage copying. This demonstrates a returned reference mismatch, not evidence that host context was stale or the allowed ancestor was missing. No arbitrary identifier trimming/repair or semantic interpretation of rejected prose is justified. Rejection preceded admission of that reflection.
+
+The valid generated experiment ran against the mutant. No patch, repair verification or final FileReviewer acceptance ran. The reviewer independently checked all three protected files against frozen originals: unchanged. Parent reconciliation reports **five calls / two groups / $0.004394**, all settled. The two-run tuned result is therefore **0/2 full-cycle completions**, separately from the original held-out denominator. Clamp produced a correct tested repair but stale final interpretation; Unicode stopped on invalid lineage identity before repair. This is neither proof that schema guidance is ineffective nor evidence of reliable semantic repair: the guidance-covered experiment/patch shapes and relational lineage are distinct boundaries.
+
+No final acceptance file was written for either tuned run, no runtime rejection overridden, and no provider or target effect was performed by this reviewer. Planned tuned evaluation is exhausted after these two outcomes, not repeated until successful.
+
+## Final accounting and replay review
+
+Independently read both fresh-process replay artifacts. Clamp preserves `ReviewStopped: project runtime review reject`; Unicode preserves `ValueError: ineligible schema correction`. Both report zero provider calls/zero target executions, unchanged campaign ledger and unchanged run files (196 clamp, 114 Unicode). These are safe terminal replays, not successful task completion.
+
+Reviewed the final `docs/engine-tuned-repair-results.md`; no material misstatement found. Reported total for this pass is16 calls/six groups/92,727tokens/$0.014884, with campaign181/200calls,56/60groups/$0.157617 and no campaign unknowns. The older Garden unknown remains separate. Remaining19calls/four groups are not automatically consumed by this completed two-run pass. No unretained text was reconstructed; no new full-workspace pass or broad reliability claim is made.

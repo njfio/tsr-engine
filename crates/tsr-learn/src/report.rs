@@ -764,6 +764,7 @@ mod tests {
             id: Hash::of(&[b"bundle"]),
             dir: std::path::PathBuf::from("/tmp/none"),
             manifest: Manifest {
+                maturity_digest: None,
                 data_manifest: Hash::of(&[b"data"]).to_hex(),
                 training_root: Hash::of(&[b"train"]).to_hex(),
                 feature_schema: spec.version.clone(),
@@ -1019,6 +1020,7 @@ mod tests {
     /// bundle's; today `report` scores whatever it is handed.
     #[test]
     fn b1_report_refuses_a_foreign_dataset() {
+        let log = tempfile::tempdir().expect("isolated report log");
         let b = bundle_for(&["calibrated"], &["calibrated"]);
         let mut rows = Vec::new();
         for i in 0..20u64 {
@@ -1030,7 +1032,7 @@ mod tests {
         // A dataset with another split digest is refused, naming the split digest.
         let mut foreign_split = dataset(&b, rows.clone());
         foreign_split.split.digest = Hash::of(&[b"another split"]);
-        let err = report_logged(&b, &foreign_split, 7, std::path::Path::new("/tmp/none"))
+        let err = report_logged(&b, &foreign_split, 7, log.path())
             .expect_err("a foreign split digest is refused");
         let msg = err.to_string();
         assert!(msg.contains("split digest"), "{msg}");
@@ -1038,7 +1040,7 @@ mod tests {
         // A dataset with another feature-schema version is refused, naming the schema version.
         let mut foreign_schema = dataset(&b, rows.clone());
         foreign_schema.spec.version = "features@v2".to_string();
-        let err = report_logged(&b, &foreign_schema, 7, std::path::Path::new("/tmp/none"))
+        let err = report_logged(&b, &foreign_schema, 7, log.path())
             .expect_err("a foreign feature schema is refused");
         let msg = err.to_string();
         assert!(msg.contains("feature schema"), "{msg}");
@@ -1047,7 +1049,7 @@ mod tests {
         let mut foreign_len = dataset(&b, rows.clone());
         foreign_len.spec.names.pop();
         foreign_len.spec.numeric_widths.pop();
-        let err = report_logged(&b, &foreign_len, 7, std::path::Path::new("/tmp/none"))
+        let err = report_logged(&b, &foreign_len, 7, log.path())
             .expect_err("a foreign feature length is refused");
         let msg = err.to_string();
         assert!(msg.contains("feature length"), "{msg}");
@@ -1055,14 +1057,14 @@ mod tests {
         // A dataset with another feature name is refused, naming the feature.
         let mut foreign_name = dataset(&b, rows.clone());
         foreign_name.spec.names[0] = "not_a_feature".to_string();
-        let err = report_logged(&b, &foreign_name, 7, std::path::Path::new("/tmp/none"))
+        let err = report_logged(&b, &foreign_name, 7, log.path())
             .expect_err("a foreign feature name is refused");
         let msg = err.to_string();
         assert!(msg.contains("not_a_feature"), "{msg}");
 
         // The matching dataset is accepted.
         let ok = dataset(&b, rows);
-        assert!(report_logged(&b, &ok, 7, std::path::Path::new("/tmp/none")).is_ok());
+        assert!(report_logged(&b, &ok, 7, log.path()).is_ok());
     }
 
     /// P2: `report` must anchor the dataset to the bundle by its data root, not only by the split

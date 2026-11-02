@@ -1,0 +1,43 @@
+{
+  "campaign": {
+    "calls": 234,
+    "changed": false,
+    "execution_groups": 65,
+    "ledger_sha256": "7b7d532c0060edb35d8726ee4d2d1f942764e2135437ed4e2dfa2089d484ce6a",
+    "settled_usd": "0.195539",
+    "unknown_calls": 0,
+    "unknown_operations": 0
+  },
+  "frozen_live_result": "e4350de4",
+  "historical_evidence_files_verified": 15,
+  "historical_restart": "safe redispatch refusal, not clean terminal replay",
+  "implementation_sha256": {
+    "scripts/engine-bound-output.py": "b751f3b47b7865e9fd5e8618b232127188e2eb4a2531a617868dd5f59b6789e5",
+    "scripts/engine-native-cycle.py": "4157283adc2113312a20ea135ad22cf729781f47dab5ed84fe64bf0c73a16acd",
+    "scripts/engine-objective-adapter.py": "fbcd2346fe284646db25a60b51a27edeceee6b01172472f6984ab2390377894b",
+    "scripts/engine-project-cycle-adapter.py": "38856d01206ac67223e0ce11e958ff6fcb4359fd462e245174cd8d40bb9ae696"
+  },
+  "live_behavior_verified": false,
+  "logs_sha256": {
+    "correction-cycle.log": "101761cd89f6e9c25f1365a975ca59dc8e3eba0a9242294a82a38ca779f72635",
+    "focused.log": "670ee93dfb6c1251795353b57688b425fcf3349581147fd1b05182f73a9fc20b",
+    "information-controls.log": "a01c4a2ac9e26cc9abdb4e357f1bcddfaf6a9e50e7122a0fac96f578534c89bf",
+    "native-release.log": "2daf7c0f7e8ba8cebfdc729e2d0f5162006f8ed5d7692539aa3cee02298d49b1",
+    "objective-flow.log": "29d499fb087241f12495d47da708eec27e2081f3ba2d9d17e71ce55f1ef738d5",
+    "release-gates.log": "0541a93e24cae84157ea802d7fddbf2044f7de2ee135ffe60759a65eac6fb945"
+  },
+  "reviewer": "/root/binding_review",
+  "scope": "local authored tests only; no model/provider or campaign target operation",
+  "source_review_findings_remaining": 0,
+  "tests": {
+    "max_serialized_request_bytes": 27399,
+    "objective_authored_corrections": 2,
+    "objective_authored_requests": 20,
+    "objective_authored_worker_groups": 4,
+    "objective_flow_seconds": 907.839,
+    "passed": 58,
+    "skipped": 2,
+    "target_commands_executed": 0
+  },
+  "version": "bound-semantic-output-local-verification@v1"
+}

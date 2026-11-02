@@ -1,0 +1,29 @@
+{
+  "version": "v2-evidence-channel-feedback@v1",
+  "prepared": "target/v2-tsr-evidence-feedback",
+  "files": {
+    "adapter-admission.json": "d20216b0da3d77f96f76738fa85997cbed7ae7675a03996323c174a98bd99f28",
+    "cycle-admission.json": "c9aa4bf70126b2368ea4a4644545527b3dd01e34e26a04b073dcf35f735e2009",
+    "scope-authority.json": "451f35aeab15eb84aa78f44ff1299be267b4cb26403805be0a60b688af5b35c0",
+    "scope-grant.json": "bcabba10f4e32c1d0fcbc59767f742828cd2a4052865bdbdfd99157a83595867",
+    "public-preview.json": "1ad0fa4f2ce2dd461db7baafb43e44aed82a33ec12a6760b3e0c5c1e92ddd158",
+    "source-lineage.json": "8b38296e830889223d1d861b23188c13c4d8b85f1afcf040ee66ca86396ad7fc",
+    "continuation-issued.json": "46e47eb0c86d1679ddfdb255c4723ab18f666bd09e768c3cc7e23eb70a1bf632"
+  },
+  "launcher_sha256": "0547919b00ec0c497fc554ec820ad7de470a9972266e9c70600b4dd17d4d6e2f",
+  "baseline": {
+    "calls": 300,
+    "operations": 83,
+    "microusd": 305034
+  },
+  "deadline": "2026-10-29T13:59:32.822861+00:00",
+  "limits": {
+    "calls": 8,
+    "operations": 2,
+    "microusd": 500000,
+    "remaining_shared_corrections": 4
+  },
+  "scope": "Exact rejection and critique, same fictional source and report, explicit fallible assessment channel; free subsequent native decision, no prescribed outcome",
+  "intervention_count_before": 6,
+  "new_routing_intervention": 1
+}

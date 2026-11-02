@@ -1,0 +1,282 @@
+{
+  "authored_only": true,
+  "chromium_sandbox": false,
+  "image": "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+  "cases": [
+    {
+      "case": "authored_click_and_key",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--pull=never",
+        "--network=none",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--memory=2g",
+        "--cpus=2",
+        "--user=501:20",
+        "--tmpfs=/tmp:rw,nosuid,nodev,exec,size=256m",
+        "--mount",
+        "type=bind,src=/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/browser-authored-jyy9q5p3,dst=/workspace,readonly",
+        "--workdir=/workspace",
+        "--entrypoint=node",
+        "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+        "browser-harness.cjs",
+        "probe.json",
+        "--container-only"
+      ],
+      "exit": 0,
+      "report": {
+        "version": "browser-observation@v1",
+        "passed": true,
+        "files": {
+          "index.html": "aad47fd2506e5d1a5ce4bdfdb223a7253416da887322a90fcc310f3d137eb9ff",
+          "style.css": "53b159fa4b0bb6ba01537c03862dbd599698c57b211e6ae1beccf61a829b659b",
+          "app.js": "3be5939c6a7cea9f17d673856e2046b88609513471941e336ab40a527601392e"
+        },
+        "observations": [
+          {
+            "kind": "render",
+            "sha256": "0415f6d5fea66d3e77b81809c18c916c1a71b95d13bdb9363d042f9ed2696c98"
+          },
+          {
+            "kind": "click",
+            "value": "#start"
+          },
+          {
+            "kind": "key",
+            "value": "ArrowLeft"
+          },
+          {
+            "kind": "text",
+            "selector": "#status",
+            "text": "Moved",
+            "abbreviated": false,
+            "original_length": 5,
+            "met": true
+          },
+          {
+            "kind": "render",
+            "sha256": "cb92db4a3b5e3fea9516650bc4d280066717a4a64a990aa31c68c0bfa51cf392"
+          }
+        ],
+        "errors": [],
+        "error_count": 0
+      },
+      "stderr": "",
+      "protected_files_unchanged": true
+    },
+    {
+      "case": "external_script_denied",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--pull=never",
+        "--network=none",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--memory=2g",
+        "--cpus=2",
+        "--user=501:20",
+        "--tmpfs=/tmp:rw,nosuid,nodev,exec,size=256m",
+        "--mount",
+        "type=bind,src=/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/browser-authored-jyy9q5p3,dst=/workspace,readonly",
+        "--workdir=/workspace",
+        "--entrypoint=node",
+        "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+        "browser-harness.cjs",
+        "probe.json",
+        "--container-only"
+      ],
+      "exit": 1,
+      "report": {
+        "version": "browser-observation@v1",
+        "passed": false,
+        "files": {
+          "index.html": "f8f7a70a3fe7aebde11caf26ce646a577b97c7ecd67148684643cef6e45c1ba2",
+          "style.css": "53b159fa4b0bb6ba01537c03862dbd599698c57b211e6ae1beccf61a829b659b",
+          "app.js": "3be5939c6a7cea9f17d673856e2046b88609513471941e336ab40a527601392e"
+        },
+        "observations": [
+          {
+            "kind": "render",
+            "sha256": "0415f6d5fea66d3e77b81809c18c916c1a71b95d13bdb9363d042f9ed2696c98"
+          },
+          {
+            "kind": "click",
+            "value": "#start"
+          },
+          {
+            "kind": "key",
+            "value": "ArrowLeft"
+          },
+          {
+            "kind": "text",
+            "selector": "#status",
+            "text": "Moved",
+            "abbreviated": false,
+            "original_length": 5,
+            "met": true
+          },
+          {
+            "kind": "render",
+            "sha256": "cb92db4a3b5e3fea9516650bc4d280066717a4a64a990aa31c68c0bfa51cf392"
+          }
+        ],
+        "errors": [
+          "console error"
+        ],
+        "error_count": 1
+      },
+      "stderr": "",
+      "protected_files_unchanged": true
+    },
+    {
+      "case": "protected_probe_not_served",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--pull=never",
+        "--network=none",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--memory=2g",
+        "--cpus=2",
+        "--user=501:20",
+        "--tmpfs=/tmp:rw,nosuid,nodev,exec,size=256m",
+        "--mount",
+        "type=bind,src=/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/browser-authored-jyy9q5p3,dst=/workspace,readonly",
+        "--workdir=/workspace",
+        "--entrypoint=node",
+        "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+        "browser-harness.cjs",
+        "probe.json",
+        "--container-only"
+      ],
+      "exit": 1,
+      "report": {
+        "version": "browser-observation@v1",
+        "passed": false,
+        "files": {
+          "index.html": "9d80512a2f1072ed6e2a2fb9509083bea49daadce630823e6551f43a67f330fa",
+          "style.css": "53b159fa4b0bb6ba01537c03862dbd599698c57b211e6ae1beccf61a829b659b",
+          "app.js": "3be5939c6a7cea9f17d673856e2046b88609513471941e336ab40a527601392e"
+        },
+        "observations": [
+          {
+            "kind": "render",
+            "sha256": "0415f6d5fea66d3e77b81809c18c916c1a71b95d13bdb9363d042f9ed2696c98"
+          },
+          {
+            "kind": "click",
+            "value": "#start"
+          },
+          {
+            "kind": "key",
+            "value": "ArrowLeft"
+          },
+          {
+            "kind": "text",
+            "selector": "#status",
+            "text": "Moved",
+            "abbreviated": false,
+            "original_length": 5,
+            "met": true
+          },
+          {
+            "kind": "render",
+            "sha256": "cb92db4a3b5e3fea9516650bc4d280066717a4a64a990aa31c68c0bfa51cf392"
+          }
+        ],
+        "errors": [
+          "blocked resource",
+          "console error"
+        ],
+        "error_count": 2
+      },
+      "stderr": "",
+      "protected_files_unchanged": true
+    },
+    {
+      "case": "application_error_not_pass",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--pull=never",
+        "--network=none",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--memory=2g",
+        "--cpus=2",
+        "--user=501:20",
+        "--tmpfs=/tmp:rw,nosuid,nodev,exec,size=256m",
+        "--mount",
+        "type=bind,src=/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/browser-authored-jyy9q5p3,dst=/workspace,readonly",
+        "--workdir=/workspace",
+        "--entrypoint=node",
+        "sha256:58deb9d12b7291f6d2c697b335eb927557d707488df09d1503659d7abdd00883",
+        "browser-harness.cjs",
+        "probe.json",
+        "--container-only"
+      ],
+      "exit": 1,
+      "report": {
+        "version": "browser-observation@v1",
+        "passed": false,
+        "files": {
+          "index.html": "aad47fd2506e5d1a5ce4bdfdb223a7253416da887322a90fcc310f3d137eb9ff",
+          "style.css": "53b159fa4b0bb6ba01537c03862dbd599698c57b211e6ae1beccf61a829b659b",
+          "app.js": "a363d597999f6343022b4b58fae500a2e53330b0b1b8bfcbca7ddd98314b833c"
+        },
+        "observations": [
+          {
+            "kind": "render",
+            "sha256": "0415f6d5fea66d3e77b81809c18c916c1a71b95d13bdb9363d042f9ed2696c98"
+          },
+          {
+            "kind": "click",
+            "value": "#start"
+          },
+          {
+            "kind": "key",
+            "value": "ArrowLeft"
+          },
+          {
+            "kind": "text",
+            "selector": "#status",
+            "text": "Moved",
+            "abbreviated": false,
+            "original_length": 5,
+            "met": true
+          },
+          {
+            "kind": "render",
+            "sha256": "cb92db4a3b5e3fea9516650bc4d280066717a4a64a990aa31c68c0bfa51cf392"
+          }
+        ],
+        "errors": [
+          "page error"
+        ],
+        "error_count": 1
+      },
+      "stderr": "",
+      "protected_files_unchanged": true
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Synthetic clock cutoff for the unchanged M4 fixture; not real-corpus maturity.
 # scripts/m4-evidence.sh — regenerate the M4 (Calibrate) exit evidence, docs/m4-evidence.md.
 #
 # Commit first, then run from the workspace root (Linux, GNU coreutils, python3, git):
@@ -430,7 +431,7 @@ body() {
     section "The pipeline over fixtures/m4/ (--by time)"
     local DS=$W/m4ds B=$W/m4-synth
     block "dataset --by time --calibrate 0.2 --holdout 0.2 --seed 7"
-    x 0 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 0 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out "$DS"
     keep dataset.txt
     endblock
@@ -467,7 +468,7 @@ body() {
     section "--by repo"
     local RDS=$W/m4-repo RB=$W/m4-repo-models
     block "dataset --by repo --calibrate 0.2 --holdout 0.2 --seed 7"
-    x 0 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 0 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --by repo --calibrate 0.2 --holdout 0.2 --seed 7 --out "$RDS"
     endblock
     block "fit (--by repo)"
@@ -544,61 +545,61 @@ body() {
 
     section "dataset input rules"
     block "--tasks missing"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --out "$W/in-no-tasks"
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --out "$W/in-no-tasks"
     endblock
     block "a label whose reviewer is not the operator"
     xs 0 "sed '1s/\"reviewer\":\"operator\"/\"reviewer\":\"generator\"/' $FX/labels.jsonl > $W/labels-reviewer.jsonl"
     x 0 grep -c '"reviewer":"generator"' "$W/labels-reviewer.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$W/labels-reviewer.jsonl" --out "$W/in-reviewer"
     endblock
     block "a diff_label outside accepted, rejected, disputed, null"
     xs 0 "sed '1s/\"diff_label\":\"accepted\"/\"diff_label\":\"maybe\"/' $FX/labels.jsonl > $W/labels-diff-label.jsonl"
     x 0 grep -c '"diff_label":"maybe"' "$W/labels-diff-label.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$W/labels-diff-label.jsonl" --out "$W/in-diff-label"
     endblock
     block "a malformed JSONL line in the task index"
     xs 0 "{ head -n 1 $FX/tasks.jsonl; echo '{\"task\":'; tail -n +2 $FX/tasks.jsonl; } > $W/tasks-malformed.jsonl"
     x 0 sed -n 2p "$W/tasks-malformed.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$W/tasks-malformed.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$W/tasks-malformed.jsonl" \
         --out "$W/in-malformed"
     endblock
     block "a task id that is not a hash"
     xs 0 "sed '1s/\"task\":\"1456cc2f/\"task\":\"zz56cc2f/' $FX/tasks.jsonl > $W/tasks-bad-hash.jsonl"
     x 0 grep -c '"task":"zz56cc2f' "$W/tasks-bad-hash.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$W/tasks-bad-hash.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$W/tasks-bad-hash.jsonl" \
         --out "$W/in-bad-hash"
     endblock
     block "a field of the wrong type (timestamp as a number)"
     xs 0 "sed '1s/\"timestamp\":\"2026-02-01T00:00:00Z\"/\"timestamp\":17/' $FX/tasks.jsonl > $W/tasks-wrong-type.jsonl"
     x 0 grep -c '"timestamp":17' "$W/tasks-wrong-type.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$W/tasks-wrong-type.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$W/tasks-wrong-type.jsonl" \
         --out "$W/in-wrong-type"
     endblock
     block "a duplicate task id in the task index"
     xs 0 "{ cat $FX/tasks.jsonl; head -n 1 $FX/tasks.jsonl; } > $W/tasks-duplicate.jsonl"
     x 0 wc -l "$W/tasks-duplicate.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$W/tasks-duplicate.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$W/tasks-duplicate.jsonl" \
         --out "$W/in-duplicate"
     endblock
     block "--by outside time, repo"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" --by bogus \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" --by bogus \
         --out "$W/in-by"
     endblock
     block "a share that leaves a side empty (--holdout 0)"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --holdout 0 --out "$W/in-empty-side"
     endblock
     block "an --out that is not empty (a copy of the --by time dataset)"
     x 0 cp -R "$DS" "$W/in-non-empty"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$FX/labels.jsonl" --by repo --seed 3 --out "$W/in-non-empty"
     x 0 diff -r "$DS" "$W/in-non-empty"
     endblock
     block "a --store that is not a sqlite database"
     xs 0 "printf 'not a database\\n' > $W/not-sqlite.db"
-    x 2 "$BIN" train dataset --store "$W/not-sqlite.db" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --store "$W/not-sqlite.db" --tasks "$FX/tasks.jsonl" \
         --out "$W/in-not-sqlite"
     endblock
 
@@ -607,13 +608,13 @@ body() {
     x 0 python3 -I -c 'import json,sys; fam={r["task"]: r["family"] for r in map(json.loads, open(sys.argv[1]))}; rows=[json.loads(l) for l in open(sys.argv[2])]; [r.update(criteria_met=fam[r["task"]]=="calibrated", diff_label="accepted" if fam[r["task"]]=="calibrated" else "rejected") for r in rows]; open(sys.argv[3], "w").write("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows))' \
         "$FX/tasks.jsonl" "$FX/labels.jsonl" "$W/labels-by-family.jsonl"
     x 0 grep -c '"diff_label":"accepted"' "$W/labels-by-family.jsonl"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --labels "$W/labels-by-family.jsonl" --by time --calibrate 0.2 --holdout 0.2 --seed 7 \
         --out "$W/probe-leak"
     x 1 test -e "$W/probe-leak"
     endblock
     block "fit below 150 tasks with a resolved label (no --labels: every row unresolved)"
-    x 0 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
+    x 0 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$FX/tasks.jsonl" \
         --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out "$W/no-labels"
     x 2 "$BIN" train fit "$W/no-labels" --out "$W/no-labels-bundle"
     endblock
@@ -638,7 +639,7 @@ body() {
         [ -z "$ASNOTE" ] || say "$ASNOTE"
         x 0 mkdir "$W/lim-ro-out"
         x 0 chmod 0555 "$W/lim-ro-out"
-        x 1 ${AS[@]+"${AS[@]}"} "$BIN" train dataset --events "$FX/events.jsonl" \
+        x 1 ${AS[@]+"${AS[@]}"} "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" \
             --tasks "$FX/tasks.jsonl" --labels "$FX/labels.jsonl" --by time --calibrate 0.2 \
             --holdout 0.2 --seed 7 --out "$W/lim-ro-out"
         x 1 ${AS[@]+"${AS[@]}"} "$BIN" train fit "$DS" --out "$W/lim-ro-out"
@@ -677,7 +678,7 @@ body() {
     block "the --out create probe leaves empty ancestors behind when a later step refuses"
     x 0 touch "$W/empty-tasks.jsonl"
     x 1 test -e "$W/lim-out"
-    x 2 "$BIN" train dataset --events "$FX/events.jsonl" --tasks "$W/empty-tasks.jsonl" \
+    x 2 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --events "$FX/events.jsonl" --tasks "$W/empty-tasks.jsonl" \
         --out "$W/lim-out/a/b/c"
     xs 0 "find $W/lim-out -type d | sort"
     endblock
@@ -685,13 +686,13 @@ body() {
     xs 0 "{ printf 'SQLite format 3\\000'; head -c 4080 /dev/zero | tr '\\000' x; } > $W/corrupt-body.db"
     xs 0 "head -c 16 $W/corrupt-body.db | od -An -c"
     x 0 stat -c '%s bytes' "$W/corrupt-body.db"
-    x 1 "$BIN" train dataset --store "$W/corrupt-body.db" --tasks "$FX/tasks.jsonl" \
+    x 1 "$BIN" train dataset --as-of 2028-01-01T00:00:00Z --store "$W/corrupt-body.db" --tasks "$FX/tasks.jsonl" \
         --out "$W/lim-corrupt-body"
     endblock
     block "the default store path (no --store, no --events, TSR_DB unset) creates an empty store"
     x 0 mkdir "$W/lim-default-store"
     x 1 test -e "$W/lim-default-store/.tsr/tsr.db"
-    xs 2 "cd $W/lim-default-store && env -u TSR_DB ../../../${BIN#./} train dataset --tasks ../../../${FX#./}/tasks.jsonl --out ./ds"
+    xs 2 "cd $W/lim-default-store && env -u TSR_DB ../../../${BIN#./} train dataset --as-of 2028-01-01T00:00:00Z --tasks ../../../${FX#./}/tasks.jsonl --out ./ds"
     x 0 stat -c '%s bytes' "$W/lim-default-store/.tsr/tsr.db"
     x 0 python3 -I -c 'import sqlite3,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True); print("events:", c.execute("select count(*) from events").fetchone()[0])' \
         "$W/lim-default-store/.tsr/tsr.db"
@@ -803,7 +804,7 @@ PY
     x 0 wc -l "$FX/events.jsonl"
     endblock
     block "dataset from .tsr/tsr.db"
-    xs 0 "cd $OP && $OPBIN train dataset --store .tsr/tsr.db --tasks .tsr/tasks.jsonl --labels .tsr/labels.jsonl --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out .tsr/m4-data"
+    xs 0 "cd $OP && $OPBIN train dataset --as-of 2028-01-01T00:00:00Z --store .tsr/tsr.db --tasks .tsr/tasks.jsonl --labels .tsr/labels.jsonl --by time --calibrate 0.2 --holdout 0.2 --seed 7 --out .tsr/m4-data"
     keep op-dataset.txt
     local k
     for k in rows data_root training_root split_digest; do

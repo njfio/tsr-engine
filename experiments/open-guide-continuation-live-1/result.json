@@ -1,0 +1,117 @@
+{
+  "behavior": {
+    "completed_actions_repeated": 0,
+    "interpretation": "Unchanged robust source responds to changed node input. No relationship development or causal benefit demonstrated.",
+    "new_desire_identities": 0,
+    "new_patches": 0,
+    "new_relationships": 0,
+    "ordinary_selected_kind": "service",
+    "route_hops_by_episode": [
+      [
+        1,
+        2,
+        2
+      ],
+      [
+        1,
+        4,
+        3
+      ],
+      [
+        5,
+        2,
+        3
+      ]
+    ],
+    "third_graph": "11>21,21>22,22>31,31>32,32>41,41>11"
+  },
+  "calls": 5,
+  "campaign": {
+    "calls": 259,
+    "committed_microusd": 222740,
+    "effective_max_calls": 272,
+    "effective_max_execution_groups": 74,
+    "evaluation_suite_sha256": "3a5fe3c51bcb94516c7d2a1017cf618af641c26092be19bace39a3d28bbea0af",
+    "execution_groups": 72,
+    "fixture_only": false,
+    "known_cost_microusd": 222740,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 7,
+    "remaining_calls": 13,
+    "remaining_execution_groups": 2,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "evidence_directory": "target/open-guide-continuation-live-1",
+  "evidence_hashes": {
+    "CLOSED.json": "d5309908088533823e913d298d5d06ad5d7045f424a9efed7accda82a0bfffc3",
+    "LAUNCH.json": "4987e11aeed839bd5f1609ef3f49af14909ff53b4ef3b97a918359c2073ad691",
+    "accounting-summary.json": "afc1f5b27fca0b2ad9af84fc5212904afae30cc2e368189f5ab2af80b941beb9",
+    "adapter/adapter.jsonl": "ae461e9557b184734ba794ddac35a18e664f6a508958dab827894b1018169cb5",
+    "admission.json": "9e64f4055221da59784d3bba0bb103eb1a51a0b868758cdef2ce0af0da54a7db",
+    "cycle-admission.json": "cdbf2581f82bf4f9d1b05e334d92db97100c2f2eb2b900ed3fec2cf1d15cbb91",
+    "cycle/cycle.jsonl": "f28167230469cd2c8b3b96904258c763dca2bec18be4fa3da9f191f1a595291c",
+    "final-state-identities.json": "af98b1987d8aedde05857dd21c3702b8e9963e0f5cc39dd6371804003cf5750b",
+    "objective-final-status.json": "b0840a9dc7eba45ea4d34e707bd5bbc0bf7a480d17870ab6593317cbbc7617b3",
+    "replay-check.json": "4429c5c993ae171a5568e91c44b3e9af48e189845aa95000e2d6d205c9ed1d60",
+    "run-output.log": "9e52215fb26e9bbbabddfb9ce5d66690df85ffc834a60f292f6a17632ded624f"
+  },
+  "execution_groups": 1,
+  "format_corrections": 0,
+  "identities": {
+    "objective_binding": "b1b56d70dea187cfc8f299ebf0b4c2970b6a05deb1fef26f0b496d31ec730dde",
+    "relationship_history_count": 0,
+    "requirements_revision": "1ddc500f26a30c04e7faa01be8e1debd0d5adadfd2eeb03e91907375f5ada3f6",
+    "snapshot": "867a52d49393b7c896f811062231c4a79415cb1e1af723e178a1876763583faf",
+    "source_files": {
+      "lib.rs": "02709e8e2a1d255d52aedd477b3d738c5642fe323f5522cd5a761e8f8b5e0d3f",
+      "service.rs": "485ebbd4b5b70d4a5ab9015d0091d394d0123e50d5b9a77ee78cb2a700db1ee3"
+    },
+    "state_root": "9bbd8b02900b0704bab21df382ca99d894742ff61f66847b03af236fdd8aa470"
+  },
+  "independent_acceptance": {
+    "assessor": "/root/continuation_review",
+    "interrupted_parent_unchanged": true,
+    "journal_hashes": {
+      "adapter/adapter.jsonl": "ae461e9557b184734ba794ddac35a18e664f6a508958dab827894b1018169cb5",
+      "cycle/cycle.jsonl": "f28167230469cd2c8b3b96904258c763dca2bec18be4fa3da9f191f1a595291c"
+    },
+    "ledger_sha256": "b0b86fdc3f9cae48832212c21c800d0e2f8850186c3806f124f0d9e78a765d02",
+    "native_branch": "stop",
+    "native_decision": "accept",
+    "operations": 0,
+    "operator_transcription": "/root",
+    "original_run_unchanged": true,
+    "provider_calls": 0
+  },
+  "original_parent_unchanged": true,
+  "packet_sha256": "c232f86e6371e82830188870585e75992ec155aaa79b44b3acd353b1972462e7",
+  "preserved_parent_commit": "304e6aab",
+  "release_commit": "0e979c71",
+  "replay": {
+    "fresh_process_exit": 0,
+    "journal_ledger_hashes": {
+      "/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/tsr-integrated-campaign-1/ledger.jsonl": "b0b86fdc3f9cae48832212c21c800d0e2f8850186c3806f124f0d9e78a765d02",
+      "target/open-guide-continuation-live-1/adapter/adapter.jsonl": "ae461e9557b184734ba794ddac35a18e664f6a508958dab827894b1018169cb5",
+      "target/open-guide-continuation-live-1/cycle/cycle.jsonl": "f28167230469cd2c8b3b96904258c763dca2bec18be4fa3da9f191f1a595291c"
+    },
+    "operations": 0,
+    "provider_calls": 0,
+    "replayed_without_dispatch": true,
+    "review_copy_fresh_process_branch": "stop",
+    "state_tree_sha256": "1f2fb509f822fc429d1d17bae2c08b5abb561e3a15d677632a09aea579f100c4"
+  },
+  "review_copy_directory": "target/open-guide-continuation-live-1-review-copy",
+  "settled_microusd": 5384,
+  "status": "completed_finite_objective_independently_accepted_in_separate_copy",
+  "terminal_retries": 0,
+  "tokens": {
+    "completion_tokens": 6403,
+    "prompt_tokens": 31372,
+    "total_tokens": 37775
+  },
+  "unused_run_allowance_expired": true,
+  "version": "open-guide-continuation-result@v1"
+}

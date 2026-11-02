@@ -1,0 +1,116 @@
+{
+  "base_contract_commit": "db4acdc3",
+  "calls": 2,
+  "campaign_after": {
+    "calls": 222,
+    "committed_microusd": 180395,
+    "effective_max_calls": 230,
+    "effective_max_execution_groups": 62,
+    "evaluation_suite_sha256": "cbc14b21b836d80a7f3a65769fec9a228809fc00e7e5b6597672f0b8aaeb0191",
+    "execution_groups": 61,
+    "fixture_only": false,
+    "known_cost_microusd": 180395,
+    "overrun": false,
+    "provider_hard_cap": false,
+    "reconciled_bills": 6,
+    "remaining_calls": 8,
+    "remaining_execution_groups": 1,
+    "stopped": false,
+    "unknown_calls": [],
+    "unknown_executions": []
+  },
+  "cap_support_commit": "e93ac496",
+  "completion_tokens": 3333,
+  "evidence_sha256": {
+    "acceptance-inspect.json": "21d42403ad336583a903ec47602091b13ad87439ccab7e3b9a88b6d37b5b6f23",
+    "adapter-admission.json": "7349f527d465386aed33ea1ca1688333f3b861bd1ca98fb601c793bdf4ff0587",
+    "adapter/adapter.jsonl": "4e9246ea89badd8587bec7c4f6d15cc1602470fcc988a8e4298b91d71ad6d712",
+    "admission-review.json": "e08564e17ef410b44ff4ff0101c22dd34e28ecd19f212014b1742c260161d2de",
+    "authority.json": "b31d69efb30fea967b3841cee258baf097d56ca90bcd96cb1a20cb6ce0bec7f1",
+    "cap-implementation-delta.json": "327c1387dff2e27b0ff151bc459b19bdad2448f6fe48694d4c65b71f5092759f",
+    "cycle-admission.json": "8bc423bbf2f6c05fa849f85c5e244770a0497b64c62faf9d91f600a22a021d39",
+    "cycle/cycle.jsonl": "c7d109e2b6da7b4c04abc5dd1c317f9700b84adc3d8931a123495a9ae244c48b",
+    "grant.json": "ffd2556a283bfb30b9b5785aed0b2f7b20134393d45dcda14fe0e91ec6153a09",
+    "initial-public-context.json": "402906866b6b8b95ec656f03094b188530b45c3e2d8aca74912dc1f24b9e3c29",
+    "origin.json": "ae6f76b52b38cef71c7dc61bc02a3a36a5121ebd072713d1d4171ecb2a3d4aad",
+    "price.json": "6839df350bb56cb76c4b5d2a9224682c62791b93a66e5d863f1e002aa224f445",
+    "replay-integrity.json": "f1211fc71b0c8225caf5015a72310f704deb2c7f834b82da882fe72a00ed50aa",
+    "run.log": "15b7e5d1cc33158e71d1147bd4e653aeb2f880cad2ae946dc050d0d78734bacb",
+    "upgrade.json": "33f0f09b759f03e7857995ac1f25e0bc4b9012a984a269cd521a4f131e1bb825"
+  },
+  "execution_groups": 1,
+  "forecast": {
+    "empirical_action_estimate_after": 0.6666666666666666,
+    "origin": "controller uncalibrated prior",
+    "probability_before": 0.5,
+    "supporting_episodes_before": 0
+  },
+  "formal_native_acceptance": "not_recorded;normal controller stopped review_required",
+  "format_corrections": 0,
+  "generator_calls": 1,
+  "independent_assessment": {
+    "limitations": "Finite protected tests and source assessment; no broad qualitative fulfillment or causal advantage.",
+    "native_acceptance_mutation": false,
+    "reviewer": "inquiry_review",
+    "verdict": "accept within frozen task domain"
+  },
+  "local_evidence_directory": "/Users/n/Documents/Codex/2026-10-14/task/tsr-engine-m3/target/native-pursuit-live-2",
+  "prompt_tokens": 6447,
+  "protected_file_sha256": {
+    "Cargo.lock": "a1bb9abde732a17f538d2af59f5d02cff43f0859454dbe151f51e65649405049",
+    "Cargo.toml": "eb5f43085a5257ac8c96248cf4438d39d236dcf37e7baf1d1bec3ca17c40a810",
+    "tests/contract.rs": "14f4734a6a0c5c7f0d3bbe4a275cf1b743e3c2b3037ae79f8f9b73ad4ed87ca9"
+  },
+  "receipts": [
+    {
+      "action": "sh",
+      "duration_ms": 2099,
+      "exit": 0,
+      "file_sha256": "0f641532fc0550df29fb77b17608c27cb34401383d39fc1adeaaa7ff689213c2",
+      "native_receipt_id": "da093e0465d611465c7ee42b11bedb8d763ce98c12a400e8a08a4cb74d8a5b49",
+      "stderr_complete": true,
+      "stdout_complete": true
+    },
+    {
+      "action": "cargo",
+      "duration_ms": 3813,
+      "exit": 0,
+      "file_sha256": "f424949b742afe3aff6ce16758c228aa86723bdc2af74453efce2c9688557358",
+      "native_receipt_id": "2cd187fe7d880d6f10d222a254c44603e4f725dfec89938e5d04c39a8328a6f9",
+      "stderr_complete": true,
+      "stdout_complete": true
+    },
+    {
+      "action": "cargo",
+      "duration_ms": 2535,
+      "exit": 0,
+      "file_sha256": "83eb52574fbef235ad95a2af8d0002f68a1c172f0cab1b3a10cc97843174cb07",
+      "native_receipt_id": "0a8dee7d8d5c8ae0ab98978dd1ff688080be0a03c40c7564d090cd2c86df798b",
+      "stderr_complete": true,
+      "stdout_complete": true
+    }
+  ],
+  "relational_admissions": 0,
+  "relationship_revision": false,
+  "replay": "fresh process; all campaign/adapter/controller journal hashes unchanged",
+  "reviewed_release_manifest_sha256": "c4e55dbccf309ef5ca1ab86843681c614083a7231558a2592d0da3ecf1eb0909",
+  "reviewer_calls": 1,
+  "settled_microusd": 1871,
+  "status": {
+    "built_in_transport": false,
+    "callback_effects_require_external_admission": true,
+    "native_reason": "independent_acceptance_or_shareable_feedback_required",
+    "status": "review_required"
+  },
+  "subsequent_pursuit": "not_needed_after_immediate_pass;not_exercised",
+  "test_verdict": "passed",
+  "tests": [
+    "bounded_repeatable_existing_ids",
+    "perspective_coverage_when_capacity_allows"
+  ],
+  "total_tokens": 9780,
+  "unknown_calls": [],
+  "unknown_operations": [],
+  "unused_attempt_allowance": "closed; no further attempt authorized",
+  "version": "native-pursuit-result@2"
+}
