@@ -161,7 +161,11 @@ class RealNative(unittest.TestCase):
   self.s.budget=lambda:{'available':True,'stopped':False}
   self.s.input(pid,{'id':'later-saved','text':'AUTHORED saved later; must not enter earlier approval'})
   self.assertNotEqual(snapshot['native_state_root'],self.s.source_snapshot(pid)['native_state_root'])
-  with self.assertRaisesRegex(ValueError,'guidance changed'):self.s.start(pid,{'id':'send-bound-guidance','confirm':'Run this reviewed session with up to $10'})
+  # Authored runtime availability isolates approval binding from host Docker readiness.
+  # Wrap only the UI module's subprocess reference: native snapshot reads remain real.
+  with patch.object(self.s,'runtime_preflight',return_value={'fixture_only':True}) as runtime, patch.object(ui,'subprocess',wraps=ui.subprocess) as processes:
+   with self.assertRaisesRegex(ValueError,'guidance changed'):self.s.start(pid,{'id':'send-bound-guidance','confirm':'Run this reviewed session with up to $10'})
+   runtime.assert_called_once_with();processes.Popen.assert_not_called()
   self.assertFalse(any(e['type']=='run_request' for e in self.s.events(pid)))
  def test_real_http_to_native_and_reload(self):
   pid=self.s.create({'id':'http','title':'Authored HTTP test','text':'AUTHORED fresh native HTTP fixture, not player feedback.'})['id']

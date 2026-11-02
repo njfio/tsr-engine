@@ -12,7 +12,8 @@
     "fresh-browser-final.json": "bf8af073078df8645343d7e267682ec2beaa0e2122a1eb9ea21214633796c7bc",
     "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "ci-failed.log": "3a57ea37a696036073dcd3736ef987a2b30adae727d3955ef043b48c93421c0f",
-    "ci-repaired-failed.log": "19b8209c9fb7591c7d43a2d34edbc752e134d114e751bfea5cf7dadfe4a92fa8"
+    "ci-repaired-failed.log": "19b8209c9fb7591c7d43a2d34edbc752e134d114e751bfea5cf7dadfe4a92fa8",
+    "ci-ui-failed.log": "4317ad31803c09b137be7d2347ec4e4fab9ce7388e4db68fd540648c300ba962"
   },
   "provider_calls": 0,
   "frozen_m0_unchanged": true,

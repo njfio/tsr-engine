@@ -120,3 +120,13 @@ bound. CI now uses limited debug information (CARGO_PROFILE_DEV_DEBUG=1) through
 the job and explicitly checks binary size after build. Optimization level, debug
 assertions, overflow checks and production admission bounds are unchanged. This
 build-only adjustment received independent review; final CI remains the merge gate.
+
+CI 41473223515 passed Rust, binary size validation, contract/recovery and native
+development/restart checks. Its UI suite had one failure: the stale-guidance
+negative test stopped at missing Docker preflight rather than reaching the
+asserted guidance rejection. The fixture now supplies an explicitly authored
+runtime preflight and asserts no worker launch, while keeping real native source
+mutation and the exact guidance-rejection assertion. Production runtime checks
+are unchanged. This failure remains retained; a fresh CI run verifies the patch.
+The corrected exact UI case passed locally (1/1, 2.929 seconds), with independent
+fixture review and no production edits.
