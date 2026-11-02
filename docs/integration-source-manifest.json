@@ -9632,6 +9632,12 @@
       "source_sha256": "df4a3f250b0b5a4f5a9eb279946c0c8ea17b90e7bb1993c8c9ca6ec417354509",
       "integration_sha256": "e5db96a665412748cb5920d103c1683e824af291cd80c981f8639f05e736468e",
       "reason": "public UI portability/privacy repair, rustfmt-only Rust formatting or trailing-whitespace normalization; see integration report"
+    },
+    {
+      "path": "crates/tsr-cli/tests/d4r1_provisioning.rs",
+      "source_sha256": "ea4ff8bb47e4b77ad2f72c3642e0bdeb420366ac5b04486bb961f6c345b4abef",
+      "integration_sha256": "ef5ef4a68b19317a2a658267db40440c80e5bffc2ea9c837b5ec1272d592626b",
+      "reason": "Isolate each D4/R1 CLI test store; preserve all assertions and production locking."
     }
   ]
 }

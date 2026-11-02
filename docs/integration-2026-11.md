@@ -102,3 +102,14 @@ Historical raw-run Python audits (for example M3 failure-contract and fixed12
 archive regressions) require their preserved local archives. They are not part of
 the portable authored CI subset. No historical assertion or frozen fixture is
 weakened to obtain a public-checkout pass.
+
+Initial GitHub CI run 41467202871 failed in Rust tests. Python-backed fixture
+transports did not produce their reports, and two D4/R1 tests collided on a
+shared default SQLite store. The underlying Python loader stderr was not retained,
+so a specific loader error is not proven. CI now uses the existing Debian Rust
+image's Python instead of the external setup-python toolcache, with an isolated
+startup/import and decoder preflight that removes LD_LIBRARY_PATH. That image
+passes the same decoder locally. D4/R1 tests now select their own scratch stores;
+assertions and production locking remain unchanged; all four targeted D4/R1 tests
+pass locally (2.84 seconds), and rustfmt/diff checks pass. The failed CI is preserved,
+and a new exact-head run must pass before merge.

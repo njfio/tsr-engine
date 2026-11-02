@@ -10,7 +10,8 @@
     "native-browser-targeted.log": "56025d2b0d6939573a13eba75901b3c65ea9f58d58dfad91acc13c639e89b361",
     "fresh-store-fixed.log": "33dab0360ed760ab08328ab9adedca29a546dc77f18ab70a41e15c0ca392bc18",
     "fresh-browser-final.json": "bf8af073078df8645343d7e267682ec2beaa0e2122a1eb9ea21214633796c7bc",
-    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ci-failed.log": "3a57ea37a696036073dcd3736ef987a2b30adae727d3955ef043b48c93421c0f"
   },
   "provider_calls": 0,
   "frozen_m0_unchanged": true,

@@ -68,6 +68,7 @@ fn r1_etc_snapshot_exits_2_and_mounts_nothing() {
     let out = scratch.join("out");
 
     let output = Command::new(tsr_bin())
+        .env("TSR_DB", scratch.join("events.sqlite"))
         .env("TSR_M3_RUNTIME", "docker")
         .env(
             "TSR_M3_IMAGE",
@@ -151,6 +152,7 @@ fn d4_record_mode_provisions_from_a_batch_owned_root() {
     let joined = std::env::join_paths(paths).unwrap();
 
     let output = Command::new(tsr_bin())
+        .env("TSR_DB", scratch.join("events.sqlite"))
         .env("TSR_M3_RUNTIME", "docker")
         .env(
             "TSR_M3_IMAGE",
@@ -240,6 +242,7 @@ fn d4r1_materialize_does_not_keep_a_poisoned_dest() {
     let out = scratch.join("out");
     let materialize = || {
         Command::new(tsr_bin())
+            .env("TSR_DB", scratch.join("events.sqlite"))
             .env("TSR_M3_RUNTIME", "docker")
             .env(
                 "TSR_M3_IMAGE",
@@ -321,6 +324,7 @@ fn r1_traversing_repo_exits_2_and_mounts_nothing() {
     let out = scratch.join("out");
 
     let output = Command::new(tsr_bin())
+        .env("TSR_DB", scratch.join("events.sqlite"))
         .env("TSR_M3_RUNTIME", "docker")
         .env(
             "TSR_M3_IMAGE",
