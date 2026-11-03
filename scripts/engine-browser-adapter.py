@@ -459,6 +459,10 @@ class Adapter(recovery.Recovery,base.Adapter):
                 if set(item)=={'retain'}:self.check_retention_reason(item)
                 else:self.check_proposal_shape({'alternatives':[item]})
             return
+        if isinstance(value,dict) and 'abstain' not in value:
+            # A top-level field that belongs in an alternative: say where, never echo unknown names.
+            misplaced=sorted(set(value)&{'edits','rationale','expectation','existing'})
+            if misplaced:helper.fail('$','unsupported_field',allowed_fields=['alternatives'],required_fields=['alternatives'],valid_locations=['$.alternatives[0].'+k for k in misplaced])
         helper.proposal_shape(value,text_limit=self.narrative_limit)
         if isinstance(value,dict) and set(value)=={'alternatives'} and isinstance(value['alternatives'],list) and len(value['alternatives'])==1:
             item=value['alternatives'][0]
