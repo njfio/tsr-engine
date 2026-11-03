@@ -102,5 +102,33 @@ class Protocol(unittest.TestCase):
         self.assertEqual(hashlib.sha256((ROOT / source['path']).read_bytes()).hexdigest(), source['sha256'])
 
 
+class GeneratedParents(unittest.TestCase):
+    def wrapper(self):
+        spec = importlib.util.spec_from_file_location('continue_generated', ROOT / 'experiments/continuous-game-v4-launch/continue_generated_parents.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def request(self, generated_meaning='I want', guidance='g'):
+        roots = [{'id': 'a', 'requirement': 'crossing', 'meaning': guidance}]
+        parents = roots + [{'id': 'p', 'meaning': generated_meaning}]
+        return {'coding': {'snapshot': 's', 'relational': {'inputs': {'parents': parents, 'acceptance_parents': roots}}}}
+
+    def test_generated_parent_is_accepted_and_guidance_may_change(self):
+        original = [{'id': 'a', 'requirement': 'crossing'}]
+        self.wrapper().verify(self.request(), self.request(guidance='renewed'), original)
+
+    def test_generated_parent_change_is_refused(self):
+        original = [{'id': 'a', 'requirement': 'crossing'}]
+        with self.assertRaisesRegex(ValueError, 'generated parent changed'):
+            self.wrapper().verify(self.request(), self.request(generated_meaning='other'), original)
+
+    def test_changed_root_identity_is_refused(self):
+        after = self.request()
+        after['coding']['relational']['inputs']['parents'][0]['requirement'] = 'other'
+        with self.assertRaises(ValueError):
+            self.wrapper().verify(self.request(), after, [{'id': 'a', 'requirement': 'crossing'}])
+
+
 if __name__ == '__main__':
     unittest.main()
