@@ -52,6 +52,8 @@ class Budget:
   self.consistency=admission.get('criterion_return_profile',{}).get('consistency_reassessment')=='single-fresh@v1'
   self.incomplete=admission.get('incomplete_regeneration',False)
   if type(self.incomplete) is not bool or (self.incomplete and (admission.get('version') not in ('browser-project-cycle-adapter@v4','browser-project-cycle-adapter@v5','browser-project-cycle-adapter@v6','browser-project-cycle-adapter@v7') or admission.get('completion_tokens')!=32768)):raise ValueError('incomplete regeneration requires explicit capacity profile')
+  self.replay=admission.get('correction_replay',False)
+  if type(self.replay) is not bool:raise ValueError('explicit boolean correction replay admission required')
   self.representation=admission.get('representation_regeneration',False)
   self.representation_profile=admission.get('representation_profile')
   if type(self.representation) is not bool:raise ValueError('explicit boolean representation admission required')
@@ -87,6 +89,9 @@ class Budget:
   if any(v['failed_request']==request_id for v in rows):raise ValueError('correction already reserved; reconcile interrupted stage')
   if len(rows)>=self.allowance:raise ValueError('format correction exhausted; retained diagnostics, terminal stop')
   feedback={**({'category':'representation_size'} if detail and detail['code']=='representation_size' else {}),'native_structure':detail,'code':consistency['code'] if consistency else shape or receipt['error_code'],'position':receipt.get('parse_position'),'instruction':('The provider stopped the preceding response at the admitted completion capacity, including reasoning. Return a full fresh valid response for the same task/source, using a smaller complete incremental edit if needed. Do not continue, concatenate or repair the partial output. No change to evidence, permissions or acceptance; abstention remains valid.' if incomplete else 'Return a complete fresh response within the reported representation byte limit. Preserve the identical task, source context, requirements, evidence and permissions. Do not truncate the prior response or waive behavior; an inability/abstention remains valid.' if detail and detail['code']=='representation_size' else 'Return a full fresh response satisfying the identical contract and source context. Correct only the reported JSON format defect. Do not change task, evidence, identifiers, permissions or intended semantics.')}
+  if self.replay and stage=='proposal' and not consistency and detail and detail['code'] in SHAPE_CODES and isinstance(result.get('value'),dict):
+   # The model's own settled response, so it corrects the format of this response instead of regenerating it.
+   feedback.update(failed_response=copy.deepcopy(result['value']),instruction='failed_response is your own preceding response. It was not admitted, reviewed or executed. Return it with only the reported JSON format defect corrected, or make a different valid decision. Do not change task, evidence, identifiers or permissions.')
   if consistency:feedback=consistency
   v={'admission':self.binding,'ordinal':len(rows)+1,'stage':stage,'source':source,'failed_request':request_id,'failure':consistency['code'] if consistency else shape or receipt['error_code']}
   if request_source is not None:v.update(feedback=feedback,request_source=copy.deepcopy(request_source))
