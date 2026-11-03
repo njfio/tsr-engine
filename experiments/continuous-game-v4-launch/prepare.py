@@ -3,8 +3,13 @@ import copy,importlib.util,json,os
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 s=importlib.util.spec_from_file_location('game_pair_adapter',ROOT/'scripts/engine-browser-adapter.py');a=importlib.util.module_from_spec(s);s.loader.exec_module(a)
-LABEL=os.environ.get('TSR_LIVE_LABEL','v4');PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
-FILES=['experiments/continuous-game-v4-launch/'+n for n in ('run.py','observe.py','continue.py','stage.py','prepare.py')]+['experiments/continuous-game-v4/mapping.py','experiments/continuous-game-v4/protocol.json','experiments/continuous-game-v3/mapping.py','experiments/game-wants-v3/mapping.py','scripts/engine-observation-coverage.py']
+LABEL=os.environ.get('TSR_LIVE_LABEL','v4b');PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
+FILES=['experiments/continuous-game-v4-launch/'+n for n in ('run.py','observe.py','continue.py','stage.py','prepare.py','discover.py')]+['experiments/continuous-game-v4/mapping.py','experiments/continuous-game-v4/protocol.json','experiments/continuous-game-v3/mapping.py','experiments/game-wants-v3/mapping.py','scripts/engine-observation-coverage.py']
+def check_pins():
+ # Against what was prepared, never against the current file.
+ base=ROOT/('target/continuous-game-live-'+LABEL);prepared=json.loads((base/'prepared-test.json').read_text());manifest=json.loads((base/'tsr/launch-manifest.json').read_text())
+ assert a.d.file_sha(PROTOCOL)==prepared['packet_sha256'],'protocol changed since preparation'
+ for path,expected in manifest['files'].items():assert a.d.file_sha(ROOT/path)==expected,path
 def prepare(auth_path):
  AUTH=json.loads(Path(auth_path).read_text());assert set(AUTH)=={'approved','at','text','scope'} and type(AUTH['approved']) is bool
  out=ROOT/('target/continuous-game-live-'+LABEL);out.mkdir(exist_ok=False);save=lambda path,value:path.write_text(json.dumps(value,indent=2)+'\n')

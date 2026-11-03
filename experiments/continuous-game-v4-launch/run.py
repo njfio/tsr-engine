@@ -1,7 +1,7 @@
 """Exact one-arm checkpoint launcher for the approved pair; no extra retry logic."""
 import hashlib,json,os,sys
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[2];LABEL=os.environ.get('TSR_LIVE_LABEL','v4')
+ROOT=Path(__file__).resolve().parents[2];LABEL=os.environ.get('TSR_LIVE_LABEL','v4b')
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def canonical(v):return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
 if len(sys.argv)!=3 or sys.argv[1] not in ('check','run') or sys.argv[2] not in ('tsr',):raise SystemExit('check|run tsr|ordinary')

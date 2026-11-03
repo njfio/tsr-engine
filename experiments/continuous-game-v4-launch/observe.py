@@ -1,13 +1,12 @@
 """Reviewed operator observation execution. One bundle per invocation, never retries."""
 import json,importlib.util,sys,fcntl,os
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[2];LABEL=os.environ.get('TSR_LIVE_LABEL','v4')
+ROOT=Path(__file__).resolve().parents[2];LABEL=os.environ.get('TSR_LIVE_LABEL','v4b')
 s=importlib.util.spec_from_file_location('pair_prepare',Path(__file__).with_name('prepare.py'));p=importlib.util.module_from_spec(s);s.loader.exec_module(p);a=p.a
 s=importlib.util.spec_from_file_location('pair_mapping',ROOT/'experiments/continuous-game-v4/mapping.py');mapping=importlib.util.module_from_spec(s);s.loader.exec_module(mapping)
 def load(path):return json.loads(path.read_text())
 def save(path,value):
  with path.open('x') as f:json.dump(value,f,indent=2);f.write('\n')
-BUNDLES=7
 BATCHES=('crossing-first','growth-first','mixed-pursuit')
 def ensure_ready(native,ad,cycle,ledger):
  for folder in (Path(ad['directory']),Path(cycle['journal'])):
@@ -16,8 +15,8 @@ def ensure_ready(native,ad,cycle,ledger):
  if b['stopped'] or b['exceeded'] or b['unsettled_requests'] or b['unresolved_tool_requests'] or b['unknown_usage'] or b['unknown_compute_requests'] or b['unknown_external_cost_requests']:raise ValueError('unsettled native effects')
  if state['stopped'] or state['blocking_unknown_calls'] or state['blocking_unknown_executions']:raise ValueError('unsettled campaign effects')
 def run(arm,batch,index):
- if arm not in ('tsr',) or batch not in BATCHES or type(index) is not int or not 0<=index<BUNDLES:raise ValueError('exact paired observer coordinates required')
- base=ROOT/('target/continuous-game-live-'+LABEL);home=base/arm;stage=home/('observations-'+batch);binding=load(stage/'input-binding.json')
+ if arm not in ('tsr',) or batch not in BATCHES or type(index) is not int or not 0<=index<7:raise ValueError('exact paired observer coordinates required')
+ p.check_pins();base=ROOT/('target/continuous-game-live-'+LABEL);home=base/arm;stage=home/('observations-'+batch);binding=load(stage/'input-binding.json')
  ad_path=ROOT/binding['admission_path'];cycle_path=ROOT/binding['cycle_path']
  assert a.d.file_sha(ad_path)==binding['admission_file_sha256'] and a.d.file_sha(cycle_path)==binding['cycle_file_sha256']
  assert a.d.file_sha(stage/'mapping.json')==binding['mapping_file_sha256'] and a.d.file_sha(stage/'mapping-review.json')==binding['mapping_review_file_sha256']
@@ -34,17 +33,23 @@ def run(arm,batch,index):
  ensure_ready(native,ad,cycle,ledger)
  native_observations=[x['observation'] for x in native.cli('project','verifier','supplemental-inspect')['records'] if 'observation' in x]
  previous=[]
- for earlier in BATCHES[:BATCHES.index(batch)]:previous += [home/('observations-'+earlier)/('bundle-'+str(i)) for i in range(BUNDLES)]
+ for earlier in BATCHES[:BATCHES.index(batch)]:previous += [home/('observations-'+earlier)/('bundle-'+str(i)) for i in range(len(mapping.search(load(home/('observations-'+earlier)/'mapping.json'),earlier)))]
  previous += [stage/('bundle-'+str(i)) for i in range(index)]
  for folder in previous:
   linked=load(folder/'linked.json');obs=load(folder/'observation.json')
   if obs not in native_observations or obs['admission']!=linked['admission'] or obs['receipt']!=linked['receipt']:raise ValueError('prior observer import incomplete')
- if any((stage/('bundle-'+str(i))).exists() for i in range(index,BUNDLES)):raise ValueError('duplicate, reordered or interrupted observer bundle')
+ if any((stage/('bundle-'+str(i))).exists() for i in range(index,7)):raise ValueError('duplicate, reordered or interrupted observer bundle')
  files={k:(native.directory/'coding-work'/k).read_text() for k in ad['origin']['initial_sources']};record=load(stage/'mapping.json');review=load(stage/'mapping-review.json')
  assert mapping.validate(record,files,review)['status']=='mapped'
- operation=stage/('bundle-'+str(index));operation.mkdir(exist_ok=False)
  request=native.request();snapshot=request['coding']['snapshot'];status=native.cli('project','acceptance','status')
- keys=mapping.search(record,batch)[index];plan=mapping.plan(record,files,review,batch,keys)
+ mapping.check_discovery(record,load(home/('discovery-'+snapshot+'.json')))
+ frozen=home/('mapping-freeze-'+snapshot+'.json');identity={'mapping_sha256':mapping.digest(record),'review_sha256':mapping.digest(review)}
+ if not frozen.exists():save(frozen,identity)
+ if load(frozen)!=identity:raise ValueError('mapping changed on an unchanged source')
+ words=mapping.search(record,batch)
+ if index>=len(words):raise ValueError('no such word: route unavailable for this batch')
+ keys=words[index];plan=mapping.plan(record,files,review,batch,keys)
+ operation=stage/('bundle-'+str(index));operation.mkdir(exist_ok=False)
  bundle={'version':'supplemental-browser@v3','snapshot':snapshot,'requirements_revision':status['requirements_revision'],'author':'operator mapping /root','reviewer':review['reviewer'],'generator':'CheaperInference/gpt-6-luna game author','review':review['attribution']+' '+review['limitations'],'harness':{'supplemental/repeat-'+str(i)+'.json':json.dumps(plan['probe']) for i in range(2)},'probe_entry':'browser-harness.cjs','cases':[{'id':'repeat_'+str(i),'args':['supplemental/repeat-'+str(i)+'.json'],'expected_stdout':'browser-observation@v1'} for i in range(2)],'mapping':{k:{'cases':['repeat_0','repeat_1'],'rationale':'Exact frozen ordered controls and actual final DOM readouts; no inferred gameplay verdict','limits':review['limitations']} for k in ('crossing','growth')}}
  save(operation/'plan.json',plan);save(operation/'bundle.json',bundle)
  ident=native.json_cli(('project','verifier','supplemental-admit'),bundle);save(operation/'registration.json',{'id':ident})
