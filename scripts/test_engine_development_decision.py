@@ -108,6 +108,16 @@ class ChoiceSummary(unittest.TestCase):
 
 
 class RetentionDecision(unittest.TestCase):
+    def test_misplaced_candidate_field_diagnostic_stays_out_of_other_decisions(self):
+        def located(value):
+            with self.assertRaises(ValueError) as caught:
+                adapter([]).check_proposal_shape(value)
+            return diagnostic(caught.exception).get('valid_locations')
+        self.assertEqual(located({'edits': [], 'rationale': 'r'}), ['$.alternatives[0].edits', '$.alternatives[0].rationale'])
+        self.assertEqual(located({'alternatives': [{}], 'expectation': {}, 'invented': 1}), ['$.alternatives[0].expectation'])
+        for other in ('abstain', 'retain', 'inspect', 'deliberation'):
+            self.assertIsNone(located({other: 'x', 'rationale': 'r'}), other)
+
     def test_bare_retention_is_a_correctable_format_defect_when_development_is_offered(self):
         with self.assertRaises(ValueError) as caught:
             adapter(['provisional_preference']).check_proposal_shape({'retain': 'Keep it'})
