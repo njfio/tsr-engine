@@ -72,7 +72,7 @@ class Cycle:
             if a.get('local_source_profile')!='browser-scoped-source@v1' or a['input_tokens']!=capacity.INPUT_TOKENS:raise ValueError('unadmitted context allocation')
         if 'max_review_rejections' in a:
             fields.add('max_review_rejections')
-            if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['max_review_rejections']) is not int or not 0<=a['max_review_rejections']<=3:raise ValueError('unadmitted rejection recovery')
+            if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['max_review_rejections']) is not int or not 0<=a['max_review_rejections']<=(12 if a.get('unlimited_policy_sha256') else 3):raise ValueError('unadmitted rejection recovery')
         if 'completion_tokens' in a:
             fields.add('completion_tokens')
             if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['completion_tokens']) is not int or a['completion_tokens']!=32768:raise ValueError('unadmitted completion allocation')
