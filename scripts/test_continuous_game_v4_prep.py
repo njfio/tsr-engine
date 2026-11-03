@@ -130,5 +130,29 @@ class GeneratedParents(unittest.TestCase):
             self.wrapper().verify(self.request(), after, [{'id': 'a', 'requirement': 'crossing'}])
 
 
+class NativeCommandTimeout(unittest.TestCase):
+    def test_controller_allows_a_debug_build_with_many_observations(self):
+        # Regression: `project cycle request` took about 150s on the debug binary with 21 observations.
+        spec = importlib.util.spec_from_file_location('envelope_timeout', ROOT / 'scripts/engine-b91-project-envelope.py')
+        envelope = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(envelope)
+        seen = {}
+
+        class Done:
+            returncode = 0
+            stdout = b'{}'
+
+        def run(*_, **kw):
+            seen.update(kw)
+            return Done()
+        original = envelope.subprocess.run
+        envelope.subprocess.run = run
+        try:
+            envelope.Controller(ROOT).cli('project', 'request')
+        finally:
+            envelope.subprocess.run = original
+        self.assertEqual(seen['timeout'], 600)
+
+
 if __name__ == '__main__':
     unittest.main()

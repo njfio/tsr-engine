@@ -103,7 +103,7 @@ class Controller:
     def __init__(self, directory): self.directory = Path(directory).resolve(strict=True)
     def cli(self, *args):
         result = subprocess.run([str(ROOT/'target/debug/tsr'), 'engine', '--directory', str(self.directory), *args],
-                                capture_output=True, timeout=120)
+                                capture_output=True, timeout=600)
         if result.returncode or len(result.stdout) > 1048576: raise ValueError('controller refused; inspect local diagnostics separately')
         return strict(result.stdout)
     def request(self): return self.cli('project', 'request')
