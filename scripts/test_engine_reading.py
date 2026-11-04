@@ -97,6 +97,9 @@ class Prompts(unittest.TestCase):
         prompt = reading.READING_SYSTEM
         self.assertIn('Nothing here has to be felt', prompt)
         self.assertIn('make it null rather than inventing something', prompt)
+        # A stated want needs its return and falsifier (rule 4), so null is not valid in every field.
+        self.assertNotIn('any field', prompt)
+        self.assertIn('Any of want, sense, belief and expect can be null, including all four', prompt)
         for word in ('must', 'required', 'you have to state'):
             self.assertNotIn(word, prompt.lower())
 

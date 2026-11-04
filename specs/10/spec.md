@@ -31,7 +31,7 @@ Under the opt-in, each cycle starts with one reading, written before any work is
 
 Rules:
 
-1. **Nothing is required to be felt.** Any direction can be null, and a blank reading is valid and needs no reason. The prompt offers no forms and asks for no decline. After the first live run recorded four readings with no want, the operator approved asking for the want directly and first (2026-11-04). Null stays valid in every field, and the prompt asks for no reason.
+1. **Nothing is required to be felt.** Any direction can be null, and a blank reading is valid and needs no reason. The prompt offers no forms and asks for no decline. After the first live run recorded four readings with no want, the operator approved asking for the want directly and first (2026-11-04). The prompt now also says a want can be small, tentative or mistaken, that stating one commits nothing, and to answer without restating the brief or listing the work ahead. These lines lower the threshold for a want and discourage one kind of want, and nothing enforces them. Any direction can still be null, and the prompt asks for no reason.
 2. **A want crosses when it is recorded.** There is no reviewer. It stays recorded as generated. It lives in its own reading view, not among ledger preferences, because open preferences feed refinement parents and acceptance aims (see `specs/10/plan.md`).
 3. **One current want per task.** A new reading's want replaces the last one in the active view, and every reading stays in the log. A want continues only if it is stated again, so persistence is visible without extra machinery.
 4. **A want goes out with an expected return and a falsifier.** This is the only condition on wanting, and it is mechanical. Nothing reads whether either is good.
@@ -54,7 +54,7 @@ Out:
 - Any detector of unassigned wanting, or any claim about it (ch. 18).
 - Any engine judgement of a reading or return.
 - Emotional evidence beyond the free text a reading can hold.
-- A paid test as part of this implementation. The operator approved one separately on 2026-11-04 (`experiments/reading-live-v1`).
+- A paid test as part of this implementation. The operator approved two separately on 2026-11-04 (`experiments/reading-live-v1`): r2, then a rerun with the reworded prompt.
 
 ## Acceptance criteria
 

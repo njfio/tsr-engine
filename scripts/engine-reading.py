@@ -21,7 +21,7 @@ READING_SYSTEM = (
     'Start with want: what do you want here? Answer in your own words from where you stand now, not by restating the brief or listing the work ahead. '
     'A want can be small, tentative or mistaken. Stating one commits nothing, and the next reading can change it. '
     'Then sense (what you sense is current), belief (what you believe now), and expect (what you expect, given what has happened). '
-    'Nothing here has to be felt: if a field is not true for you now, make it null rather than inventing something. Null is valid in any field, including all of them. '
+    'Nothing here has to be felt: if a field is not true for you now, make it null rather than inventing something. Any of want, sense, belief and expect can be null, including all four. '
     'If you state a want, also give expected_return {from, what} (what should come back, and from whom) and falsifier '
     '(what would show this reading was wrong). Otherwise both are null. '
     'The reading is recorded as generated. It approves, executes and accepts nothing, and nothing judges it. '
