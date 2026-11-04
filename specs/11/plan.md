@@ -14,7 +14,7 @@ Add one opt-in profile. All changes sit in the Python cycle and adapter; the nat
 
 - Admission: `abilities_profile`, `spend_cap_microusd`.
 - Proposal responses: `{need:{what,because}}`, `{play:{actions,checks}}`.
-- Terminals: `need_outside_scope`, `spend_cap`.
+- Terminals: `need_to_operator`, `spend_cap`.
 - Returns use the existing `project check-return`, `from: rules`, so no wire or schema change. Text is bounded to `READING_TEXT_MAX`; the full report's digest is the evidence and the report stays in the journal.
 
 ## Risks

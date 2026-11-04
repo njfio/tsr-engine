@@ -144,6 +144,12 @@ class Prompts(unittest.TestCase):
         with self.assertRaises(ValueError):
             abilities.proposal_system('text without the sentences', [])
 
+    def test_prompt_is_honest_about_how_a_need_is_handled(self):
+        text = abilities.proposal_system(reading.PROPOSAL_SYSTEM, [])
+        self.assertNotIn('beyond scope', text)
+        self.assertIn('first need', text)
+        self.assertIn('spending cap', text)
+
     def test_response_envelope_names_what_is_offered(self):
         self.assertIn('{need:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
         self.assertNotIn('{play:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
@@ -355,7 +361,7 @@ class Cycle(BrowserAdapter):
         second = {'need': {'what': 'A human playtester', 'because': 'Only a person can say if it is fun'}}
         seen, ran = self.script(a, [NEED, second])
         result = self.cycle(a, ca).run()
-        self.assertEqual(result['status'], 'need_outside_scope')
+        self.assertEqual(result['status'], 'need_to_operator')
         self.assertEqual(result['need'], second['need'])
         self.assertTrue(result['desires_remain_open'])
         self.assertFalse(result['acceptance_recorded'])
@@ -395,13 +401,64 @@ class Cycle(BrowserAdapter):
         self.assertEqual(result['status'], 'spend_cap')
         self.assertEqual(len(seen), 2)
 
-    def test_spec_c09_cap_stops_a_restart_too(self):
-        a, ca = self.configure(cap=150)
-        seen, _ = self.script(a, [RETAIN])
-        a.spend_reached = lambda: False
-        first = self.cycle(a, ca).run()
+    def test_spec_c09_restart_at_the_cap_ends_with_spend_cap(self):
+        a, ca = self.configure()
+        bad = {'alternatives': [{'edits': 'wrong scalar', 'rationale': 'Authored invalid shape'}]}
+        seen, _ = self.script(a, [bad])
+        dispatch = a.call
+
+        class Killed(BaseException):
+            pass
+
+        def call(kind, body):
+            if len(seen) == 2:
+                raise Killed()  # Between calls: the first proposal is settled, the correction not sent.
+            return dispatch(kind, body)
+        a.call = call
+        with self.assertRaises(Killed):
+            self.cycle(a, ca).run()
         fresh = self.adapter()
-        self.assertEqual(self.cycle(fresh, ca).run(), first)
+        calls = []
+        fresh.injected_transport = lambda body, timeout: calls.append(1)
+        fresh.spend_reached = lambda: True
+        launcher_cycle = self.cycle(fresh, ca)
+        launcher_cycle.recover_pending()
+        result = launcher_cycle.run()
+        self.assertEqual(result['status'], 'spend_cap')
+        self.assertEqual(calls, [])
+        self.assertEqual(self.cycle(fresh, ca).run(), result)
+
+    @unittest.skipUnless(os.getenv('TSR_BROWSER_SEALED_AUTHORED') == '1', 'sealed authored worker opt-in')
+    def test_spec_c09_cap_during_reflection_keeps_the_check_return(self):
+        self.playable = True
+        a, ca = self.configure()
+        original = m.load
+        self.addCleanup(setattr, m, 'load', original)
+
+        def load(name, file):
+            module = original(name, file)
+            if name != 'browser_pursuit_reflection':
+                return module
+            stop = RuntimeError('cap')
+            stop.known_stage_stop = {'version': 'known-stage-stop@v1', 'status': 'spend_cap', 'reason': 'Authored cap'}
+
+            def reflect(_):
+                raise stop
+            module.reflect = reflect
+            return module
+        m.load = load
+        result = self.cycle(a, ca).run()
+        self.assertEqual(result['status'], 'spend_cap')
+        self.assertIn('Controller checks ran', json.dumps(self.returns()))
+
+    def test_spec_c14_reviewer_sees_play_results_and_never_the_want(self):
+        a, ca = self.configure()
+        seen, _ = self.script(a, [NEED, PLAY, EDIT])
+        self.cycle(a, ca).run()
+        review = json.dumps([b for k, b in seen if k == 'review'][0]['messages'])
+        self.assertIn('blocked inline style', review)
+        self.assertNotIn(WANT['want'], review)
+        self.assertNotIn(NEED['need']['what'], review)
 
     def test_spec_c09_spend_cap_stops_before_a_review(self):
         a, ca = self.configure()
