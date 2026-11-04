@@ -101,3 +101,7 @@ declined them.
   these has been run yet.
 - **Bounds stay finite.** 64 actions, at most eight readouts, waits of at most
   1000 ms each, and an unchanged per-case deadline (at most 180 s).
+
+## Later change
+
+Spec #10 adds an opt-in that replaces this menu with a single reading. See `docs/architecture/adr-001-single-reading.md`. Runs that don't opt in keep the behavior described here.

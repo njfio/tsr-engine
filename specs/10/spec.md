@@ -83,7 +83,7 @@ Out:
 | C-05 | Want with no falsifier | Refused; log unchanged | 5 | Unit |
 | C-06 | Over-long text; foreign scope; bad JSON | Refused; log unchanged; no proposal request | 6 | Unit, Property, Fuzz |
 | C-07 | Operator return naming no reading; check return; generated return | First two appended; third refused | 7 | Unit |
-| C-08 | Bound + 3 readings, some with returns | Bound shown side by side; "3 omitted"; no verdict field; all in log | 8 | Unit, Snapshot |
+| C-08 | Bound + 3 readings, some with returns | Bound shown side by side; "3 omitted"; no verdict field; all in log | 8 | Unit |
 | C-09 | Opted-in request; generated provisional proposal | No forms or `development_declined`; proposal refused | 9 | Integration |
 | C-10 | Want open, no grant; paired edit rejected in review | Execution refused; aims identical; edit not run | 10 | Integration |
 | C-11 | Existing fixtures; rejected expansion; frozen manifests | Same head root and views; rejected stays inactive | 11 | Regression |

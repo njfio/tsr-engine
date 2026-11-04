@@ -150,6 +150,8 @@ limitations) says so; do not cite main's behaviour as permission.
    from success or treat scoped artifact success as human fulfillment.
 8. **Admission by source.** Operator statements, including rejection reasons, enter the ledger
    directly; generated statements wait for review. The failed strategy is never a positive example.
+   Amended 2026-11-04: under the `reading@v1` opt-in, a reading's want crosses with no review, in
+   its own view outside the preference ledger, and grants nothing (`docs/architecture/adr-001-single-reading.md`).
 9. **Unchosen candidates are not negatives.** They stay in the log as possibilities not realized.
 10. **Terminology.** TSR terms (Desire, Intuition, Belief, Expectation, Culmination, Attraction,
     Tune, Focus, Vortex, Current …) appear only where `docs/PRD.md` §B2 maps them, and never as a

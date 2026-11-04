@@ -28,13 +28,9 @@ Reading response:
 
 - Wants stay out of `Preference`. `is_open()` feeds refinement parents (`engine/adaptive.rs`), and `Open | Fulfilled` entries feed acceptance aims (`acceptance/cycle.rs`). A preference with no review could reach both. Its own view keeps authority untouched and old folds byte-identical.
 
-## To confirm first
-
-- That nothing in the opted-in cycle's continuation or closure requires an admitted development, including `project_desire_admit_unlocked` and `project_relational_admit_unlocked` callers.
-- Whether the operator return can reuse the `feedback_events` admission or needs its own command.
-- Which controller-recorded checks produce returns. Start with test and browser check results.
-
-If any of these changes the design, this plan and the spec are updated before code.
+- An opted-in cycle needs no admitted development to continue or close. It reached `proposal_retention` in the authored tests with none. The advisory reconsideration branch is refused, because it would offer a route opted-in runs don't have.
+- The operator return has its own command, `project return`. `feedback_events` is fixed at admission, so it can't take a return that arrives later.
+- Controller-recorded returns come from the receipt, snapshot and test result in the resume result. Not exercised with a real sealed browser run here, because Docker isn't available; covered at the function level only.
 
 ## Risks
 
