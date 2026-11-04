@@ -85,6 +85,21 @@ class Prompts(unittest.TestCase):
             self.assertNotIn(word, reading.READING_SYSTEM.lower())
         self.assertIn('null', reading.READING_SYSTEM)
 
+    def test_reading_prompt_asks_for_the_want_first_and_directly(self):
+        # r2's four readings all left want null under the old wording (docs/reading-live-v1-result.md).
+        prompt = reading.READING_SYSTEM
+        self.assertIn('what do you want here?', prompt)
+        self.assertLess(prompt.index('what do you want here?'), prompt.index('sense ('))
+        self.assertNotIn('if anything', prompt)
+        self.assertNotIn('needs no reason', prompt)
+
+    def test_spec_rule1_reading_prompt_still_requires_no_feeling(self):
+        prompt = reading.READING_SYSTEM
+        self.assertIn('Nothing here has to be felt', prompt)
+        self.assertIn('make it null rather than inventing something', prompt)
+        for word in ('must', 'required', 'you have to state'):
+            self.assertNotIn(word, prompt.lower())
+
     def test_spec_c09_proposal_context_has_no_development_forms(self):
         stripped = reading.strip_development(self.wire())
         self.assertEqual(set(stripped['choice_summary']['forms']), {'abstain', 'retain', 'edit', 'inspect'})
