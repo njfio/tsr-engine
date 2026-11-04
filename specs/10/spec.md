@@ -31,7 +31,7 @@ Under the opt-in, each cycle starts with one reading, written before any work is
 
 Rules:
 
-1. **Nothing is required to be felt.** Any direction can be null, and a blank reading is valid and needs no reason. The prompt offers no forms and asks for no decline.
+1. **Nothing is required to be felt.** Any direction can be null, and a blank reading is valid and needs no reason. The prompt offers no forms and asks for no decline. After the first live run recorded four readings with no want, the operator approved asking for the want directly and first (2026-11-04). Null stays valid in every field, and the prompt asks for no reason.
 2. **A want crosses when it is recorded.** There is no reviewer. It stays recorded as generated. It lives in its own reading view, not among ledger preferences, because open preferences feed refinement parents and acceptance aims (see `specs/10/plan.md`).
 3. **One current want per task.** A new reading's want replaces the last one in the active view, and every reading stays in the log. A want continues only if it is stated again, so persistence is visible without extra machinery.
 4. **A want goes out with an expected return and a falsifier.** This is the only condition on wanting, and it is mechanical. Nothing reads whether either is good.
@@ -102,7 +102,7 @@ Reported per run, as counts only, with no claim about what they mean:
 ## Risks to judge when accepting
 
 - **No semantic check remains on wanting.** A want can be banal, or can claim the user wants something. Only its provenance is guaranteed. Returns may correct it later, but nothing forces that.
-- **A reading is still assigned.** Asking for it is a prompt, so this removes suggestion, not assignment. It doesn't produce or detect wanting nobody assigned.
+- **A reading is still assigned.** Asking for it is a prompt, so this removes suggestion, not assignment. It doesn't produce or detect wanting nobody assigned. The direct question adds suggestion back: a want written in reply to it shows the model answered, not that it wanted anything unprompted.
 - **Form-filling.** The six fields can become a new menu. A model can fill them in by rote, and a blank reading is the only way out it has. Word-level sameness across cycles would show this in the counts, but nothing prevents it.
 - **Self-influence.** Readings enter later prompts, so the model shapes its own next proposals. Authority doesn't read them, but artifact proposals can be influenced.
 - **Cost.** One more model call per cycle. It's the price of writing the reading before the proposal contract is in view. The reviewer call for development goes away.

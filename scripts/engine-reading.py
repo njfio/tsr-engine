@@ -18,9 +18,10 @@ _s.loader.exec_module(_output)
 READING_SYSTEM = (
     'Before any work is proposed, write one reading of where this public browser project stands for you now. '
     'Use the supplied brief, source, returns and earlier readings. '
-    'There are four free-text fields: want (what you want here, if anything), sense (what you sense is current), '
-    'belief (what you believe now), and expect (what you expect, given what has happened). '
-    'Any of them may be null, and all of them may be null: a blank reading is valid and needs no reason. '
+    'Start with want: what do you want here? Answer in your own words from where you stand now, not by restating the brief or listing the work ahead. '
+    'A want can be small, tentative or mistaken. Stating one commits nothing, and the next reading can change it. '
+    'Then sense (what you sense is current), belief (what you believe now), and expect (what you expect, given what has happened). '
+    'Nothing here has to be felt: if a field is not true for you now, make it null rather than inventing something. Null is valid in any field, including all of them. '
     'If you state a want, also give expected_return {from, what} (what should come back, and from whom) and falsifier '
     '(what would show this reading was wrong). Otherwise both are null. '
     'The reading is recorded as generated. It approves, executes and accepts nothing, and nothing judges it. '
