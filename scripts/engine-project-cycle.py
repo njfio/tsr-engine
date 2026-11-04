@@ -189,7 +189,12 @@ class Cycle:
             spec=self.read()[2].get('callback_input_'+intent['name'])
             if spec is not None:
                 self.native('provider_recovery_ready',None)
-                value=self.invoke_model_stage(spec)
+                try:value=self.invoke_model_stage(spec)
+                except Exception as error:
+                    # The cap stops recovery as it stops anything else: nothing was sent, so the stage closes as a stop.
+                    stop=getattr(error,'known_stage_stop',None)
+                    if not self.valid_stage_stop(stop) or stop['status']!='spend_cap':raise
+                    value={'known_stage_stop':{**stop,'stage':intent['name']}}
                 stage_receipts.Receipts(self.root,self.admission).save(rows,intent,value)
                 receipt={'value':value}
         if receipt is None:raise d.Blocked('uncertain effect; successful stage receipt missing; no retry')
@@ -574,7 +579,7 @@ class Cycle:
             response=proposed['response']
             if self.abilities is not None and set(response)=={'need'}:
                 outcome=self.op('ability_need_'+index,lambda:self.abilities.ability_need(response['need']))
-                if outcome['unmet']:return self.terminal('need_outside_scope',need=outcome['need'],desires_remain_open=True,acceptance_recorded=False)
+                if outcome['unmet']:return self.terminal('need_to_operator',need=outcome['need'],desires_remain_open=True,acceptance_recorded=False)
                 continue
             if self.abilities is not None and set(response)=={'play'}:
                 self.op('ability_play_'+index,lambda:self.abilities.ability_play(response['play']))

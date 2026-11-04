@@ -218,6 +218,11 @@ class Adapter(recovery.Recovery,base.Adapter):
         context['own_decisions']=[{'response':v['response'],'source':self.read()[2].get('bound_output_'+k[len('generated_'):],{}).get('source')} for k,v in self.read()[2].items() if k.startswith('generated_') and not reading_policy.is_reading(v['response'])]
         context['independent_assessments']=[{**v,'applicability':'current_source' if v['snapshot']==view['source_snapshot'] else 'historical_source_only'} for k,v in self.read()[2].items() if k.startswith('independent_assessment_')]
         context['evidence_contract']=base.review_contract.evidence_contract()
+        if self.abilities_opted():
+            # A need is wanting's side of the line, so the reviewer doesn't see it. A play's result is evidence, so it does.
+            context['own_decisions']=[x for x in context['own_decisions'] if set(x['response'])!={'need'}]
+            plays=[v for k,v in self.read()[2].items() if k.startswith('play_evidence_')]
+            if plays:context['play_returns']=abilities_policy.review_evidence(plays)
         return request,context
     def record_execution_source(self,result):
         request=self.controller.request();coding=request['coding']
@@ -399,8 +404,13 @@ class Adapter(recovery.Recovery,base.Adapter):
             result=super().native(kind,value)
             self.record_execution_source(result)
             assessment.collect(self,self.controller.request())
-            load('browser_pursuit_reflection','engine-pursuit-reflection.py').reflect(self)
-            load('browser_criterion_return','engine-criterion-return.py').reflect(self)
+            try:
+                load('browser_pursuit_reflection','engine-pursuit-reflection.py').reflect(self)
+                load('browser_criterion_return','engine-criterion-return.py').reflect(self)
+            except RuntimeError as stop:
+                # The change did run, so what the check returned is kept even when the cap stops the run here.
+                if getattr(stop,'known_stage_stop',{}).get('status')=='spend_cap':self.record_check_return(result)
+                raise
             if self.reading_opted():self.record_check_return(result)
             return result
         if kind!='reject_proposal':return super().native(kind,value)
@@ -470,6 +480,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         run=self.op(name,lambda:self.ledger.run_execution(self.trial,name,e.sha(self.admission),worker))
         returned=abilities_policy.play_return(run,play,coding['snapshot'],self.latest_reading())
         self.op('play_return_'+e.sha(returned),lambda:self.controller.json_cli(('project','check-return'),returned))
+        self.op('play_evidence_'+str(count),lambda:{'text':returned['text'],'evidence':returned['evidence']})
         return {'snapshot':coding['snapshot'],'exit':run['exit'],'evidence':returned['evidence']}
     def reading(self,view):
         """One reading before any proposal. It is recorded with no review and grants nothing."""
@@ -493,6 +504,7 @@ class Adapter(recovery.Recovery,base.Adapter):
                 revealed=self.abilities_revealed()
                 stripped['choice_summary']['forms'].update(abilities_policy.forms(revealed))
                 stripped['response_contracts'].update(abilities_policy.contracts(revealed))
+                stripped.pop('play_returns',None)  # It already sits beside the readings.
                 if 'response_envelope' in stripped:stripped['response_envelope']=abilities_policy.envelope(stripped['response_envelope'],revealed)
                 return self.body(abilities_policy.proposal_system(reading_policy.PROPOSAL_SYSTEM,revealed),stripped)
             return self.body(reading_policy.PROPOSAL_SYSTEM,stripped)
