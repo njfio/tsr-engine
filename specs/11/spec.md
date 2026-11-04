@@ -1,6 +1,6 @@
 # Spec #11: A want for a missing ability gets acted on
 
-Status: Reviewed (P1, multi-module: flagged for human review in the PR)
+Status: Reviewed (P1, multi-module: flagged for human review in the PR). Built and tested offline; no live run yet.
 Milestone: Wanting crossing. Follows #10.
 
 ## Problem
