@@ -1,6 +1,6 @@
 # Spec #10: A single reading each cycle
 
-Status: Draft. Needs author acceptance (P0: amends invariant 8 and changes the ledger's wire format).
+Status: Accepted by the author on 2026-11-04 (P0: amends invariant 8 and changes the ledger's wire format).
 
 ## Problem
 
@@ -32,7 +32,7 @@ Under the opt-in, each cycle starts with one reading, written before any work is
 Rules:
 
 1. **Nothing is required to be felt.** Any direction can be null, and a blank reading is valid and needs no reason. The prompt offers no forms and asks for no decline.
-2. **A want crosses when it is recorded.** There is no reviewer. It stays recorded as generated.
+2. **A want crosses when it is recorded.** There is no reviewer. It stays recorded as generated. It lives in its own reading view, not among ledger preferences, because open preferences feed refinement parents and acceptance aims (see `specs/10/plan.md`).
 3. **One current want per task.** A new reading's want replaces the last one in the active view, and every reading stays in the log. A want continues only if it is stated again, so persistence is visible without extra machinery.
 4. **A want goes out with an expected return and a falsifier.** This is the only condition on wanting, and it is mechanical. Nothing reads whether either is good.
 5. **Returns meet the reading, with no verdict.** The engine puts expected and actual side by side. It doesn't decide whether a reading was right. What the next reading does with a return is the signal.
@@ -59,8 +59,8 @@ Out:
 ## Acceptance criteria
 
 - AC-1: Given an opted-in cycle, when it starts, then a reading request with no action contract goes first, and no proposal request is sent until a reading is recorded.
-- AC-2: Given a reading with a want, when it is recorded, then the want is open in the active view with no reviewer call and no Council event, its origin is `Generator`, and its provenance names the reading.
-- AC-3: Given a later reading in the same task, when it is recorded, then only its want is open and earlier wants stay in the log. If the text is identical after normalization, the same preference stays open.
+- AC-2: Given a reading with a want, when it is recorded, then the want is current in the reading view with no reviewer call and no Council event, its text is recorded as generated, and the view names the reading it came from. No ledger preference is created.
+- AC-3: Given a later reading in the same task, when it is recorded, then only its want is current and earlier wants stay in the log. If the text is identical after normalization, the view counts it as restated.
 - AC-4: Given a blank reading, when it is recorded, then it is valid, needs no reason, and leaves no want open.
 - AC-5: Given a want without an expected return or falsifier, when it is proposed, then it is refused and nothing is appended.
 - AC-6: Given an unbounded, malformed or foreign-scope reading, when it is proposed, then it is refused, nothing is appended, and no proposal follows. Regeneration stays within the existing allowance, then the cycle stops.
@@ -77,8 +77,8 @@ Out:
 | Case | Input | Expected | AC | Tier |
 |---|---|---|---|---|
 | C-01 | Opted-in cycle start | First request has no action contract; proposal blocked until reading recorded | 1 | Conformance |
-| C-02 | Reading with a want | Open; 0 reviewer calls; 0 Council events; origin `Generator`; reading provenance | 2 | Conformance |
-| C-03 | Wants A, B, then B again | Only B open; A in log; one preference for B | 3 | Unit, Property |
+| C-02 | Reading with a want | Current; 0 reviewer calls; 0 Council events; generated provenance; names the reading; preference view unchanged | 2 | Conformance |
+| C-03 | Wants A, B, then B again | Only B current; A in log; one restatement counted | 3 | Unit, Property |
 | C-04 | All directions null | Recorded; no want open; no reason needed | 4 | Unit |
 | C-05 | Want with no falsifier | Refused; log unchanged | 5 | Unit |
 | C-06 | Over-long text; foreign scope; bad JSON | Refused; log unchanged; no proposal request | 6 | Unit, Property, Fuzz |
