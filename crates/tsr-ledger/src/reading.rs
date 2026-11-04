@@ -192,7 +192,14 @@ impl Ledger<'_> {
                 ));
             }
         }
-        let event = Event::new(*task, vec![], from, EventKind::Returned { returned }, at);
+        // Chained to the task's latest event: an operator's return arrives between cycles.
+        let parents = self
+            .store()
+            .by_task(task)?
+            .last()
+            .map(|(_, e)| vec![e.id])
+            .unwrap_or_default();
+        let event = Event::new(*task, parents, from, EventKind::Returned { returned }, at);
         self.store().append(&event)?;
         Ok(event.id)
     }

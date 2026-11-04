@@ -135,6 +135,22 @@ mod tests {
     }
 
     #[test]
+    fn spec_c07_operator_return_leaves_the_project_readable() -> Result<()> {
+        let (_d, e) = setup()?;
+        e.project_return_record(
+            Source::Operator,
+            ReadingReturn {
+                reading: None,
+                text: "waaaay too easy".into(),
+                evidence: None,
+            },
+        )?;
+        e.project_configuration()?;
+        e.project_cycle_request()?;
+        Ok(())
+    }
+
+    #[test]
     fn spec_c07_generated_return_is_refused() -> Result<()> {
         let (_d, e) = setup()?;
         let bad = ReadingReturn {

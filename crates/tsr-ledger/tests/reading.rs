@@ -399,6 +399,18 @@ fn spec_c12_forged_events_admit_nothing() {
 }
 
 #[test]
+fn return_chains_to_the_tasks_latest_event() {
+    let (_d, s) = store();
+    let id = record(&s, wanting("want A"));
+    let returned = Ledger::new(&s)
+        .record_return(&task(), Source::Operator, operator_return(None, "no"), AT)
+        .unwrap();
+    let events = s.all().unwrap();
+    let event = events.iter().find(|(_, e)| e.id == returned).unwrap();
+    assert_eq!(event.1.parents, vec![id]);
+}
+
+#[test]
 fn view_ignores_other_tasks() {
     let (_d, s) = store();
     let other = TaskId(Hash::of(&[b"t-other"]));

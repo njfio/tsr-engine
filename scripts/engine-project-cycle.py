@@ -37,7 +37,8 @@ class Cycle:
     row=staticmethod(d.Driver.row)
     read=d.Driver.read
     append=d.Driver.append
-    def __init__(self,root,admission,native,proposal,review,*,hook=None):
+    def __init__(self,root,admission,native,proposal,review,*,hook=None,reading=None):
+        self.reading=reading
         self.root=Path(root).absolute();self.admission=admission;self.fixture=admission.get('advisory_profile')=='local-fixture-only@v1';self.continuous=admission.get('version') in ('local-project-cycle@v3','local-project-cycle@v4','local-project-cycle@v5');self.objective=admission.get('version')=='local-project-cycle@v5';self.information=admission.get('version')=='local-project-cycle@v4'
         # Local introspection is not the provider export. V4 has seven bounded decisions.
         self.local_context_limit=8388608 if admission.get('local_source_profile')=='browser-scoped-source@v1' else 131072 if self.information or self.objective else 32768
@@ -499,6 +500,7 @@ class Cycle:
                     continue
             if branch in ('stop','idle','blocked','reconcile','review_required'):
                 return self.terminal(branch,native_reason=current.get('reason'))
+            if branch=='reconsider' and self.reading is not None:return self.terminal('reading_reconsideration_not_offered',desires_remain_open=True,acceptance_recorded=False)
             if branch=='reconsider':
                 if not self.continuous and self.admission.get('advisory_profile')!='local-fixture-only@v1':return self.terminal('review_required',native_reason='advisory_reconsideration_not_admitted')
                 result=self.reconsider(current)
@@ -559,6 +561,10 @@ class Cycle:
             if branch!='propose':raise ValueError('unsupported native branch')
             completed=self.decision_count(done);index=str(completed)
             if feedback_policy.reached(completed,self.admission['max_decisions']):return self.terminal('decision_budget')
+            # The reading comes first and changes the state root, so the request is captured after it.
+            if self.reading is not None and 'reading_'+index not in done:
+                self.op('reading_'+index,lambda:self.reading(current))
+                continue
             captured=self.op('request_'+index,lambda:current)
             self.same_source(captured,current)
             if len(e.canonical(captured))>self.local_context_limit:raise d.Blocked('proposal context bound')
