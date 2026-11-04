@@ -4,13 +4,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 s=importlib.util.spec_from_file_location('game_pair_adapter',ROOT/'scripts/engine-browser-adapter.py');a=importlib.util.module_from_spec(s);s.loader.exec_module(a)
 LABEL=os.environ.get('TSR_LIVE_LABEL','r1');CAP=int(os.environ['TSR_SPEND_CAP_MICROUSD']);PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
-FILES=['experiments/want-loop-v1/'+n for n in ('run.py','prepare.py')]+['experiments/continuous-game-v4/protocol.json','scripts/engine-abilities.py','scripts/engine-reading.py','scripts/engine-browser-harness.cjs']
+FILES=['experiments/want-loop-v1/'+n for n in ('run.py','prepare.py','report.py')]+['experiments/continuous-game-v4/protocol.json','scripts/engine-abilities.py','scripts/engine-reading.py','scripts/engine-browser-harness.cjs']
 FACT_KEYS=('operational_roots','criteria','minimum_obligations','unknown_rule','shared_consequences','excluded_claims')
-def check_pins():
- # Against what was prepared, never against the current file.
- base=ROOT/('target/want-loop-'+LABEL);prepared=json.loads((base/'prepared-test.json').read_text());manifest=json.loads((base/'tsr/launch-manifest.json').read_text())
- assert a.d.file_sha(PROTOCOL)==prepared['packet_sha256'],'protocol changed since preparation'
- for path,expected in manifest['files'].items():assert a.d.file_sha(ROOT/path)==expected,path
 def prepare(auth_path):
  AUTH=json.loads(Path(auth_path).read_text());assert set(AUTH)=={'approved','at','text','scope'} and type(AUTH['approved']) is bool
  out=ROOT/('target/want-loop-'+LABEL);out.mkdir(exist_ok=False);save=lambda path,value:path.write_text(json.dumps(value,indent=2)+'\n')
@@ -18,6 +13,7 @@ def prepare(auth_path):
  protocol=json.loads(PROTOCOL.read_text());assert a.d.file_sha(ROOT/protocol['derived_from']['path'])==protocol['derived_from']['sha256']
  # The protocol's feedback and observation_policy describe operator-run batches. No operator runs anything here, so the brief doesn't claim one does.
  facts={k:copy.deepcopy(protocol[k]) for k in FACT_KEYS}
+ facts['excluded_claims']=[x.replace('from one pair','from one run') for x in facts['excluded_claims']]
  brief=protocol['user_input']['text']+'\n\nExperiment-authored operational context, not additional player preferences:\n'+json.dumps(facts,ensure_ascii=False,sort_keys=True)
  wants={k:v+'\nArtifact criterion: '+protocol['criteria'][k] for k,v in protocol['operational_roots'].items() if k!='attribution'}
  editable={'index.html':'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body><main></main><script src="app.js"></script></body></html>\n','app.js':'// Empty project scaffold; no game implementation.\n','style.css':'/* Empty project scaffold. */\n'}
@@ -51,7 +47,7 @@ def prepare(auth_path):
   ad=a.admission(arm/'adapter',origin,c.cli('project','config'),campaign,None,max_decisions=None,max_executions=None,correction_allowance=20,feedback_cycle=policy,transient_recovery={'version':'exact-failed-zero-recovery@v1','max_retries':1,'backoff_seconds':60},process_profile='ordinary-memory@v1' if ordinary else None,unlimited_policy_sha256=unlimited,max_review_rejections=12,correction_replay=True,reading_profile=a.reading_policy.PROFILE,abilities_profile=a.abilities_policy.PROFILE,spend_cap_microusd=CAP)
   ca={'version':'local-project-cycle@v3','journal':str(arm/'cycle'),'scope':public['scope'],'max_decisions':None,'max_executions':None,'local_source_profile':'browser-scoped-source@v1','stage_receipts':'durable-stage-receipts@v1','review_feedback':'attributed-review-feedback@v1','completion_tokens':32768,'input_tokens':a.base.capacity.INPUT_TOKENS,'max_review_rejections':12,'feedback_cycle':policy,'expires_at':None,'unlimited_policy_sha256':unlimited,'implementation_sha256':a.d.file_sha(Path(a.loop.__file__))}
   typ=a.load('game_plain','engine-browser-ordinary.py').Adapter if ordinary else a.Adapter;adapter=typ(ad['directory'],ad,c,ledger)
-  authority={'version':'continuous-game-test-scope@v1','authorization':AUTH,'packet_sha256':PACKET,'common_information_sha256':a.d.file_sha(out/'common-information.json'),'arm':label,'stage':'one launch; runs until it stops by itself','spend_cap_microusd':CAP,'baseline':status,'paid_dispatch':False,'later_stages':None}
+  authority={'version':'want-loop-scope@v1','authorization':AUTH,'packet_sha256':PACKET,'common_information_sha256':a.d.file_sha(out/'common-information.json'),'arm':label,'stage':'one launch; runs until it stops by itself','spend_cap_microusd':CAP,'baseline':status,'paid_dispatch_at_preparation':False,'later_stages':None}
   grant=adapter.scope_grant(a.e.sha(authority),'independent-agent:want-loop-v1 binding review; required before dispatch',None)
   view=c.cli('project','cycle','request');req,context=adapter.project(view);wire=adapter.wire_context(req,context);body=adapter.proposal_body(view,wire)
   assert a.base.capacity.prompt_upper(body)<=a.base.capacity.INPUT_TOKENS

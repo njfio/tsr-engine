@@ -132,7 +132,7 @@ class Cycle:
         # Internal callback protocol only. Model dictionaries are never exceptions.
         return (isinstance(value,dict) and set(value)=={'version','status','reason'}
                 and value['version']=='known-stage-stop@v1'
-                and value['status'] in ('capacity_stop','technical_stop')
+                and value['status'] in ('capacity_stop','technical_stop','spend_cap')
                 and isinstance(value['reason'],str) and bool(value['reason'].strip())
                 and len(value['reason'].encode())<=2048)
     def close_stage_stop(self,record):

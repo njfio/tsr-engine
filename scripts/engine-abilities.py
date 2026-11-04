@@ -62,6 +62,28 @@ def system_text(revealed):
     return NEED_SYSTEM + (PLAY_SYSTEM if 'play' in revealed else '')
 
 
+# The reading prompt's stopping sentences, as they are in this loop. Each must still be there to replace.
+_RETENTION = ('Retention ends this checkpoint, not future separately admitted input. ', 'Neither retention nor anything else is acceptance. ')
+_ABSTENTION = ('this stops the scheduled session. Neither creates user acceptance.', 'this ends the run. Neither creates user acceptance.')
+
+
+def proposal_system(base, revealed):
+    for old, new in (_RETENTION, _ABSTENTION):
+        if base.count(old) != 1:
+            raise ValueError('proposal prompt changed: ' + old)
+        base = base.replace(old, new)
+    return base + ' ' + system_text(revealed)
+
+
+def envelope(base, revealed):
+    old = '{abstain:reason}, or {inspect:{path,offset}}.'
+    if base['instruction'].count(old) != 1:
+        raise ValueError('response envelope changed')
+    forms_now = '{abstain:reason}, {inspect:{path,offset}}, {need:{what,because}}'
+    forms_now += ', or {play:{actions,checks}}.' if 'play' in revealed else '.'
+    return {**base, 'instruction': base['instruction'].replace(old, forms_now)}
+
+
 def forms(revealed):
     value = {'need': 'State an ability you lack: {need:{what,because}}. Recorded; grants nothing by itself.'}
     if 'play' in revealed:
@@ -149,6 +171,16 @@ def new_evidence(keys):
     return seen
 
 
+def signals(keys, stop):
+    """Counts only, in journal order, with no claim about what they mean."""
+    needs = [k for k in keys if k.startswith('ability_need_')]
+    marks = ['play' if k.startswith('ability_play_') else 'edit' for k in keys if k.startswith(('ability_play_', 'advance_'))]
+    pairs = list(zip(marks, marks[1:]))
+    return {'needs': len(needs), 'first_need_decision': int(needs[0].rsplit('_', 1)[1]) if needs else None, 'plays': marks.count('play'),
+            'plays_followed_by_an_edit': pairs.count(('play', 'edit')), 'edits_followed_by_a_play': pairs.count(('edit', 'play')),
+            'retentions': sum(k.startswith('ability_retain_') for k in keys), 'stop': stop}
+
+
 def _bounded(text):
     raw = text.encode()
     if len(raw) <= TEXT_MAX:
@@ -172,7 +204,10 @@ def play_return(run, play, snapshot, reading):
         lines.append('The harness gave no report: ' + str(run['stderr']))
     else:
         lines.append('Errors (' + str(report.get('error_count')) + '): ' + json.dumps(report.get('errors'), ensure_ascii=False))
-        lines.append('Observed: ' + json.dumps([o for o in report.get('observations', []) if o.get('kind') != 'render'], ensure_ascii=False))
+        seen = [o for o in report.get('observations', []) if o.get('kind') != 'render']
+        # Readouts first: the bound below cuts from the end, and the action list is what the model sent.
+        lines.append('Readouts: ' + json.dumps([o for o in seen if o.get('kind') == 'text'], ensure_ascii=False))
+        lines.append('Actions run: ' + json.dumps([o for o in seen if o.get('kind') != 'text'], ensure_ascii=False))
     return {'reading': reading, 'evidence': digest, 'text': _bounded('\n'.join(lines))}
 
 
