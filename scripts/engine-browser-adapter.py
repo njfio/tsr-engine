@@ -329,10 +329,7 @@ class Adapter(recovery.Recovery,base.Adapter):
             if self.admission.get('independent_assessment'):assessment.collect(self,request)
             load('browser_pursuit_reflection','engine-pursuit-reflection.py').reflect(self)
             load('browser_criterion_return','engine-criterion-return.py').reflect(self)
-            if self.reading_opted():
-                latest=self.controller.cli('project','reading-view')['bounded']['readings']
-                returned=reading_policy.check_return(result,latest[-1]['event'] if latest else None)
-                if returned is not None:self.op('check_return_'+e.sha(returned),lambda:self.controller.json_cli(('project','check-return'),returned))
+            if self.reading_opted():self.record_check_return(result)
             return result
         if kind=='provider_recovery_ready':return self.recovery_ready()
         if kind=='feedback_witness':
@@ -418,6 +415,11 @@ class Adapter(recovery.Recovery,base.Adapter):
         return load('browser_proposal_references','engine-proposal-references.py').project(context,request)
     def reading_opted(self):
         return bool(getattr(self,'admission',{}).get('reading_profile'))
+    def record_check_return(self,result):
+        """What a controller check returned, beside the latest reading, with no verdict."""
+        latest=self.controller.cli('project','reading-view')['bounded']['readings']
+        returned=reading_policy.check_return(result,latest[-1]['event'] if latest else None)
+        if returned is not None:self.op('check_return_'+e.sha(returned),lambda:self.controller.json_cli(('project','check-return'),returned))
     def reading_callback(self):
         return self.reading if self.reading_opted() else None
     def reading(self,view):

@@ -237,6 +237,35 @@ class Cycle(BrowserAdapter):
         self.assertEqual(earlier['readings'][0]['returns'][0]['from'], 'operator')
         self.assertEqual(earlier['readings'][0]['reading']['falsifier'], WANT['falsifier'])
 
+    def test_spec_c11_reading_turn_refused_when_not_opted_in(self):
+        a, _ = self.configure()
+        view = a.native('request', None)
+        a.admission = {k: v for k, v in a.admission.items() if k != 'reading_profile'}
+        with self.assertRaisesRegex(ValueError, 'reading not admitted'):
+            a.reading(view)
+        self.assertEqual(self.c.cli('project', 'reading-view')['counts']['readings'], 0)
+
+    def test_spec_c07_check_after_execution_is_recorded_once_beside_the_latest_reading(self):
+        a, _ = self.configure()
+        recorded = self.c.json_cli(('project', 'reading-record'), WANT)
+        execution = {'state': {'goal_completion': {'test_receipt': 'a' * 64, 'snapshot': 'b' * 64, 'test_verdict': 'failed'}}}
+        a.record_check_return(execution)
+        view = self.c.cli('project', 'reading-view')
+        returns = view['bounded']['readings'][-1]['returns']
+        self.assertEqual(view['bounded']['readings'][-1]['event'], recorded['reading'])
+        self.assertEqual([r['from'] for r in returns], ['rules'])
+        self.assertIn('failed', returns[0]['text'])
+        self.assertEqual(self.c.cli('project', 'acceptance', 'status')['accepted'], False)
+        self.adapter().record_check_return(execution)
+        self.assertEqual(self.c.cli('project', 'reading-view'), view)
+
+    def test_spec_c07_execution_with_no_receipt_records_no_return(self):
+        a, _ = self.configure()
+        self.c.json_cli(('project', 'reading-record'), WANT)
+        a.record_check_return({'state': {'goal_completion': {}}})
+        counts = self.c.cli('project', 'reading-view')['counts']
+        self.assertEqual(counts['returns_named'] + counts['returns_unnamed'], 0)
+
     def test_spec_c13_restart_makes_no_new_call_and_no_new_reading(self):
         a, ca = self.configure()
         self.transported(a)
