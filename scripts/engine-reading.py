@@ -41,13 +41,26 @@ PROPOSAL_SYSTEM = (
     'To keep the artifact unchanged, return {retain:reason}. Retention ends this checkpoint, not future separately admitted input. '
     'Use {abstain:reason} for inability or declining further work; this stops the scheduled session. Neither creates user acceptance. Return only the supplied JSON contract.')
 
-READING_CONTEXT_KEYS = ('public_brief', 'parents', 'files', 'return_evidence', 'feedback_provenance', 'review_criticism')
+READING_CONTEXT_KEYS = ('public_brief', 'parents', 'files', 'return_evidence', 'browser_returns', 'supplemental_returns', 'criterion_returns',
+                        'independent_assessments', 'feedback_provenance', 'review_criticism')
 ARTIFACT_FORMS = ('abstain', 'retain', 'edit', 'inspect', 'verify')
 DEVELOPMENT_CONTRACTS = ('relational', 'public_desire', 'provisional_preference', 'contrast_preference', 'success_preference', 'deliberation')
 DEVELOPMENT_CONTEXT = ('relational_contract', 'relational_history', 'public_meaning_references', 'public_desire_history', 'generated_preferences',
-                       'current_success', 'current_contrast', 'eligible_identity_aspirations')
+                       'current_success', 'current_contrast', 'eligible_identity_aspirations', 'public_meaning_policy', 'generated_preference_statuses')
+STRIPPED_CONTRACTS = DEVELOPMENT_CONTRACTS + ('relational_envelope',)
 DEVELOPMENT_ALTERNATIVES = frozenset(DEVELOPMENT_CONTRACTS)
 RETAIN_FORM = 'Keep the current artifact unchanged for this checkpoint: {retain:reason}. Not fulfillment or acceptance.'
+RESPONSE_ENVELOPE = {
+    'instruction': 'The generator response is {alternatives:[candidate,...]}, {retain:reason}, {abstain:reason}, or {inspect:{path,offset}}. Independent reviewers return their separate judgment contract, never inspect. '
+                   'edits/rationale are candidate fields, never top-level fields. Each candidate matches one of response_contracts. Byte limits count UTF-8, not characters. '
+                   'resulting_file in diagnostics means the complete file after applying that candidate, not a response field.',
+    'max_alternatives': 4,
+    'retention': '{retain:reason} is a current-condition no-change choice for the artifact; {abstain:reason} stops further work. Neither proves fulfillment or acceptance.'}
+RESPONSIBILITIES = {
+    'generator': 'Return proposed alternatives, not executed results. You may propose an untested initial design from the public brief, active wants and current source. '
+                 'Prior test returns or player feedback are not prerequisites for an initial edit proposal. You do not invoke native preview yourself.',
+    'review_stage': 'Independent proposal review assesses whether a complete incremental edit is useful and safe for the current stage; it need not finish every unresolved aim in one proposal. '
+                    'Review must still reject misleading claims, regressions or unsupported actions. Proposal approval is not final acceptance; unresolved aims remain pending.'}
 
 
 def admission_fields(profile):
@@ -68,6 +81,10 @@ def _text(path, value):
         _output.fail(path, 'string_required', expected_type='string')
     if not value.strip() or len(value.encode()) > TEXT_MAX:
         _output.fail(path, 'text_bound', nonblank=True, max_utf8_bytes=TEXT_MAX)
+
+
+def is_reading(value):
+    return isinstance(value, dict) and set(value) == set(FIELDS)
 
 
 def check_shape(value):
@@ -122,7 +139,11 @@ def strip_development(wire):
     """The proposal turn's context, with every development route removed."""
     value = {k: v for k, v in wire.items() if k not in DEVELOPMENT_CONTEXT}
     contracts = wire.get('response_contracts', {})
-    value['response_contracts'] = {k: v for k, v in contracts.items() if k not in DEVELOPMENT_CONTRACTS}
+    value['response_contracts'] = {k: v for k, v in contracts.items() if k not in STRIPPED_CONTRACTS}
+    if 'response_envelope' in wire:
+        value['response_envelope'] = RESPONSE_ENVELOPE
+    if 'proposal_responsibilities' in wire:
+        value['proposal_responsibilities'] = {**wire['proposal_responsibilities'], **RESPONSIBILITIES}
     summary = wire.get('choice_summary', {})
     forms = {k: v for k, v in summary.get('forms', {}).items() if k in ARTIFACT_FORMS}
     if 'retain' in forms:

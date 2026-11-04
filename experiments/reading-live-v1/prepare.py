@@ -5,6 +5,11 @@ ROOT=Path(__file__).resolve().parents[2]
 s=importlib.util.spec_from_file_location('game_pair_adapter',ROOT/'scripts/engine-browser-adapter.py');a=importlib.util.module_from_spec(s);s.loader.exec_module(a)
 LABEL=os.environ.get('TSR_LIVE_LABEL','r1');PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
 FILES=['experiments/reading-live-v1/'+n for n in ('run.py','observe.py','continue.py','stage.py','prepare.py','discover.py')]+['experiments/continuous-game-v4/mapping.py','experiments/continuous-game-v4/protocol.json','experiments/continuous-game-v3/mapping.py','experiments/game-wants-v3/mapping.py','scripts/engine-observation-coverage.py']
+MENU='an artifact change, a development of meaning, retention, or abstention'
+def reading_feedback(text):
+ # An opted-in run has no development route, so its feedback text names none. The only change to the v4 task.
+ assert text.count(MENU)==1
+ return text.replace(MENU,'an artifact change, retention, or abstention')
 def check_pins():
  # Against what was prepared, never against the current file.
  base=ROOT/('target/continuous-game-live-'+LABEL);prepared=json.loads((base/'prepared-test.json').read_text());manifest=json.loads((base/'tsr/launch-manifest.json').read_text())
@@ -16,6 +21,7 @@ def prepare(auth_path):
  save(out/'authorization.json',AUTH)
  protocol=json.loads(PROTOCOL.read_text());assert a.d.file_sha(ROOT/protocol['derived_from']['path'])==protocol['derived_from']['sha256']
  facts={k:copy.deepcopy(protocol[k]) for k in ('operational_roots','criteria','minimum_obligations','feedback','unknown_rule','shared_consequences','excluded_claims','observation_policy')}
+ facts['feedback']['text']=reading_feedback(facts['feedback']['text'])
  brief=protocol['user_input']['text']+'\n\nExperiment-authored operational context, not additional player preferences:\n'+json.dumps(facts,ensure_ascii=False,sort_keys=True)
  wants={k:v+'\nArtifact criterion: '+protocol['criteria'][k] for k,v in protocol['operational_roots'].items() if k!='attribution'}
  editable={'index.html':'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body><main></main><script src="app.js"></script></body></html>\n','app.js':'// Empty project scaffold; no game implementation.\n','style.css':'/* Empty project scaffold. */\n'}

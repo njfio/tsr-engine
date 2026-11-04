@@ -305,6 +305,86 @@ class Cycle(BrowserAdapter):
         a.admission = {k: v for k, v in a.admission.items() if k != 'reading_profile'}
         self.assertIsNone(launcher.build_cycle(m.loop.Cycle, ca, a).reading)
 
+    def rejecting_transport(self, a, marker):
+        """Authored turns: a marked reading, a first review that rejects, an accepting second."""
+        original = self.transport
+        seen = {'reading': [], 'proposal': [], 'review': []}
+
+        def transport(body, timeout):
+            data = json.loads(body['messages'][1]['content'])
+            result = original(body, timeout)
+            if 'reading_contract' in data:
+                seen['reading'].append(data)
+                result['value'] = {**WANT, 'want': marker}
+            elif 'criteria' in data:
+                seen['review'].append(json.dumps(body))
+                if len(seen['review']) == 1:
+                    result['value']['verdict'] = 'reject'
+                    next(iter(result['value']['findings'].values())).update(finding='not_met', explanation='Authored criticism to carry forward')
+            else:
+                seen['proposal'].append(data)
+                if len(seen['proposal']) == 2:
+                    result['value']['alternatives'][0]['rationale'] = 'Authored replacement after the criticism; untested until the protected worker returns evidence'
+            return result
+        a.injected_transport = transport
+        return seen
+
+    def test_spec_c10_c08_review_criticism_survives_the_reading_and_review_never_sees_it(self):
+        self.playable = True
+        a, ca = self.configure()
+        self.adapter_instance = a
+        ca['max_executions'] = 0
+        marker = 'MARKER-WANT-A-MUCH-HARDER-LEVEL'
+        seen = self.rejecting_transport(a, marker)
+        result = self.cycle(a, ca).run()
+        self.assertGreaterEqual(len(seen['review']), 2, result)
+        self.assertEqual(len(seen['proposal']), 2)
+        self.assertNotIn('review_criticism', seen['proposal'][0])
+        self.assertEqual(seen['proposal'][1]['review_criticism']['items'][0]['source']['source_snapshot'], seen['proposal'][1]['binding']['source_snapshot'])
+        self.assertIn('review_criticism', seen['reading'][1])
+        for body in seen['review']:
+            self.assertNotIn(marker, body)
+        for proposal in seen['proposal']:
+            self.assertNotIn(marker, json.dumps(proposal['own_decisions']))
+            self.assertEqual(proposal['current_reading']['current_want']['text'], marker)
+
+    @unittest.skipUnless(os.getenv('TSR_BROWSER_SEALED_AUTHORED') == '1', 'sealed authored worker opt-in')
+    def test_spec_c07_sealed_execution_returns_the_check_beside_the_reading(self):
+        self.playable = True
+        a, ca = self.configure()
+        self.adapter_instance = a
+        marker = 'MARKER-WANT-A-MUCH-HARDER-LEVEL'
+        self.rejecting_transport(a, marker)
+        self.cycle(a, ca).run()
+        self.assertEqual(self.c.cli('project', 'status')['execution_status'], 'passed')
+        view = self.c.cli('project', 'reading-view')
+        returned = [r for entry in view['bounded']['readings'] for r in entry['returns']]
+        self.assertEqual([r['from'] for r in returned], ['rules'])
+        self.assertRegex(returned[0]['text'], 'Controller checks ran on source [0-9a-f]{64} with receipt')
+        self.assertTrue(returned[0]['evidence'])
+        self.assertEqual(view['counts']['returns_named'], 1)
+        self.assertFalse(self.c.cli('project', 'acceptance', 'status')['accepted'])
+
+    def test_spec_c09_real_proposal_request_offers_no_development_anywhere(self):
+        a, _ = self.configure()
+        view = a.native('request', None)
+        request, context = a.project(view)
+        body = a.proposal_body(view, a.wire_context(request, context))
+        data = json.loads(body['messages'][1]['content'])
+        data.pop('public_brief')
+        data.pop('files')
+        text = body['messages'][0]['content'] + json.dumps(data)
+        for word in ('development', 'provisional', 'deliberat', 'wanting', 'relational_envelope'):
+            self.assertNotIn(word, text.lower())
+        self.assertIn('retain', data['response_envelope']['instruction'])
+        self.assertIn('generator', data['proposal_responsibilities'])
+
+    def test_spec_c01_reading_turn_sees_observed_returns(self):
+        context = reading.reading_context({'browser_returns': ['b'], 'supplemental_returns': ['s'], 'criterion_returns': ['c'], 'independent_assessments': ['i'], 'choice_summary': {}}, {'bounded': {}})
+        for key in ('browser_returns', 'supplemental_returns', 'criterion_returns', 'independent_assessments'):
+            self.assertIn(key, context)
+        self.assertNotIn('choice_summary', context)
+
     def test_spec_c11_not_opted_in_takes_no_reading_and_keeps_the_menu(self):
         a, ca = self.configure(profile=None)
         self.assertNotIn('reading_profile', self.a)

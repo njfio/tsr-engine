@@ -54,7 +54,7 @@ Out:
 - Any detector of unassigned wanting, or any claim about it (ch. 18).
 - Any engine judgement of a reading or return.
 - Emotional evidence beyond the free text a reading can hold.
-- A paid test.
+- A paid test as part of this implementation. The operator approved one separately on 2026-11-04 (`experiments/reading-live-v1`).
 
 ## Acceptance criteria
 

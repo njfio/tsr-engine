@@ -202,14 +202,14 @@ class Adapter(recovery.Recovery,base.Adapter):
             if prior['source_snapshot']==view['source_snapshot']:feedback.append(prior)
         for key,item in self.read()[2].items():
             if key.startswith('review_rejection_'):
-                if item['source']!={k:view[k] for k in ('state_root','source_snapshot','scope')}:
-                    carried=[v for k,v in self.read()[2].items() if k.startswith('session_continue_') and v.get('after')=={k:view[k] for k in ('state_root','source_snapshot','scope')} and v.get('evidence_anchor')==self.evidence_anchor() and key in v.get('criticism_keys',[])]
+                if not self.same_view(item['source'],view):
+                    carried=[v for k,v in self.read()[2].items() if k.startswith('session_continue_') and self.same_view(v.get('after'),view) and v.get('evidence_anchor')==self.evidence_anchor() and key in v.get('criticism_keys',[])]
                     if not carried:continue
                 feedback.append(item)
         if feedback:context['review_criticism']={'status':'attributed fallible judgments, not observed gameplay or authority','items':feedback,'instruction':'Address relevant criticism in a fresh proposal, retain a justified alternative, or abstain. Unknown findings describe insufficient evidence, not a substantive rejection. Never claim a rejected or unknown proposal executed. No obligation to obtain approval by repeated rewording.'}
-        native_feedback=[v for k,v in self.read()[2].items() if k.startswith('native_rejection_') and v['source']=={k:view[k] for k in ('state_root','source_snapshot','scope')}]
+        native_feedback=[v for k,v in self.read()[2].items() if k.startswith('native_rejection_') and self.same_view(v['source'],view)]
         if native_feedback:context['native_validation_feedback']={'items':native_feedback,'instruction':'These candidates were not admitted or executed. Make a fresh decision from the current supplied source and exact typed rejection: inspect source, propose a valid current-source action, retain prior meaning, justify development, or abstain. No obligation to obtain acceptance. This is not a formatting correction or observed gameplay.'}
-        context['own_decisions']=[{'response':v['response'],'source':self.read()[2].get('bound_output_'+k[len('generated_'):],{}).get('source')} for k,v in self.read()[2].items() if k.startswith('generated_')]
+        context['own_decisions']=[{'response':v['response'],'source':self.read()[2].get('bound_output_'+k[len('generated_'):],{}).get('source')} for k,v in self.read()[2].items() if k.startswith('generated_') and not reading_policy.is_reading(v['response'])]
         context['independent_assessments']=[{**v,'applicability':'current_source' if v['snapshot']==view['source_snapshot'] else 'historical_source_only'} for k,v in self.read()[2].items() if k.startswith('independent_assessment_')]
         context['evidence_contract']=base.review_contract.evidence_contract()
         return request,context
@@ -395,6 +395,7 @@ class Adapter(recovery.Recovery,base.Adapter):
             assessment.collect(self,self.controller.request())
             load('browser_pursuit_reflection','engine-pursuit-reflection.py').reflect(self)
             load('browser_criterion_return','engine-criterion-return.py').reflect(self)
+            if self.reading_opted():self.record_check_return(result)
             return result
         if kind!='reject_proposal':return super().native(kind,value)
         self.validate_current_admission()
@@ -413,6 +414,12 @@ class Adapter(recovery.Recovery,base.Adapter):
         return self.op('review_rejection_'+e.sha(value['judgment']['reviewer']),lambda:record)
     def wire_context(self,request,context):
         return load('browser_proposal_references','engine-proposal-references.py').project(context,request)
+    def same_view(self,source,view):
+        """Whether a source names this view, counting only the roots a reading moved it through."""
+        roots={view['state_root']}
+        for key,item in reversed(list(self.read()[2].items())):
+            if key.startswith('reading_ready_') and item['state_root'] in roots:roots.add(item['before'])
+        return isinstance(source,dict) and set(source)=={'state_root','source_snapshot','scope'} and source['state_root'] in roots and source['source_snapshot']==view['source_snapshot'] and source['scope']==view['scope']
     def reading_opted(self):
         return bool(getattr(self,'admission',{}).get('reading_profile'))
     def record_check_return(self,result):
@@ -433,7 +440,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         response=result['response']
         recorded=self.op('reading_record_'+e.sha({'reading':response,'state_root':request['state_root']}),lambda:self.controller.json_cli(('project','reading-record'),response))
         ready=self.native('request',None)['state_root']
-        self.op('reading_ready_'+ready,lambda:{'reading':recorded['reading'],'state_root':ready})
+        self.op('reading_ready_'+ready,lambda:{'reading':recorded['reading'],'state_root':ready,'before':request['state_root']})
         return {'reading':recorded['reading'],'receipt':result['receipt']}
     def proposal_body(self,view,context):
         if self.reading_opted():
