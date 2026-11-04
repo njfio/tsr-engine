@@ -1155,10 +1155,8 @@ mod tests {
     /// semantic judgment/active desire differs; executable alternatives stay fixed.
     #[test]
     fn fixed_alternatives_review_changes_estimates_without_forcing_choice() -> Result<()> {
-        fn choose(
-            decision: acceptance::Decision,
-            withdraw: bool,
-        ) -> Result<(String, Hash, Vec<(String, f64)>)> {
+        type Chosen = (String, Hash, Vec<(String, f64)>);
+        fn choose(decision: acceptance::Decision, withdraw: bool) -> Result<Chosen> {
             let (dir, e) = setup()?;
             let initial =
                 "pub fn subtotal(unit_cents:u32,quantity:u32)->u32 {unit_cents * quantity}\n";

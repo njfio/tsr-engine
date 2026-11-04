@@ -478,7 +478,7 @@ mod tests {
         assert!(
             e.project_relational_context()?["inputs"]["generated_preferences"]
                 .as_array()
-                .map_or(true, |v| v.is_empty())
+                .is_none_or(|v| v.is_empty())
         );
         Ok(())
     }
@@ -496,7 +496,7 @@ mod tests {
         assert!(
             e.project_relational_context()?["inputs"]["generated_preferences"]
                 .as_array()
-                .map_or(true, |x| x.is_empty())
+                .is_none_or(|x| x.is_empty())
         );
         Ok(())
     }

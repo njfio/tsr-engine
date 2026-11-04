@@ -78,6 +78,9 @@ pub struct Status {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "snake_case", deny_unknown_fields)]
+// Entries are parsed from the log and dropped soon after. Boxing the large variant would only add
+// indirection to the provenance check that matches on an inquiry's origin.
+#[allow(clippy::large_enum_variant)]
 enum Entry {
     Bootstrap {
         input: Bootstrap,
