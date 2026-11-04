@@ -105,6 +105,15 @@ class Returns(unittest.TestCase):
         self.assertLessEqual(len(out['text'].encode()), abilities.TEXT_MAX)
         self.assertIn('omitted', out['text'])
 
+    def test_long_play_keeps_errors_and_readouts_ahead_of_the_action_list(self):
+        actions = [{'kind': 'key', 'value': 'ArrowUp'}] * 64
+        checks = [{'kind': 'text', 'selector': '#c' + str(i), 'text': 'x' * 200, 'met': True} for i in range(8)]
+        report = {**REPORT, 'observations': actions + checks}
+        out = abilities.play_return({'exit': 1, 'report': report, 'stderr': ''}, PLAY['play'], 'a' * 64, None)
+        self.assertLessEqual(len(out['text'].encode()), abilities.TEXT_MAX)
+        self.assertIn('#c7', out['text'])
+        self.assertIn('blocked inline style', out['text'])
+
     def test_need_return_quotes_the_need_and_names_what_it_revealed(self):
         out = abilities.need_return(NEED['need'], ['play'], 'r' * 64)
         self.assertIn(NEED['need']['what'], out['text'])
@@ -125,6 +134,27 @@ class Prompts(unittest.TestCase):
         self.assertEqual(sorted(abilities.forms(['play'])), ['need', 'play'])
         self.assertNotIn('play', abilities.contracts([]))
         self.assertIn('play', abilities.contracts(['play']))
+
+    def test_prompt_says_nothing_false_about_this_loop(self):
+        for revealed in ([], ['play']):
+            text = abilities.proposal_system(reading.PROPOSAL_SYSTEM, revealed)
+            self.assertNotIn('Retention ends this checkpoint', text)
+            self.assertNotIn('scheduled session', text)
+            self.assertIn('abstain', text)
+        with self.assertRaises(ValueError):
+            abilities.proposal_system('text without the sentences', [])
+
+    def test_response_envelope_names_what_is_offered(self):
+        self.assertIn('{need:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
+        self.assertNotIn('{play:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
+        self.assertIn('{play:', abilities.envelope(reading.RESPONSE_ENVELOPE, ['play'])['instruction'])
+        self.assertNotIn('need', reading.RESPONSE_ENVELOPE['instruction'])
+
+    def test_observable_signals_are_counts_in_journal_order(self):
+        keys = ['reading_0', 'advance_0', 'resume_0', 'ability_need_1', 'ability_play_2', 'advance_3', 'resume_1', 'ability_play_4', 'ability_retain_5', 'terminal']
+        self.assertEqual(abilities.signals(keys, 'proposal_retention'),
+                         {'needs': 1, 'first_need_decision': 1, 'plays': 2, 'plays_followed_by_an_edit': 1, 'edits_followed_by_a_play': 2, 'retentions': 1, 'stop': 'proposal_retention'})
+        self.assertIsNone(abilities.signals(['reading_0'], 'x')['first_need_decision'])
 
     def test_evidence_since_last_retention(self):
         since = abilities.new_evidence
@@ -203,7 +233,7 @@ class Cycle(BrowserAdapter):
         spec.loader.exec_module(launcher)
         return launcher.build_cycle(m.loop.Cycle, ca, a)
 
-    def script(self, a, proposals, run=None):
+    def script(self, a, proposals, run=None, reject_reviews=False):
         """Authored turns: a want on each reading, then each proposal in order, then retention."""
         original = self.transport
         remaining = list(proposals)
@@ -219,6 +249,9 @@ class Cycle(BrowserAdapter):
                 out['value'] = copy.deepcopy(WANT)
             elif kind == 'proposal':
                 out['value'] = copy.deepcopy(remaining.pop(0) if remaining else RETAIN)
+            elif reject_reviews:
+                out['value']['verdict'] = 'reject'
+                next(iter(out['value']['findings'].values())).update(finding='not_met', explanation='Authored criticism')
             return out
 
         def runner(files, probe, harness, image, user):
@@ -242,6 +275,7 @@ class Cycle(BrowserAdapter):
         self.assertEqual(ran, [])
         proposal = [b for k, b in seen if k == 'proposal'][0]
         self.assertEqual(proposal['messages'][0]['content'], reading.PROPOSAL_SYSTEM)
+        self.assertEqual(json.loads(proposal['messages'][1]['content'])['response_envelope'], reading.RESPONSE_ENVELOPE)
         self.assertNotIn('need', json.loads(proposal['messages'][1]['content'])['choice_summary']['forms'])
         self.assertEqual(result['status'], 'proposal_retention')
         self.assertEqual(self.returns(), [])
@@ -344,6 +378,31 @@ class Cycle(BrowserAdapter):
         a.ledger = type('L', (), {'status': lambda self: {'committed_microusd': 500}, 'manifest': a.ledger.manifest})()
         self.assertTrue(a.spend_reached())
 
+    def test_spec_c09_cap_binds_on_inspection_with_the_real_ledger(self):
+        a, ca = self.configure(cap=250, decisions=8)
+        looks = [{'inspect': {'path': 'app.js', 'offset': i % 2}} for i in range(9)]
+        seen, _ = self.script(a, looks)
+        result = self.cycle(a, ca).run()
+        self.assertEqual(result['status'], 'spend_cap')
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(self.ledger.status()['calls'], 3)
+
+    def test_spec_c09_cap_binds_on_format_correction_with_the_real_ledger(self):
+        a, ca = self.configure(cap=150)
+        bad = {'alternatives': [{'edits': 'wrong scalar', 'rationale': 'Authored invalid shape'}]}
+        seen, _ = self.script(a, [bad, bad, bad])
+        result = self.cycle(a, ca).run()
+        self.assertEqual(result['status'], 'spend_cap')
+        self.assertEqual(len(seen), 2)
+
+    def test_spec_c09_cap_stops_a_restart_too(self):
+        a, ca = self.configure(cap=150)
+        seen, _ = self.script(a, [RETAIN])
+        a.spend_reached = lambda: False
+        first = self.cycle(a, ca).run()
+        fresh = self.adapter()
+        self.assertEqual(self.cycle(fresh, ca).run(), first)
+
     def test_spec_c09_spend_cap_stops_before_a_review(self):
         a, ca = self.configure()
         seen, _ = self.script(a, [EDIT])
@@ -361,6 +420,39 @@ class Cycle(BrowserAdapter):
         self.assertEqual(len(ran), 1)
         self.assertIn('review', self.kinds(seen))
 
+    def test_spec_c10_a_rejected_edit_after_a_play_is_not_run(self):
+        a, ca = self.configure()
+        before = self.c.request()['coding']['snapshot']
+        seen, ran = self.script(a, [NEED, PLAY, EDIT, RETAIN, RETAIN], reject_reviews=True)
+        self.cycle(a, ca).run()
+        self.assertIn('review', self.kinds(seen))
+        self.assertEqual(self.c.request()['coding']['snapshot'], before)
+
+    def test_spec_c11_restart_in_mid_run_does_not_repeat_the_play(self):
+        a, ca = self.configure()
+        _, ran = self.script(a, [NEED, PLAY, RETAIN, RETAIN])
+        first = self.cycle(a, ca)
+
+        class Killed(BaseException):
+            pass
+
+        def hook(point, name):
+            if point == 'after_result' and name.startswith('ability_play_'):
+                raise Killed()
+        first.hook = hook
+        with self.assertRaises(Killed):
+            first.run()
+        self.assertEqual(len(ran), 1)
+        returned = len(self.returns())
+        fresh = self.adapter()
+        again = []
+        self.script(fresh, [RETAIN, RETAIN], run=lambda n: again.append(n))
+        result = self.cycle(fresh, ca).run()
+        self.assertEqual(again, [])
+        self.assertEqual(len(ran), 1)
+        self.assertEqual(len(self.returns()), returned)
+        self.assertEqual(result['status'], 'proposal_retention')
+
     def test_spec_c11_restart_runs_nothing_twice(self):
         a, ca = self.configure()
         _, ran = self.script(a, [NEED, PLAY, RETAIN, RETAIN])
@@ -368,8 +460,10 @@ class Cycle(BrowserAdapter):
         view = self.c.cli('project', 'reading-view')
         calls = self.ledger.status()['calls']
         fresh = self.adapter()
-        fresh.play_runner = lambda *_: self.fail('play ran again')
+        again = []
+        fresh.play_runner = lambda *_: again.append(1)
         self.assertEqual(self.cycle(fresh, ca).run(), result)
+        self.assertEqual(again, [])
         self.assertEqual(self.c.cli('project', 'reading-view'), view)
         self.assertEqual(self.ledger.status()['calls'], calls)
         self.assertEqual(len(ran), 1)
@@ -383,9 +477,11 @@ class Cycle(BrowserAdapter):
         with self.assertRaises(Exception):
             self.cycle(a, ca).run()
         fresh = self.adapter()
-        fresh.play_runner = lambda *_: self.fail('play ran again')
+        again = []
+        fresh.play_runner = lambda *_: again.append(1)
         with self.assertRaises(Exception):
             self.cycle(fresh, ca).run()
+        self.assertEqual(again, [])
         self.assertEqual(len(ran), 1)
 
     @unittest.skipUnless(os.getenv('TSR_BROWSER_SEALED_AUTHORED') == '1' and shutil.which('docker'), 'real local harness opt-in')
