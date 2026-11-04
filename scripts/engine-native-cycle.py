@@ -76,7 +76,8 @@ def ensure_scope_grant(ledger,module,adapter,grant,expected,*,check_only=False):
 def build_cycle(cycle_type,cycle_admission,adapter):
     """The one place a launched cycle is built. An opted-in run gets its reading turn here."""
     callback=getattr(adapter,'reading_callback',lambda:None)()
-    return cycle_type(cycle_admission['journal'],cycle_admission,adapter.native,adapter.proposal,adapter.review,**({'reading':callback} if callback else {}))
+    abilities=getattr(adapter,'abilities_callback',lambda:None)()
+    return cycle_type(cycle_admission['journal'],cycle_admission,adapter.native,adapter.proposal,adapter.review,**({'reading':callback} if callback else {}),**({'abilities':abilities} if abilities else {}))
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--scope-grant',type=Path)

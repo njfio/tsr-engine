@@ -37,8 +37,9 @@ class Cycle:
     row=staticmethod(d.Driver.row)
     read=d.Driver.read
     append=d.Driver.append
-    def __init__(self,root,admission,native,proposal,review,*,hook=None,reading=None):
+    def __init__(self,root,admission,native,proposal,review,*,hook=None,reading=None,abilities=None):
         self.reading=reading
+        self.abilities=abilities
         self.root=Path(root).absolute();self.admission=admission;self.fixture=admission.get('advisory_profile')=='local-fixture-only@v1';self.continuous=admission.get('version') in ('local-project-cycle@v3','local-project-cycle@v4','local-project-cycle@v5');self.objective=admission.get('version')=='local-project-cycle@v5';self.information=admission.get('version')=='local-project-cycle@v4'
         # Local introspection is not the provider export. V4 has seven bounded decisions.
         self.local_context_limit=8388608 if admission.get('local_source_profile')=='browser-scoped-source@v1' else 131072 if self.information or self.objective else 32768
@@ -243,7 +244,7 @@ class Cycle:
         if after.get('branch')!='reconsider' or before.get('reconsideration')!=after.get('reconsideration'):raise d.Blocked('advisory evidence/lineage drift')
     @staticmethod
     def decision_count(done):
-        return sum(k.startswith(('advance_','rejected_proposal_')) or (k.startswith('reconsider_') and k.endswith('_acknowledge')) for k in done)
+        return sum(k.startswith(('advance_','rejected_proposal_','ability_')) or (k.startswith('reconsider_') and k.endswith('_acknowledge')) for k in done)
     def reconsider(self,current):
         index=str(self.decision_count(self.read()[2]));prefix=('reconsider_'+index+'_') if self.continuous else 'advisory_'
         if feedback_policy.reached(int(index),self.admission['max_decisions']):return self.terminal('decision_budget')
@@ -561,6 +562,7 @@ class Cycle:
             if branch!='propose':raise ValueError('unsupported native branch')
             completed=self.decision_count(done);index=str(completed)
             if feedback_policy.reached(completed,self.admission['max_decisions']):return self.terminal('decision_budget')
+            if self.abilities is not None and self.abilities.spend_reached():return self.terminal('spend_cap',desires_remain_open=True,acceptance_recorded=False)
             # The reading comes first and changes the state root, so the request is captured after it.
             if self.reading is not None and 'reading_'+index not in done:
                 self.op('reading_'+index,lambda:self.reading(current))
@@ -570,6 +572,13 @@ class Cycle:
             if len(e.canonical(captured))>self.local_context_limit:raise d.Blocked('proposal context bound')
             proposed=self.model_stage('proposal_'+index,'proposal',captured)
             response=proposed['response']
+            if self.abilities is not None and set(response)=={'need'}:
+                outcome=self.op('ability_need_'+index,lambda:self.abilities.ability_need(response['need']))
+                if outcome['unmet']:return self.terminal('need_outside_scope',need=outcome['need'],desires_remain_open=True,acceptance_recorded=False)
+                continue
+            if self.abilities is not None and set(response)=={'play'}:
+                self.op('ability_play_'+index,lambda:self.abilities.ability_play(response['play']))
+                continue
             if set(response)=={'deliberation'}:
                 result=self.deliberation(index,response,captured)
                 if result is not None:return result
@@ -578,6 +587,9 @@ class Cycle:
                 reason=response['retain']
                 if self.admission.get('local_source_profile')!='browser-scoped-source@v1' or not isinstance(reason,str) or not 0<len(reason.encode())<=131072:raise ValueError('bounded browser retention required')
                 fresh=self.current();self.same_source(captured,fresh)
+                if self.abilities is not None and self.abilities.ability_new_evidence(list(self.read()[2])):
+                    self.op('ability_retain_'+index,lambda:{'reason':reason})
+                    continue
                 return self.terminal('proposal_retention',reason=reason,state_root=fresh['state_root'],source_snapshot=fresh['source_snapshot'],desires_remain_open=True,acceptance_recorded=False)
             if set(response)=={'abstain'}:
                 reason=response['abstain']
@@ -588,6 +600,7 @@ class Cycle:
             if fresh['branch']!='propose':raise d.Blocked('native branch changed')
             preview=self.native('preview',{'response':response});self.same_source(fresh,preview['cycle'])
             if len(e.canonical({'context':fresh,'response':response}))>self.local_context_limit:raise d.Blocked('review context bound')
+            if self.abilities is not None and self.abilities.spend_reached():return self.terminal('spend_cap',desires_remain_open=True,acceptance_recorded=False)
             reviewed=self.model_stage('review_'+index,'review',{**fresh,'response_digest':preview['response_digest']},response)
             judgment=reviewed['judgment']
             if set(judgment)!={'decision','reviewer','generator','response_digest'} or judgment['decision'] not in ('approve','reject','unknown','abstain'):raise ValueError('review judgment shape')
