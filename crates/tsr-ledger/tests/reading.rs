@@ -113,6 +113,30 @@ fn spec_c04_blank_reading_is_valid_and_leaves_no_want_current() {
 }
 
 #[test]
+fn spec_c04_a_reading_with_any_one_direction_is_not_blank() {
+    let some = || Some("something".to_string());
+    assert!(blank().is_blank());
+    assert!(!wanting("a harder second level").is_blank());
+    for reading in [
+        Reading {
+            sense: some(),
+            ..blank()
+        },
+        Reading {
+            belief: some(),
+            ..blank()
+        },
+        Reading {
+            expect: some(),
+            ..blank()
+        },
+    ] {
+        assert!(!reading.is_blank(), "{reading:?}");
+        reading.validate().unwrap();
+    }
+}
+
+#[test]
 fn spec_c05_want_needs_an_expected_return_and_a_falsifier() {
     let (_d, s) = store();
     let mut no_falsifier = wanting("want A");
@@ -459,7 +483,7 @@ fn randomized_text_never_panics_and_validation_decides_every_append() {
         state ^= state << 17;
         state
     };
-    let mut text = |n: u64| -> Option<String> {
+    let text = |n: u64| -> Option<String> {
         match n % 4 {
             0 => None,
             1 => Some(" \t\n".to_string()),

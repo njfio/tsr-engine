@@ -151,6 +151,40 @@ mod tests {
     }
 
     #[test]
+    fn reading_and_return_record_the_wall_clock_as_provenance() -> Result<()> {
+        let millis = || -> Result<u128> {
+            Ok(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis())
+        };
+        let (_d, e) = setup()?;
+        let before = millis()?;
+        e.project_reading_record(wanting("a harder second level"))?;
+        e.project_return_record(
+            Source::Operator,
+            ReadingReturn {
+                reading: None,
+                text: "waaaay too easy".into(),
+                evidence: None,
+            },
+        )?;
+        let after = millis()?;
+        let events = e.events()?;
+        for (_, event) in events.iter().rev().take(2) {
+            let at: u128 = event
+                .recorded_at
+                .strip_prefix("unix-ms:")
+                .ok_or_else(|| anyhow::anyhow!("no unix-ms prefix"))?
+                .parse()?;
+            assert!(
+                (before..=after).contains(&at),
+                "{at} not in {before}..={after}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn spec_c07_generated_return_is_refused() -> Result<()> {
         let (_d, e) = setup()?;
         let bad = ReadingReturn {

@@ -710,7 +710,7 @@ pub fn run(directory: &Path, command: ProjectCmd) -> Result<()> {
         }
         ProjectCmd::CheckReturn { file } => print_project(
             Engine::open(directory)?
-                .project_return_record(tsr_domain::Source::Rules, acceptance_file(&file)?)?,
+                .project_return_record(tsr_domain::Source::Rules, reading_file(&file)?)?,
         ),
         ProjectCmd::ReadingView => print_project(Engine::open(directory)?.project_reading_view()?),
         ProjectCmd::PursuitReflectionApply { file } => {

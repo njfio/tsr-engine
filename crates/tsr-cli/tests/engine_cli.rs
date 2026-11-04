@@ -243,3 +243,85 @@ fn operator_drafts_and_episode_initialization_need_no_internal_state_edits() {
     assert_eq!(status["status"], "committed_not_executed");
     assert_eq!(status["operator_next"], "resume");
 }
+
+#[test]
+fn spec_c07_reading_commands_round_trip_through_the_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_tsr"))
+            .args(["engine", "--directory"])
+            .arg(dir.path())
+            .args(["project"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let printed = |args: &[&str]| -> serde_json::Value {
+        let out = run(args);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let spec = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/engine-cargo/scope.json"
+    );
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/engine-cargo");
+    assert!(run(&["init", "--spec", spec, "--source", source])
+        .status
+        .success());
+    let file = dir.path().join("input.json");
+    let path = file.to_str().unwrap();
+
+    std::fs::write(
+        &file,
+        serde_json::json!({
+            "want": "a harder second level",
+            "sense": null,
+            "belief": null,
+            "expect": null,
+            "expected_return": {"from": "the operator", "what": "says it is harder"},
+            "falsifier": "the operator says it is too easy",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let recorded = printed(&["reading-record", "--file", path]);
+    let reading = recorded["reading"].as_str().unwrap();
+
+    let returned = printed(&["return", "--text", "waaaay too easy", "--reading", reading]);
+    assert!(returned["returned"].is_string());
+
+    // The largest text a return may hold, in characters JSON has to escape, is still a return.
+    let text = "\u{1}".repeat(4096);
+    std::fs::write(
+        &file,
+        serde_json::json!({"reading": reading, "text": text, "evidence": null}).to_string(),
+    )
+    .unwrap();
+    assert!(std::fs::metadata(&file).unwrap().len() > 16384);
+    printed(&["check-return", "--file", path]);
+
+    let view = printed(&["reading-view"]);
+    assert_eq!(
+        view["bounded"]["current_want"]["text"],
+        "a harder second level"
+    );
+    let returns = &view["bounded"]["readings"][0]["returns"];
+    assert_eq!(returns[0]["from"], "operator");
+    assert_eq!(returns[0]["text"], "waaaay too easy");
+    assert_eq!(returns[1]["from"], "rules");
+    assert_eq!(view["counts"]["readings"], 1);
+    assert_eq!(view["counts"]["returns_named"], 2);
+
+    // Refusals leave the view as it was.
+    assert!(!run(&["return", "--text", "   "]).status.success());
+    std::fs::write(&file, r#"{"want":null,"verdict":"good"}"#).unwrap();
+    assert!(!run(&["reading-record", "--file", path]).status.success());
+    std::fs::write(&file, "x".repeat(262145)).unwrap();
+    assert!(!run(&["reading-record", "--file", path]).status.success());
+    assert_eq!(printed(&["reading-view"]), view);
+}
