@@ -254,7 +254,9 @@ class Cycle(BrowserAdapter):
             if kind == 'reading':
                 out['value'] = copy.deepcopy(WANT)
             elif kind == 'proposal':
-                out['value'] = copy.deepcopy(remaining.pop(0) if remaining else RETAIN)
+                turn = remaining.pop(0) if remaining else RETAIN
+                if turn is not None:  # None keeps the fixture's own playable edit.
+                    out['value'] = copy.deepcopy(turn)
             elif reject_reviews:
                 out['value']['verdict'] = 'reject'
                 next(iter(out['value']['findings'].values())).update(finding='not_met', explanation='Authored criticism')
@@ -447,6 +449,7 @@ class Cycle(BrowserAdapter):
             module.reflect = reflect
             return module
         m.load = load
+        self.script(a, [None])
         result = self.cycle(a, ca).run()
         self.assertEqual(result['status'], 'spend_cap')
         self.assertIn('Controller checks ran', json.dumps(self.returns()))
