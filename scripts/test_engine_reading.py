@@ -4,6 +4,7 @@ The authored class uses the real native controller and an authored transport. Th
 order, refusals and prompts. They are not evidence about what a model will write.
 """
 import copy
+import importlib.util
 import json
 import os
 import random
@@ -294,6 +295,15 @@ class Cycle(BrowserAdapter):
         big = 'é' * (reading.TEXT_MAX // 2)
         value = {'want': big, 'sense': big, 'belief': big, 'expect': big, 'expected_return': {'from': big, 'what': big}, 'falsifier': big}
         self.assertTrue(self.c.json_cli(('project', 'reading-record'), value)['reading'])
+
+    def test_spec_c01_real_launcher_gives_the_cycle_the_reading_only_when_opted_in(self):
+        spec = importlib.util.spec_from_file_location('reading_native_cycle', Path(__file__).with_name('engine-native-cycle.py'))
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        a, ca = self.configure()
+        self.assertEqual(launcher.build_cycle(m.loop.Cycle, ca, a).reading, a.reading)
+        a.admission = {k: v for k, v in a.admission.items() if k != 'reading_profile'}
+        self.assertIsNone(launcher.build_cycle(m.loop.Cycle, ca, a).reading)
 
     def test_spec_c11_not_opted_in_takes_no_reading_and_keeps_the_menu(self):
         a, ca = self.configure(profile=None)
