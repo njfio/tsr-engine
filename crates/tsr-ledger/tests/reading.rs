@@ -33,6 +33,7 @@ fn wanting(want: &str) -> Reading {
             what: "says it is harder".to_string(),
         }),
         falsifier: Some("the operator says it is still too easy".to_string()),
+        gap: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn blank() -> Reading {
         expect: None,
         expected_return: None,
         falsifier: None,
+        gap: None,
     }
 }
 
@@ -377,6 +379,7 @@ fn spec_c12_forged_events_admit_nothing() {
         EventKind::Reading {
             reading: Reading {
                 falsifier: None,
+                gap: None,
                 ..wanting("malformed")
             },
         },
@@ -503,6 +506,7 @@ fn randomized_text_never_panics_and_validation_decides_every_append() {
                 what,
             }),
             falsifier: text(next()),
+            gap: None,
         };
         let valid = r.validate().is_ok();
         let fields = [&r.want, &r.sense, &r.belief, &r.expect, &r.falsifier];
@@ -522,4 +526,26 @@ fn randomized_text_never_panics_and_validation_decides_every_append() {
     }
     assert!(accepted > 0);
     assert!(s.all().unwrap().is_empty());
+}
+
+/// Spec #12: `gap` is optional, bounded like the other fields, and absent from the serialized
+/// form when unset, so a reading without it keeps the identity it had before the field existed.
+#[test]
+fn spec12_gap_is_optional_bounded_and_identity_preserving() {
+    let without = wanting("a harder second level");
+    let text = serde_json::to_string(&without).unwrap();
+    assert!(!text.contains("gap"), "{text}");
+    let with = Reading {
+        gap: Some("the want is far from what the game does now".to_string()),
+        ..wanting("a harder second level")
+    };
+    with.validate().unwrap();
+    assert!(serde_json::to_string(&with).unwrap().contains("\"gap\""));
+    let blank_gap = Reading {
+        gap: Some("   ".to_string()),
+        ..wanting("a harder second level")
+    };
+    assert!(blank_gap.validate().is_err());
+    let parsed: Reading = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed, without);
 }

@@ -85,6 +85,7 @@ mod tests {
                 what: "says it is harder".into(),
             }),
             falsifier: Some("the operator says it is too easy".into()),
+            gap: None,
         }
     }
 

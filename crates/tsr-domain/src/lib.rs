@@ -827,6 +827,10 @@ pub struct Reading {
     pub expect: Option<String>,
     pub expected_return: Option<ExpectedReturn>,
     pub falsifier: Option<String>,
+    /// How far apart the want, hunch, belief and expectation seem now (spec #12, the notebook of
+    /// ch. 21). Optional and omitted when absent, so readings without it keep their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<String>,
 }
 
 impl Reading {
@@ -839,6 +843,7 @@ impl Reading {
             &self.belief,
             &self.expect,
             &self.falsifier,
+            &self.gap,
         ]
         .into_iter()
         .flatten()
