@@ -51,6 +51,20 @@ class Shape(unittest.TestCase):
             with self.subTest(value=str(value)[:60]), self.assertRaises(ValueError):
                 abilities.check_play(value)
 
+    def test_spec_c21_every_play_refusal_is_a_correctable_format_defect(self):
+        # Regression: live run p1-full ended in technical_stop on a play with action kind "value".
+        correction = m.load('abilities_correction_test', 'engine-bounded-correction.py')
+        key = {'kind': 'key', 'value': 'ArrowUp'}
+        check = {'selector': 'body', 'text': ''}
+        bad = [{'actions': [key] * 65, 'checks': [check]}, {'actions': [], 'checks': []}, {'actions': [{'kind': 'value', 'value': 'x'}], 'checks': [check]},
+               {'actions': [{'kind': 'wait', 'value': 1001}], 'checks': [check]}, {'actions': [{'kind': 'key', 'value': ''}], 'checks': [check]},
+               {'actions': [], 'checks': [check], 'pad': 1}, {'actions': 'x', 'checks': [check]}]
+        for value in bad:
+            with self.subTest(value=str(value)[:60]):
+                with self.assertRaises(ValueError) as caught:
+                    abilities.check_play(value)
+                self.assertIsNotNone(correction.native_feedback(caught.exception.diagnostic), caught.exception.diagnostic)
+
     def test_spec_c12_play_over_the_probe_file_limit_is_refused(self):
         big = {'actions': [{'kind': 'click', 'value': 'x' * 128}] * 64, 'checks': [{'selector': 'b', 'text': ''}]}
         with self.assertRaises(ValueError):
@@ -349,6 +363,18 @@ class Cycle(BrowserAdapter):
         self.assertIn('blocked inline style', text)
         self.assertIn(before, text)
         self.assertFalse(self.c.cli('project', 'acceptance', 'status')['accepted'])
+
+    def test_spec_c21_bad_play_is_corrected_and_the_run_goes_on(self):
+        # Regression: live run p1-full ended in technical_stop on a play with action kind "value".
+        a, ca = self.configure()
+        bad = {'play': {'actions': [{'kind': 'value', 'value': 'ArrowRight'}], 'checks': PLAY['play']['checks']}}
+        seen, ran = self.script(a, [NEED, bad, PLAY, RETAIN, RETAIN])
+        self.cycle(a, ca).run()
+        terminal = [json.loads(line)['event'] for line in (self.root / 'abilities-cycle' / 'cycle.jsonl').read_text().splitlines()]
+        stops = [r['value']['status'] for r in terminal if r.get('kind') == 'result' and r['name'] == 'terminal']
+        self.assertEqual(stops, ['proposal_retention'])
+        self.assertEqual(len(ran), 1)
+        self.assertIn('Start', ran[0]['files']['index.html'])
 
     def test_spec_c05_later_reading_sees_what_the_play_returned(self):
         a, ca = self.configure()

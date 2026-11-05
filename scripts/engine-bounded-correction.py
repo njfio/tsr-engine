@@ -5,7 +5,8 @@ criterion-only policy permits one contradictory-assessment regeneration. Zero by
 """
 import json,os,hashlib,copy,re
 from pathlib import Path
-SHAPE_CODES=frozenset({'unsupported_field','required_field','string_required','array_required','object_required','number_required','integer_required','boolean_required','null_required','text_bound','array_length','unique_file_edits'})
+SHAPE_CODES=frozenset({'unsupported_field','required_field','string_required','array_required','object_required','number_required','integer_required','boolean_required','null_required','text_bound','array_length','unique_file_edits',
+ 'array_bound','unsupported_value','integer_bound'})  # The last three come from the play check (spec #11).
 def native_feedback(raw):
  if not isinstance(raw,str) or len(raw.encode())>8192:return None
  prefix='Error: TSR_SHAPE_V1:'
@@ -19,13 +20,14 @@ def native_feedback(raw):
    return d
   v=json.loads(raw[len(prefix):],object_pairs_hook=unique)
  except (ValueError,TypeError):return None
- allowed={'version','code','path','allowed_fields','required_fields','valid_locations','unknown_key_ordinal','field_name_withheld','expected_type','max_utf8_bytes','nonblank','min_items','max_items','actual_utf8_bytes'}
+ allowed={'version','code','path','allowed_fields','required_fields','valid_locations','unknown_key_ordinal','field_name_withheld','expected_type','max_utf8_bytes','nonblank','min_items','max_items','actual_utf8_bytes','allowed_values','minimum','maximum','max_chars'}
  if not isinstance(v,dict) or set(v)-allowed or v.get('version')!='native-shape-diagnostic@v1' or v.get('code') not in SHAPE_CODES|{'representation_size'}:return None
  path=r'\$(?:\.[A-Za-z_][A-Za-z_0-9]*|\[[0-9]*\])*'
  if not isinstance(v.get('path'),str) or not re.fullmatch(path,v['path']):return None
+ if 'allowed_values' in v and (not isinstance(v['allowed_values'],list) or len(v['allowed_values'])>64 or any(not isinstance(i,str) or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,63}',i) for i in v['allowed_values'])):return None
  for key in ('allowed_fields','required_fields','valid_locations'):
   if key in v and (not isinstance(v[key],list) or len(v[key])>64 or any(not isinstance(i,str) or len(i)>256 or not re.fullmatch(path if key=='valid_locations' else r'[A-Za-z_][A-Za-z_0-9]*',i) for i in v[key])):return None
- for key in ('max_utf8_bytes','min_items','max_items','unknown_key_ordinal','actual_utf8_bytes'):
+ for key in ('max_utf8_bytes','min_items','max_items','unknown_key_ordinal','actual_utf8_bytes','minimum','maximum','max_chars'):
   if key in v and (type(v[key]) is not int or not 0<=v[key]<=(8388608 if key=='actual_utf8_bytes' else 1048576)):return None
  for key in ('nonblank','field_name_withheld'):
   if key in v and type(v[key]) is not bool:return None
