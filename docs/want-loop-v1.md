@@ -1,12 +1,28 @@
-# Want loop v1: built, not yet run live
+# Want loop v1: one live run, no need stated
 
 Spec: [specs/11/spec.md](../specs/11/spec.md). Launcher: `experiments/want-loop-v1/`.
 
 One launch runs until it stops by itself. There are no stages to prepare. A proposal can state a `need`; the first need reveals a local `play` that runs the current source with the model's own controls, and the result comes back beside the reading. A later need goes to the operator. Retaining with nothing new, abstaining, or reaching a spending cap, if the launch sets one, also ends the run.
 
-## What is known
+## Live run r2 (2026-11-05)
 
-Everything below comes from authored transports and the real local browser harness. No model has seen this prompt, so nothing here says what a model will do or want.
+One launch of `gpt-6-luna` with no spending cap, at commit `ec9e2bd`. It ended by itself with `proposal_retention` after 10 calls, $0.029116 and about 10 minutes. The game is still the empty scaffold.
+
+| Turn | Want in the reading | Proposal | Result |
+|---|---|---|---|
+| 0 | The scaffold becomes a small deterministic game with checkable routes and outcomes | Edit | Rejected: collapse timers never initialized |
+| 1 | More care about the gap between claims and source | Edit | Rejected, including route text cut at 200 characters |
+| 2 | "I want to be able to tell when the game's mechanics are real rather than just described" | Retain | Another reading, since a rejection was new |
+| 3 | A clearer basis for telling what the game does from what proposals said | Retain | Run ended |
+
+- **No need was stated**, in any of the 4 proposal prompts that offered it, so `play` was never revealed and nothing was played or executed.
+- **The want on turn 2 is close to the one this loop was built for, but it didn't turn into a need.** The model retained and said no browser return had come, without using the form that would have asked for a way to get one.
+- **`play` might not have helped here.** It runs current source, and both edits were rejected before executing, so a play would have run the empty scaffold.
+- This is one run. It doesn't show why no need was stated, or what a different prompt or another run would do.
+
+## What is known from authored tests
+
+Everything below comes from authored transports and the real local browser harness.
 
 - Need, play, retention, cap and restart paths run through the real native controller.
 - A set cap is checked before every dispatch, including inspections, format corrections and recovery. A call under way can overshoot by that one call.

@@ -1,6 +1,6 @@
 # Spec #11: A want for a missing ability gets acted on
 
-Status: Reviewed (P1, multi-module: flagged for human review in the PR). Built and tested offline; no live run yet.
+Status: Reviewed (P1, multi-module: flagged for human review in the PR). One live run, r2: no need stated. See docs/want-loop-v1.md.
 Milestone: Wanting crossing. Follows #10.
 
 ## Problem
