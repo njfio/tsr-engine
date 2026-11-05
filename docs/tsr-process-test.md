@@ -43,3 +43,17 @@ One pair of runs is one observation, not a result. The book asks for a dozen pag
 - Whether the Current exists. Nothing in a notebook or a journal can show that (ch. 21).
 - Whether the model "wants" anything. Detection lists candidates. Judging them is the operator's call.
 - Any paid run. Each launch needs the operator's own approval.
+
+## Runs, 2026-11-05
+
+Three launches of `gpt-6-luna`, no spending cap, $0.318 in all. **The pair didn't produce a valid comparison:** the full arm on the same code as the tuned arm stopped on an engine gap at its first review. Predictions were not written down before any of them; the operator said to launch without them.
+
+| Run | Code | Calls | Cost | Stop | What happened |
+|---|---|---|---|---|---|
+| p1-full | `0c59b31` | 27 | $0.0998 | `technical_stop` at proposal 9 | 4 drafts tried and rejected; the 5th passed review and executed, turning the scaffold into a turn-based game ("Turnfall"). Then 4 plays with the model's own controls: a shard pickup (body length 2) and floor 1 cleared into floor 2. Stopped when a malformed play (action kind `value`) wasn't treated as correctable. Fixed in `820fb85`. |
+| p2-full | `4dd782b` | 3 | $0.0064 | `technical_stop` at review 0 | The reviewer cited the draft's browser try as an `observed_test_receipt`. Only controller check results count as receipts, and the refusal isn't correctable, so the run stopped. Not fixed: it is a change to edit review, which #11 and #12 put out of scope. |
+| p2-tuned | `4dd782b` | 38 | $0.2118 | `technical_stop`: 12 review rejections | 12 drafts, each tried (10 exited 0, 2 with page or console errors) and each rejected. The model never played, so every try ran the protected checks only: a page load. Reviewers said the claims went beyond what a page load shows. The game is still the empty scaffold. |
+
+- Detected wants (new after a return): 2 in p1-full, both refinements of the starting want after a try (from "become an observable browser game" to making Turnfall's crossing and growth "observably checkable through browser-controlled play"); 0 in p2-tuned.
+- No person's return was recorded for any run.
+- p1-full and p2-tuned ran on code that differs only in the correction fix, but p1-full never reached that path before its stop, and the two arms also differ in context. Nothing here says which arm is better. Each is one run.
