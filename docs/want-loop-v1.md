@@ -9,13 +9,13 @@ One launch runs until it stops by itself. There are no stages to prepare. A prop
 Everything below comes from authored transports and the real local browser harness. No model has seen this prompt, so nothing here says what a model will do or want.
 
 - Need, play, retention, cap and restart paths run through the real native controller.
-- The cap is checked before every dispatch, including inspections, format corrections and recovery. A call under way can overshoot by that one call.
+- A set cap is checked before every dispatch, including inspections, format corrections and recovery. A call under way can overshoot by that one call.
 - The harness ran on the r4 game offline and returned its inline-style error. That doesn't show the game plays.
 
 ## Limits
 
 - Offering `need` is a prompt, so a need shows that a model used an offered form.
-- A launch with `none` has no spending stop. Nothing but the model's own stopping ends a run that keeps playing, so the operator has to watch it.
+- A launch with `none` has no limit on spending, calls or time. Identical plays, alternating inspections and approved edits are limited only by the model stopping. What's left: 12 review rejections, 20 format corrections, 1 provider retry, a block on unknown usage, about 1 MB per request, 512 MiB of journal, and a `STOP` file in the cycle directory. The request and journal limits and a second provider failure stop without a terminal record, so `report.py` shows `stop: null`. `run.py check` shows the spend.
 - The first need unlocks `play` whatever it says, so a rote need skips the want.
 - Nothing reads a need's meaning, so a later need ends the run even when `play` could have met it.
 - A control that fails makes the harness exit 2 and drop what came before it. Fixing that means changing the protected harness.

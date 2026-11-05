@@ -441,6 +441,9 @@ class Cycle:
             _,pending,done=self.read()
             if pending:raise d.Blocked('uncertain effect; reconcile without retry')
             if 'terminal' in done:return done['terminal']
+            # Read from the journal, so a crash between the need and this stop can't turn into another paid reading.
+            unmet=[v['need'] for k,v in done.items() if k.startswith('ability_need_') and v['unmet']]
+            if unmet:return self.terminal('need_to_operator',need=unmet[0],desires_remain_open=True,acceptance_recorded=False)
             refreshed=self.context_refresh(done)
             if refreshed is not None:return refreshed
             if 'stage_receipts' in self.admission:
@@ -578,8 +581,7 @@ class Cycle:
             proposed=self.model_stage('proposal_'+index,'proposal',captured)
             response=proposed['response']
             if self.abilities is not None and set(response)=={'need'}:
-                outcome=self.op('ability_need_'+index,lambda:self.abilities.ability_need(response['need']))
-                if outcome['unmet']:return self.terminal('need_to_operator',need=outcome['need'],desires_remain_open=True,acceptance_recorded=False)
+                self.op('ability_need_'+index,lambda:self.abilities.ability_need(response['need']))
                 continue
             if self.abilities is not None and set(response)=={'play'}:
                 self.op('ability_play_'+index,lambda:self.abilities.ability_play(response['play']))

@@ -31,7 +31,8 @@ NEED_SYSTEM = (
     'If you lack an ability you would need for what you want here, you may return {need:{what,because}} in your own words instead. '
     'It is recorded beside your latest reading, and nothing reads what it means. Your first need makes available whatever is already within scope, whatever it asks for. '
     'A need stated after that ends this run and goes to the operator; nothing is built for it automatically. '
-    'Retaining after something new has come back takes another reading; retaining with nothing new ends this run. The run also ends at a spending cap.')
+    'Retaining after something new has come back takes another reading; retaining with nothing new ends this run.')
+CAP_SYSTEM = ' The run also ends at a spending cap.'
 PLAY_SYSTEM = (
     ' Available now: {play:{actions,checks}} runs the current source in the protected browser harness with your own controls. '
     'actions are {kind,value}: click with a selector, key with a key name, or wait with milliseconds. '
@@ -58,8 +59,8 @@ def admission_fields(profile, reading_profile, cap):
     return {'abilities_profile': PROFILE, 'spend_cap_microusd': cap}
 
 
-def system_text(revealed):
-    return NEED_SYSTEM + (PLAY_SYSTEM if 'play' in revealed else '')
+def system_text(revealed, capped=True):
+    return NEED_SYSTEM + (CAP_SYSTEM if capped else '') + (PLAY_SYSTEM if 'play' in revealed else '')
 
 
 # The reading prompt's stopping sentences, as they are in this loop. Each must still be there to replace.
@@ -67,12 +68,12 @@ _RETENTION = ('Retention ends this checkpoint, not future separately admitted in
 _ABSTENTION = ('this stops the scheduled session. Neither creates user acceptance.', 'this ends the run. Neither creates user acceptance.')
 
 
-def proposal_system(base, revealed):
+def proposal_system(base, revealed, capped=True):
     for old, new in (_RETENTION, _ABSTENTION):
         if base.count(old) != 1:
             raise ValueError('proposal prompt changed: ' + old)
         base = base.replace(old, new)
-    return base + ' ' + system_text(revealed)
+    return base + ' ' + system_text(revealed, capped)
 
 
 def envelope(base, revealed):

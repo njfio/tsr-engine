@@ -154,6 +154,13 @@ class Prompts(unittest.TestCase):
         self.assertIn('first need', text)
         self.assertIn('spending cap', text)
 
+    def test_spec_c15_prompt_mentions_a_cap_only_when_there_is_one(self):
+        for revealed in ([], ['play']):
+            text = abilities.proposal_system(reading.PROPOSAL_SYSTEM, revealed, capped=False)
+            self.assertNotIn('spending', text)
+            self.assertNotIn(' cap', text)
+            self.assertIn('first need', text)
+
     def test_response_envelope_names_what_is_offered(self):
         self.assertIn('{need:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
         self.assertNotIn('{play:', abilities.envelope(reading.RESPONSE_ENVELOPE, [])['instruction'])
@@ -372,6 +379,39 @@ class Cycle(BrowserAdapter):
         self.assertTrue(result['desires_remain_open'])
         self.assertFalse(result['acceptance_recorded'])
         self.assertEqual(ran, [])
+
+    def test_spec_c15_no_cap_prompt_reaches_the_model_without_the_sentence(self):
+        a, ca = self.configure(cap=None)
+        seen, _ = self.script(a, [RETAIN])
+        self.cycle(a, ca).run()
+        self.assertTrue(seen)
+        self.assertNotIn('spending cap', json.dumps(seen))
+
+    def test_spec_c07_restart_after_a_second_need_still_stops(self):
+        a, ca = self.configure()
+        second = {'need': {'what': 'A human playtester', 'because': 'Only a person can say if it is fun'}}
+        seen, _ = self.script(a, [NEED, second])
+
+        class Killed(BaseException):
+            pass
+
+        first = self.cycle(a, ca)
+        terminal = first.terminal
+
+        def die(*args, **kwargs):
+            raise Killed()
+        first.terminal = die
+        with self.assertRaises(Killed):
+            first.run()
+        fresh = self.adapter()
+        calls = []
+        fresh.injected_transport = lambda body, timeout: calls.append(1)
+        again = self.cycle(fresh, ca)
+        again.recover_pending()
+        result = again.run()
+        self.assertEqual(result['status'], 'need_to_operator')
+        self.assertEqual(result['need'], second['need'])
+        self.assertEqual(calls, [])
 
     def test_spec_c09_spend_cap_stops_before_the_next_call(self):
         a, ca = self.configure(cap=1)

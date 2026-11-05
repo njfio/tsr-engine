@@ -507,7 +507,7 @@ class Adapter(recovery.Recovery,base.Adapter):
                 stripped['response_contracts'].update(abilities_policy.contracts(revealed))
                 stripped.pop('play_returns',None)  # It already sits beside the readings.
                 if 'response_envelope' in stripped:stripped['response_envelope']=abilities_policy.envelope(stripped['response_envelope'],revealed)
-                return self.body(abilities_policy.proposal_system(reading_policy.PROPOSAL_SYSTEM,revealed),stripped)
+                return self.body(abilities_policy.proposal_system(reading_policy.PROPOSAL_SYSTEM,revealed,self.admission['spend_cap_microusd'] is not None),stripped)
             return self.body(reading_policy.PROPOSAL_SYSTEM,stripped)
         # One shared text for every arm and branch: the paired comparison requires identical
         # system messages. Each limit is stated once, in the ground rules, not attached to
