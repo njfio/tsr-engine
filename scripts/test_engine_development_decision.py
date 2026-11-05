@@ -66,12 +66,13 @@ def diagnostic(error):
 
 
 class ChoiceSummary(unittest.TestCase):
-    def test_retention_asks_for_a_development_decision_only_when_development_is_offered(self):
+    def test_retention_mentions_an_optional_decision_only_when_development_is_offered(self):
         request, context = fixture()
         summary = refs.project(context, request)['choice_summary']
         self.assertIn('provisional_preference', summary['forms'])
         self.assertIn('relationship_initial', summary['forms'])
         self.assertIn('development_declined', summary['forms']['retain'])
+        self.assertIn('never required', summary['forms']['retain'])
         self.assertEqual(summary['unavailable_development_routes'], {})
         self.assertEqual(refs.development_forms(summary), ['provisional_preference', 'relationship_initial'])
 
@@ -118,28 +119,11 @@ class RetentionDecision(unittest.TestCase):
         for other in ('abstain', 'retain', 'inspect', 'deliberation'):
             self.assertIsNone(located({other: 'x', 'rationale': 'r'}), other)
 
-    def test_bare_retention_is_a_correctable_format_defect_when_development_is_offered(self):
-        with self.assertRaises(ValueError) as caught:
-            adapter(['provisional_preference']).check_proposal_shape({'retain': 'Keep it'})
-        detail = diagnostic(caught.exception)
-        self.assertEqual(detail['code'], 'required_field')
-        self.assertEqual(detail['required_fields'], ['development_declined', 'retain'])
-
-    def test_settled_bare_retention_receives_one_bounded_correction_naming_the_field(self):
-        import tempfile
-        with self.assertRaises(ValueError) as caught:
-            adapter(['provisional_preference']).check_proposal_shape({'retain': 'Keep it'})
-        with tempfile.TemporaryDirectory() as d:
-            budget = correction.Budget(Path(d) / 'corrections.jsonl', {'version': 'browser-project-cycle-adapter@v7'}, allowance=1)
-            settled = {'receipt': {'status': 'settled', 'usd': 0.001}}
-            feedback = budget.feedback('proposal', 'a' * 64, settled, 'request-1', native_diagnostic=caught.exception.diagnostic)
-            self.assertEqual(feedback['code'], '$: required_field')
-            self.assertEqual(feedback['native_structure']['required_fields'], ['development_declined', 'retain'])
-            corrected = budget.body({'messages': [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': '{}'}]}, feedback)
-            self.assertIn('development_declined', corrected['messages'][-1]['content'])
-            # One allowance means one correction; a second bare retention is a terminal stop.
-            with self.assertRaisesRegex(ValueError, 'exhausted'):
-                budget.feedback('proposal', 'a' * 64, settled, 'request-2', native_diagnostic=caught.exception.diagnostic)
+    def test_spec12_bare_retention_is_accepted_even_when_development_is_offered(self):
+        # Spec #12, rule 9: requiring a development decision was Focus, so it is no longer required.
+        adapter(['provisional_preference']).check_proposal_shape({'retain': 'Keep it'})
+        adapter(['provisional_preference']).check_proposal_shape(
+            {'deliberation': {'artifact': {'retain': 'Keep it'}, 'development': None, 'artifact_dependency': 'independent'}})
 
     def test_stated_decision_is_accepted_and_plain_retention_still_works_without_development(self):
         a = adapter(['provisional_preference'])
@@ -158,13 +142,6 @@ class RetentionDecision(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             a.check_proposal_shape({'retain': 'Keep it', 'development_declined': 'x' * 60})
         self.assertEqual(diagnostic(caught.exception)['code'], 'text_bound')
-
-    def test_deliberation_cannot_retain_both_without_the_decision(self):
-        value = {'deliberation': {'artifact': {'retain': 'Keep it'}, 'development': None, 'artifact_dependency': 'independent'}}
-        with self.assertRaises(ValueError) as caught:
-            adapter(['provisional_preference']).check_proposal_shape(value)
-        self.assertEqual(diagnostic(caught.exception)['path'], '$.deliberation.development')
-        adapter([]).check_proposal_shape(value)
 
     def test_expansion_folds_the_decision_into_the_native_reason(self):
         request, context = fixture()
@@ -245,14 +222,13 @@ class ObservationCoverage(unittest.TestCase):
         self.assertNotIn('>4000', harness)
         self.assertIn('>4000', (HERE / 'engine-browser-harness-v1.cjs').read_text())
 
-    def test_no_proposal_envelope_offers_bare_retention_beside_development(self):
+    def test_spec12_no_prompt_requires_a_development_decision(self):
         import re
-        for name in ('engine-browser-adapter.py', 'engine-browser-project.py'):
+        for name in ('engine-browser-adapter.py', 'engine-browser-project.py', 'engine-proposal-references.py'):
             text = (HERE / name).read_text()
-            for match in re.finditer(r"\{retain:reason\}", text):
-                window = text[max(0, match.start() - 120):match.start() + 160]
-                self.assertTrue('development_declined' in window or 'only when' in window or 'no development form' in window,
-                                name + ': ' + window)
+            for match in re.finditer(r"development_declined:reason", text):
+                window = text[max(0, match.start() - 160):match.start() + 200]
+                self.assertTrue('never required' in window or 'optionally' in window or 'may add' in window, name + ': ' + window)
 
     def test_declarations_must_be_complete(self):
         for bad in ({}, {'crossing': {'min_inputs': 0, 'basis': 'x'}}, {'crossing': {'min_inputs': 3, 'basis': ' '}},

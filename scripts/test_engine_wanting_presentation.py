@@ -22,7 +22,8 @@ class WantingPresentation(unittest.TestCase):
  def test_retention_and_component_authority_remain_separate(self):
   text=self.body('propose')['messages'][0]['content']
   self.assertIn('both artifact and meaning',text);self.assertIn('keeping the artifact alone does not preclude',text)
-  self.assertIn('{retain:reason, development_declined:reason}',text)
+  self.assertIn('return {retain:reason}; you may add development_declined:reason',text)
+  self.assertIn('never required',text)
   self.assertIn('explicit dependency and separate reviews',text);self.assertIn('executes only with authorization',text)
   advisory=self.body('reconsider')['messages'][0]['content'];self.assertIn('no execution',advisory)
  def test_reviewer_permits_supported_facts_but_rejects_fabrication(self):

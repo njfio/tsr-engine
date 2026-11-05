@@ -33,14 +33,14 @@ class BrowserDeliberation(BrowserDesire):
    out=original(body,timeout);out['value']={'retain':'Authored no new meaning','development_declined':'Authored fixture: development considered, none proposed at this checkpoint'};return out
   a.injected_transport=transport;result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
   self.assertEqual(result['status'],'proposal_retention');self.assertEqual(self.ledger.status()['calls'],1)
- def test_bare_retention_while_development_is_offered_is_not_accepted(self):
+ def test_spec12_bare_retention_while_development_is_offered_is_accepted(self):
+  # Spec #12, rule 9: a development decision is recorded when given and never required.
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):
    out=original(body,timeout);out['value']={'retain':'Authored bare retention without a development decision'};return out
   a.injected_transport=transport
-  try:result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
-  except Exception as error:result={'status':'raised','error':str(error)}
-  self.assertNotEqual(result['status'],'proposal_retention')
+  result=m.loop.Cycle(ca['journal'],ca,a.native,a.proposal,a.review).run()
+  self.assertEqual(result['status'],'proposal_retention')
  def test_same_identity_component_preserves_exact_admitted_delta(self):
   a,ca=self.configure();original=self.transport
   def transport(body,timeout):

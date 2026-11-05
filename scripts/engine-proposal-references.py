@@ -64,9 +64,9 @@ LEGACY_OPTIONS='Edits, initial or developed relationships, supported Contrast-de
 # Forms that develop meaning rather than keep or change the artifact.
 DEVELOPMENT_FORMS=('relationship_initial','relationship_revision','meaning_development','provisional_preference','contrast_preference','success_preference')
 RETAIN_PLAIN='Keep the current artifact and meaning unchanged for this checkpoint: {retain:reason}. Not fulfillment or acceptance.'
-RETAIN_WITH_DECISION=('Keep the current artifact and meaning unchanged for this checkpoint: {retain:reason, development_declined:reason}. '
-    'development_declined names the development forms listed here that you considered and why none is worth proposing now; '
-    'it is recorded with the retention. Not fulfillment or acceptance.')
+RETAIN_WITH_DECISION=('Keep the current artifact and meaning unchanged for this checkpoint: {retain:reason}. '
+    'You may add development_declined:reason, naming development forms listed here that you considered; '
+    'it is recorded with the retention when given and never required. Not fulfillment or acceptance.')
 
 def retain_form(forms):
     """Retention costs the same decision as development whenever development is offered."""

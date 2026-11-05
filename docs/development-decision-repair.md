@@ -50,18 +50,15 @@ The frozen v2 mapping is unchanged. Its file hashes are bound in the
 
 Repairs:
 
-- **Retention states its development decision.** Whenever `choice_summary`
-  offers a development form, retention is
-  `{retain:reason, development_declined:reason}`.
-  - A bare `{retain}`, or a deliberation that retains the artifact with
-    `development: null`, gets a structural diagnostic (`required_field` /
-    `object_required`). That diagnostic is eligible for the existing bounded
-    format correction.
-  - The decline reason is folded into the native retention reason under a fixed
-    label (`Development considered and declined:`), so it is recorded without a
-    native schema change.
-  - With no development form offered, plain `{retain:reason}` is unchanged. The
-    ordinary-memory arm, which offers none, keeps plain retention.
+- **Retention may state its development decision (superseded by spec #12).**
+  This was first a requirement: a bare `{retain}` got a structural diagnostic
+  whenever development was offered. Reading *The Sovereign Mirror* afterwards
+  showed that requiring it was Focus pushed against the same gap (ch. 11–12).
+  Spec #12 made it optional.
+  - `{retain:reason}` is always accepted.
+  - `development_declined:reason` is recorded when given, folded into the native
+    retention reason under the fixed label `Development considered and declined:`,
+    and never required.
 - **Balanced prompt.** One shared system message, still identical across paired
   arms, names three choices with none preferred. It states each limit once, in
   ground rules that apply to every choice.
