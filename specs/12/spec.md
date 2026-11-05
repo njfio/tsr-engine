@@ -1,6 +1,6 @@
 # Spec #12: Let the process run the way the book says it runs
 
-Status: Draft, needs operator review (P1, multi-module). Built and tested offline; no paid run.
+Status: Approved by the operator 2026-11-05, including both paid launches (tuned and full arms). Built and tested offline. Launches run from the operator's machine; none has run yet.
 Milestone: Wanting crossing. Follows #10 and #11.
 
 ## Problem

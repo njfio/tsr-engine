@@ -9,5 +9,5 @@
 - [x] T7 Launcher `experiments/tsr-process-v1/` and its report.
 - [x] T8 Tests: unit tests (admission, notebook, try, detection, tuning, report) and authored native tests (play offered first, try before review, try return once, controls reused, restart, tuned smaller).
 - [x] T9 `docs/tsr-process-test.md`: the pre-registered push/ease protocol.
-- [ ] T10 Operator review of the spec (P1).
-- [ ] T11 Paid launches of both arms. Needs separate operator approval.
+- [x] T10 Operator review of the spec (P1): approved 2026-11-05.
+- [ ] T11 Paid launches of both arms. Approved 2026-11-05; each still needs its independent binding review, run from the operator's machine.
