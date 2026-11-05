@@ -608,6 +608,10 @@ class Cycle:
             preview=self.native('preview',{'response':response});self.same_source(fresh,preview['cycle'])
             if len(e.canonical({'context':fresh,'response':response}))>self.local_context_limit:raise d.Blocked('review context bound')
             if self.abilities is not None and self.abilities.spend_reached():return self.terminal('spend_cap',desires_remain_open=True,acceptance_recorded=False)
+            # Try before review (spec #12): each proposed edit runs on a candidate copy first, so the
+            # reviewer and the next reading see what came back. Changes no source or native state.
+            if self.abilities is not None and getattr(self.abilities,'tsr_process_opted',lambda:False)():
+                self.op('trial_run_'+index,lambda:self.abilities.ability_try(response))
             reviewed=self.model_stage('review_'+index,'review',{**fresh,'response_digest':preview['response_digest']},response)
             judgment=reviewed['judgment']
             if set(judgment)!={'decision','reviewer','generator','response_digest'} or judgment['decision'] not in ('approve','reject','unknown','abstain'):raise ValueError('review judgment shape')
@@ -617,6 +621,8 @@ class Cycle:
                 latest=self.current();self.same_source(captured,latest)
                 if judgment['response_digest']!=preview['response_digest']:raise d.Blocked('rejected response digest drift')
                 self.op('rejected_proposal_'+index,lambda:self.native('reject_proposal',{'source':latest,'response':response,'judgment':judgment}))
+                if self.abilities is not None and getattr(self.abilities,'tsr_process_opted',lambda:False)():
+                    self.op('try_returns_'+index,lambda:self.abilities.record_try_returns())
                 continue
             if judgment['decision']!='approve':return self.terminal('review_'+judgment['decision'])
             final_preview=self.native('preview',{'response':response});latest=final_preview['cycle'];self.same_source(captured,latest)

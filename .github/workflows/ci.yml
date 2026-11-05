@@ -35,6 +35,7 @@ jobs:
           python3 -m unittest
           scripts.test_engine_wanting_presentation
           scripts.test_engine_development_decision
+          scripts.test_engine_tsr_process
           scripts.test_continuous_game_v3_prep
           scripts.test_engine_deliberation_restart
           scripts.test_engine_criterion_consistency
@@ -51,6 +52,7 @@ jobs:
           python3 -m unittest
           scripts.test_engine_browser_provisional.BrowserProvisional.test_initial_single_contributor_recursive_identity_and_inert_restart
           scripts.test_engine_browser_deliberation.BrowserDeliberation.test_lost_native_component_result_recovers_without_second_admission
+          scripts.test_engine_tsr_process.Cycle.test_spec12_ac4_an_edit_runs_on_a_candidate_copy_before_review
       - name: Local UI HTTP and state tests (authored transport)
         env:
           PYTHONPATH: ui/engine:.:scripts

@@ -18,9 +18,10 @@ clock=load('paired_clock','engine-pair-clock.py')
 feedback_policy=load('browser_feedback_policy','engine-feedback-policy.py')
 reading_policy=load('browser_reading','engine-reading.py')
 abilities_policy=load('browser_abilities','engine-abilities.py')
+process_policy=load('browser_tsr_process','engine-process.py')
 VERSION='browser-project-cycle-adapter@v7'
 def pins():
-    return {**base.pins(),**{n:d.file_sha(Path(__file__).with_name(n)) for n in ('engine-reading.py','engine-abilities.py','engine-browser-deliberation.py','engine-criterion-return.py','engine-browser-expansion.py','engine-browser-desire.py','engine-pursuit-reflection.py','engine-feedback-policy.py','engine-proposal-references.py','engine-browser-harness-v1.cjs','engine-browser-session.py','engine-browser-assessment.py','engine-pair-clock.py','engine-browser-ordinary.py','engine-browser-transient.py','engine-browser-predispatch.py','engine-browser-response-recovery.py','engine-objective-continuation.py','engine-browser-adapter.py','engine-browser-project.py','engine-browser-harness.cjs')}}
+    return {**base.pins(),**{n:d.file_sha(Path(__file__).with_name(n)) for n in ('engine-reading.py','engine-abilities.py','engine-process.py','engine-browser-deliberation.py','engine-criterion-return.py','engine-browser-expansion.py','engine-browser-desire.py','engine-pursuit-reflection.py','engine-feedback-policy.py','engine-proposal-references.py','engine-browser-harness-v1.cjs','engine-browser-session.py','engine-browser-assessment.py','engine-pair-clock.py','engine-browser-ordinary.py','engine-browser-transient.py','engine-browser-predispatch.py','engine-browser-response-recovery.py','engine-objective-continuation.py','engine-browser-adapter.py','engine-browser-project.py','engine-browser-harness.cjs')}}
 def supported_harness(text):
     if not isinstance(text,str):return False
     # Current harness, the previous exact harness (12 actions) kept for admitted projects, or an older pinned one.
@@ -36,7 +37,7 @@ def validate_feedback_events(events,parents):
         ids.add(event['id'])
         guidance=event['guidance']
         if not isinstance(guidance,dict) or not guidance or not set(guidance)<=allowed or any(not isinstance(v,str) or not v.strip() or len(v.encode())>web.NATIVE_RESPONSE_LIMIT for v in guidance.values()):raise ValueError('feedback public meaning scope')
-def admission(root,origin,configuration,campaign,expires_at,*,max_decisions=4,max_executions=2,correction_allowance=0,feedback_events=None,feedback_cycle=None,transient_recovery=None,process_profile=None,active_window_seconds=None,independent_assessment=None,unlimited_policy_sha256=None,criterion_return_profile=None,max_review_rejections=3,correction_replay=False,reading_profile=None,abilities_profile=None,spend_cap_microusd=None):
+def admission(root,origin,configuration,campaign,expires_at,*,max_decisions=4,max_executions=2,correction_allowance=0,feedback_events=None,feedback_cycle=None,transient_recovery=None,process_profile=None,active_window_seconds=None,independent_assessment=None,unlimited_policy_sha256=None,criterion_return_profile=None,max_review_rejections=3,correction_replay=False,reading_profile=None,abilities_profile=None,spend_cap_microusd=None,tsr_process_profile=None,process_context=None):
     load('criterion_profile','engine-criterion-return.py').validate(criterion_return_profile)
     unlimited=feedback_policy.unlimited({'unlimited_policy_sha256':unlimited_policy_sha256})
     if type(max_review_rejections) is not int or not 0<=max_review_rejections<=(12 if unlimited else 3):raise ValueError('review rejection allowance')
@@ -54,7 +55,7 @@ def admission(root,origin,configuration,campaign,expires_at,*,max_decisions=4,ma
     if transient_recovery is not None and feedback_cycle is None:raise ValueError('provider recovery requires persistent feedback-session authority')
     feedback_events=feedback_events or []
     validate_feedback_events(feedback_events,origin['public']['parents'])
-    return {**abilities_policy.admission_fields(abilities_profile,reading_profile,spend_cap_microusd),**reading_policy.admission_fields(reading_profile),**({'criterion_return_profile':criterion_return_profile} if criterion_return_profile is not None else {}),**({'correction_replay':True} if correction_replay else {}),**({'unlimited_policy_sha256':unlimited_policy_sha256} if unlimited else {}),**({'independent_assessment':independent_assessment} if independent_assessment is not None else {}),**({'active_window_seconds':active_window_seconds} if active_window_seconds is not None else {}),**({'process_profile':process_profile} if process_profile else {}),**({'transient_recovery':transient_recovery} if transient_recovery is not None else {}),**({'feedback_cycle':feedback_cycle} if feedback_cycle is not None else {}),'feedback_events':feedback_events,'version':VERSION,'directory':str(Path(root).resolve()),'origin':origin,'configuration_sha256':e.sha(configuration),'campaign_sha256':e.sha(campaign),'model':base.MODEL,'max_decisions':max_decisions,'max_calls':None if unlimited else reading_policy.calls_per_decision(reading_profile)*max_decisions+correction_allowance,'max_executions':max_executions,'correction_allowance':correction_allowance,'output_profile':'strict-json-bound@v2','completion_tokens':32768,'context_profile':base.capacity.PROFILE,'input_tokens':base.capacity.INPUT_TOKENS,'payload_bytes':base.capacity.PAYLOAD_BYTES,'incomplete_regeneration':True,'review_format_regeneration':True,'max_review_rejections':max_review_rejections,'representation_regeneration':True,'representation_profile':'browser-exact-edits@v2','expires_at':expires_at,'implementation':pins(),'binary_sha256':d.file_sha(e.ROOT/'target/debug/tsr'),'criteria_sha256':e.sha(base.review_contract.CRITERIA)}
+    return {**process_policy.admission_fields(tsr_process_profile,process_context,reading_profile,abilities_profile),**abilities_policy.admission_fields(abilities_profile,reading_profile,spend_cap_microusd),**reading_policy.admission_fields(reading_profile),**({'criterion_return_profile':criterion_return_profile} if criterion_return_profile is not None else {}),**({'correction_replay':True} if correction_replay else {}),**({'unlimited_policy_sha256':unlimited_policy_sha256} if unlimited else {}),**({'independent_assessment':independent_assessment} if independent_assessment is not None else {}),**({'active_window_seconds':active_window_seconds} if active_window_seconds is not None else {}),**({'process_profile':process_profile} if process_profile else {}),**({'transient_recovery':transient_recovery} if transient_recovery is not None else {}),**({'feedback_cycle':feedback_cycle} if feedback_cycle is not None else {}),'feedback_events':feedback_events,'version':VERSION,'directory':str(Path(root).resolve()),'origin':origin,'configuration_sha256':e.sha(configuration),'campaign_sha256':e.sha(campaign),'model':base.MODEL,'max_decisions':max_decisions,'max_calls':None if unlimited else reading_policy.calls_per_decision(reading_profile)*max_decisions+correction_allowance,'max_executions':max_executions,'correction_allowance':correction_allowance,'output_profile':'strict-json-bound@v2','completion_tokens':32768,'context_profile':base.capacity.PROFILE,'input_tokens':base.capacity.INPUT_TOKENS,'payload_bytes':base.capacity.PAYLOAD_BYTES,'incomplete_regeneration':True,'review_format_regeneration':True,'max_review_rejections':max_review_rejections,'representation_regeneration':True,'representation_profile':'browser-exact-edits@v2','expires_at':expires_at,'implementation':pins(),'binary_sha256':d.file_sha(e.ROOT/'target/debug/tsr'),'criteria_sha256':e.sha(base.review_contract.CRITERIA)}
 def continuation_key(value):
     index=value.get('index')
     if type(index) is not int or index<0:raise ValueError('continuation index')
@@ -89,7 +90,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         if set(origin)-{'directory','public','initial_sources','prior_review_feedback','prior_validation_feedback'} or not {'directory','public','initial_sources'}<=set(origin):raise ValueError('browser origin fields')
         if str(c.directory)!=origin['directory']:raise ValueError('native origin directory')
         config=c.cli('project','config')
-        expected=admission(self.root,origin,config,self.ledger.manifest,a['expires_at'],max_decisions=a['max_decisions'],max_executions=a['max_executions'],correction_allowance=a['correction_allowance'],feedback_events=a['feedback_events'],feedback_cycle=a.get('feedback_cycle'),transient_recovery=a.get('transient_recovery'),process_profile=a.get('process_profile'),active_window_seconds=a.get('active_window_seconds'),independent_assessment=a.get('independent_assessment'),unlimited_policy_sha256=a.get('unlimited_policy_sha256'),criterion_return_profile=a.get('criterion_return_profile'),max_review_rejections=a['max_review_rejections'],correction_replay=a.get('correction_replay',False),reading_profile=a.get('reading_profile'),abilities_profile=a.get('abilities_profile'),spend_cap_microusd=a.get('spend_cap_microusd'))
+        expected=admission(self.root,origin,config,self.ledger.manifest,a['expires_at'],max_decisions=a['max_decisions'],max_executions=a['max_executions'],correction_allowance=a['correction_allowance'],feedback_events=a['feedback_events'],feedback_cycle=a.get('feedback_cycle'),transient_recovery=a.get('transient_recovery'),process_profile=a.get('process_profile'),active_window_seconds=a.get('active_window_seconds'),independent_assessment=a.get('independent_assessment'),unlimited_policy_sha256=a.get('unlimited_policy_sha256'),criterion_return_profile=a.get('criterion_return_profile'),max_review_rejections=a['max_review_rejections'],correction_replay=a.get('correction_replay',False),reading_profile=a.get('reading_profile'),abilities_profile=a.get('abilities_profile'),spend_cap_microusd=a.get('spend_cap_microusd'),tsr_process_profile=a.get('tsr_process_profile'),process_context=a.get('process_context'))
         if a!=expected or time.time()>=feedback_policy.deadline(a,d.stamp):raise ValueError('browser admission drift/expiry')
         if feedback_policy.unlimited(a) and self.ledger.status().get('unlimited_policy_sha256')!=a['unlimited_policy_sha256']:raise ValueError('unlimited policy not recorded in campaign')
         if config.get('browser') is not True or config.get('browser_container_only') is not True or config['image']!=IMAGE or config['user']!='501:20' or config.get('cargo') or config.get('named_package') or config.get('full_workspace_oracle'):raise ValueError('pinned container-only browser profile required')
@@ -190,7 +191,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         if view['branch']=='reconsider':
             context['advisory_reconsideration']=view['reconsideration']
             for key in ('edits_or_abstention','existing','edit_layout'):context['response_contracts'].pop(key,None)
-            context['response_envelope']={'instruction':'Return {alternatives:[one advisory candidate]}, {deliberation:{artifact:{retain:reason},development:one advisory candidate,artifact_dependency:independent|requires_development}}, {retain:reason,development_declined:reason} (development_declined names the development forms in choice_summary you considered and why none is worth proposing now), or {abstain:reason}. No edit, verification execution or inspection in this dedicated reconsideration. Prior lineage is context, not a mandatory target. Independent review is required. Retention does not imply fulfillment or acceptance.','max_alternatives':1}
+            context['response_envelope']={'instruction':'Return {alternatives:[one advisory candidate]}, {deliberation:{artifact:{retain:reason},development:one advisory candidate,artifact_dependency:independent|requires_development}}, {retain:reason} (optionally with development_declined:reason naming development forms in choice_summary you considered; never required), or {abstain:reason}. No edit, verification execution or inspection in this dedicated reconsideration. Prior lineage is context, not a mandatory target. Independent review is required. Retention does not imply fulfillment or acceptance.','max_alternatives':1}
 
         load('browser_pursuit_reflection','engine-pursuit-reflection.py').project(self,request,context)
         load('browser_criterion_return','engine-criterion-return.py').project(self,request,context)
@@ -215,7 +216,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         if feedback:context['review_criticism']={'status':'attributed fallible judgments, not observed gameplay or authority','items':feedback,'instruction':'Address relevant criticism in a fresh proposal, retain a justified alternative, or abstain. Unknown findings describe insufficient evidence, not a substantive rejection. Never claim a rejected or unknown proposal executed. No obligation to obtain approval by repeated rewording.'}
         native_feedback=[v for k,v in self.read()[2].items() if k.startswith('native_rejection_') and self.same_view(v['source'],view)]
         if native_feedback:context['native_validation_feedback']={'items':native_feedback,'instruction':'These candidates were not admitted or executed. Make a fresh decision from the current supplied source and exact typed rejection: inspect source, propose a valid current-source action, retain prior meaning, justify development, or abstain. No obligation to obtain acceptance. This is not a formatting correction or observed gameplay.'}
-        context['own_decisions']=[{'response':v['response'],'source':self.read()[2].get('bound_output_'+k[len('generated_'):],{}).get('source')} for k,v in self.read()[2].items() if k.startswith('generated_') and not reading_policy.is_reading(v['response'])]
+        context['own_decisions']=[{'response':v['response'],'source':self.read()[2].get('bound_output_'+k[len('generated_'):],{}).get('source')} for k,v in self.read()[2].items() if k.startswith('generated_') and not reading_policy.is_reading(v['response']) and not process_policy.is_page(v['response'])]
         context['independent_assessments']=[{**v,'applicability':'current_source' if v['snapshot']==view['source_snapshot'] else 'historical_source_only'} for k,v in self.read()[2].items() if k.startswith('independent_assessment_')]
         context['evidence_contract']=base.review_contract.evidence_contract()
         if self.abilities_opted():
@@ -223,6 +224,8 @@ class Adapter(recovery.Recovery,base.Adapter):
             context['own_decisions']=[x for x in context['own_decisions'] if set(x['response'])!={'need'}]
             plays=[v for k,v in self.read()[2].items() if k.startswith('play_evidence_')]
             if plays:context['play_returns']=abilities_policy.review_evidence(plays)
+            tries=[v for k,v in self.read()[2].items() if k.startswith('try_evidence_') and v.get('source')==view['source_snapshot']]
+            if tries:context['try_returns']=process_policy.review_evidence(tries)
         return request,context
     def record_execution_source(self,result):
         request=self.controller.request();coding=request['coding']
@@ -412,6 +415,7 @@ class Adapter(recovery.Recovery,base.Adapter):
                 if getattr(stop,'known_stage_stop',{}).get('status')=='spend_cap':self.record_check_return(result)
                 raise
             if self.reading_opted():self.record_check_return(result)
+            self.record_try_returns()
             return result
         if kind!='reject_proposal':return super().native(kind,value)
         self.validate_current_admission()
@@ -434,7 +438,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         """Whether a source names this view, counting only the roots a reading moved it through."""
         roots={view['state_root']}
         for key,item in reversed(list(self.read()[2].items())):
-            if key.startswith('reading_ready_') and item['state_root'] in roots:roots.add(item['before'])
+            if key.startswith(('reading_ready_','return_root_')) and item['state_root'] in roots:roots.add(item['before'])
         return isinstance(source,dict) and set(source)=={'state_root','source_snapshot','scope'} and source['state_root'] in roots and source['source_snapshot']==view['source_snapshot'] and source['scope']==view['scope']
     def reading_opted(self):
         return bool(getattr(self,'admission',{}).get('reading_profile'))
@@ -450,7 +454,50 @@ class Adapter(recovery.Recovery,base.Adapter):
     def abilities_callback(self):
         return self if self.abilities_opted() else None
     def abilities_revealed(self):
+        # Under the process profile nothing has to be asked for: play is in scope from the start.
+        if self.tsr_process_opted():return list(abilities_policy.ABILITIES)
         return list(abilities_policy.ABILITIES) if 'abilities_revealed' in self.read()[2] else []
+    def tsr_process_opted(self):
+        return bool(getattr(self,'admission',{}).get('tsr_process_profile'))
+    def latest_play_controls(self):
+        plays=[v for k,v in self.read()[2].items() if k.startswith('play_controls_')]
+        return plays[-1] if plays else None
+    def ability_try(self,response):
+        """Each proposed edit runs on a candidate copy before review. Accounted, never retried, changes no source."""
+        if not self.tsr_process_opted():raise ValueError('try not admitted')
+        request=self.controller.request();coding=request['coding'];config=self.controller.cli('project','config')
+        files={f['path']:f['source'] for f in coding['files'] if f['editable']}
+        protected=json.loads(config['protected']['probe.json'])
+        controls=self.latest_play_controls()
+        probe=abilities_policy.probe(protected,controls) if controls else protected
+        runner=getattr(self,'play_runner',abilities_policy.run_harness)
+        reading=self.latest_reading();results=[]
+        for position,proposal in enumerate(process_policy.edit_proposals(response)):
+            count=sum(k.startswith('try_evidence_') for k in self.read()[2])
+            try:
+                candidate=process_policy.candidate_files(files,proposal)
+            except process_policy.Unbuildable as error:
+                returned=process_policy.unbuildable_return(position,str(error),coding['snapshot'],reading)
+            else:
+                name='ability_try_'+str(count)
+                def worker(candidate=candidate):
+                    return runner(candidate,probe,config['protected']['browser-harness.cjs'],config['image'],config['user'])
+                run=self.op(name,lambda:self.ledger.run_execution(self.trial,name,e.sha(self.admission),worker))
+                returned=process_policy.try_return(position,run,coding['snapshot'],reading)
+            self.op('try_evidence_'+str(count),lambda:{'text':returned['text'],'evidence':returned['evidence'],'source':coding['snapshot'],'returned':returned})
+            results.append({'evidence':returned['evidence']})
+        return {'snapshot':coding['snapshot'],'tries':results,'controls':'latest play' if controls else 'protected probe'}
+    def record_try_returns(self):
+        """A try's report goes beside the reading once the decision settles, exactly once."""
+        if not self.tsr_process_opted():return
+        for key,item in list(self.read()[2].items()):
+            if key.startswith('try_evidence_') and 'try_recorded_'+key[len('try_evidence_'):] not in self.read()[2]:
+                before=self.native('request',None)['state_root']
+                self.op('try_recorded_'+key[len('try_evidence_'):],lambda item=item:self.controller.json_cli(('project','check-return'),item['returned']))
+                after=self.native('request',None)['state_root']
+                # Recording a return moves the state root; earlier criticism of this source still applies.
+                if after!=before:self.op('return_root_'+after,lambda before=before,after=after:{'state_root':after,'before':before})
+        return {'recorded':True}
     def spend_reached(self):
         cap=self.admission['spend_cap_microusd']
         return cap is not None and self.ledger.status()['committed_microusd']>=cap
@@ -461,6 +508,7 @@ class Adapter(recovery.Recovery,base.Adapter):
         return abilities_policy.new_evidence(keys)
     def ability_need(self,need):
         """Asking reveals what is in scope. A need with nothing left to reveal goes to the operator."""
+        if self.tsr_process_opted():raise ValueError('need is not offered under the process profile')
         unmet=bool(self.abilities_revealed())
         if not unmet:self.op('abilities_revealed',lambda:{'abilities':list(abilities_policy.ABILITIES)})
         returned=abilities_policy.need_return(need,self.abilities_revealed() if not unmet else [],self.latest_reading())
@@ -482,17 +530,22 @@ class Adapter(recovery.Recovery,base.Adapter):
         returned=abilities_policy.play_return(run,play,coding['snapshot'],self.latest_reading())
         self.op('play_return_'+e.sha(returned),lambda:self.controller.json_cli(('project','check-return'),returned))
         self.op('play_evidence_'+str(count),lambda:{'text':returned['text'],'evidence':returned['evidence']})
+        if self.tsr_process_opted():self.op('play_controls_'+str(count),lambda:copy.deepcopy(play))
         return {'snapshot':coding['snapshot'],'exit':run['exit'],'evidence':returned['evidence']}
     def reading(self,view):
         """One reading before any proposal. It is recorded with no review and grants nothing."""
         if not self.reading_opted():raise ValueError('reading not admitted')
         request,context=self.project(view)
-        body=self.body(reading_policy.READING_SYSTEM,reading_policy.reading_context(self.wire_context(request,context),self.controller.cli('project','reading-view')))
+        if self.tsr_process_opted():
+            body=self.body(process_policy.NOTEBOOK_SYSTEM,process_policy.reading_context(self.wire_context(request,context),self.controller.cli('project','reading-view')))
+        else:
+            body=self.body(reading_policy.READING_SYSTEM,reading_policy.reading_context(self.wire_context(request,context),self.controller.cli('project','reading-view')))
         self.reading_turn=True
         try:result=self.checked('proposal',body,lambda value:(value,{}))
         finally:self.reading_turn=False
         response=result['response']
-        recorded=self.op('reading_record_'+e.sha({'reading':response,'state_root':request['state_root']}),lambda:self.controller.json_cli(('project','reading-record'),response))
+        page=process_policy.native_page(response) if self.tsr_process_opted() else response
+        recorded=self.op('reading_record_'+e.sha({'reading':response,'state_root':request['state_root']}),lambda:self.controller.json_cli(('project','reading-record'),page))
         ready=self.native('request',None)['state_root']
         self.op('reading_ready_'+ready,lambda:{'reading':recorded['reading'],'state_root':ready,'before':request['state_root']})
         return {'reading':recorded['reading'],'receipt':result['receipt']}
@@ -501,6 +554,13 @@ class Adapter(recovery.Recovery,base.Adapter):
             self.offered_development=[]
             stripped=reading_policy.strip_development(context)
             stripped['current_reading']=self.controller.cli('project','reading-view')['bounded']
+            if self.tsr_process_opted():
+                stripped['choice_summary']['forms'].update(process_policy.forms())
+                stripped['response_contracts'].update(process_policy.contracts())
+                stripped.pop('play_returns',None);stripped.pop('try_returns',None)  # They already sit beside the notebook.
+                if 'response_envelope' in stripped:stripped['response_envelope']=process_policy.envelope(stripped['response_envelope'])
+                if self.admission['process_context']=='tuned':stripped=process_policy.tune(stripped)
+                return self.body(process_policy.proposal_system(reading_policy.PROPOSAL_SYSTEM,self.admission['spend_cap_microusd'] is not None),stripped)
             if self.abilities_opted():
                 revealed=self.abilities_revealed()
                 stripped['choice_summary']['forms'].update(abilities_policy.forms(revealed))
@@ -525,18 +585,21 @@ class Adapter(recovery.Recovery,base.Adapter):
             'Consider alternatives and return 1..4 distinct candidates allowed by the supplied response contracts; do not mix executable and advisory candidates in an alternatives batch; use the deliberation envelope for one of each. You may instead inspect an admitted source window. '
             'Exact edits use old_text/new_text. A complete incremental edit is allowed; never return partial JSON or unfinished code. Preserve protected checks, runtime, permissions and acceptance. '
             'The controller previews proposals, obtains independent review, and executes only with authorization; never claim these later steps happened already. '
-            'To keep both artifact and meaning unchanged, return {retain:reason, development_declined:reason} whenever choice_summary lists any development form: development_declined names the development forms you considered and why none is worth proposing now. When choice_summary lists no development form, return {retain:reason}. '
+            'To keep both artifact and meaning unchanged, return {retain:reason}; you may add development_declined:reason naming development forms you considered, which is recorded when given and never required. '
             'Retention ends this checkpoint, not future separately admitted input. Use {abstain:reason} for inability or declining further work; this stops the scheduled session. Neither creates user acceptance. Return only the supplied JSON contract.')
         if view['branch']=='reconsider':system+=' This is advisory reconsideration: a new relationship, revision, same-identity development or provisional/supported wanting may be proposed. Prior lineage is context, not a required target. Artifact intent may only retain here; no execution. Abstention remains valid.'
         return self.body(system,context)
     def check_retention_reason(self,value):
         if not isinstance(value['retain'],str) or not value['retain'].strip() or len(value['retain'].encode())>self.narrative_limit:raise ValueError('retention reason required within response capacity')
     def check_proposal_shape(self,value):
-        if getattr(self,'reading_turn',False):return reading_policy.check_shape(value)
+        if getattr(self,'reading_turn',False):return process_policy.check_page(value) if self.tsr_process_opted() else reading_policy.check_shape(value)
         if self.reading_opted():reading_policy.check_no_development(value)
         helper=load('browser_proposal_shape','engine-project-output.py')
         if self.abilities_opted() and isinstance(value,dict):
-            if set(value)=={'need'}:return abilities_policy.check_need(value['need'])
+            if set(value)=={'need'}:
+                # Asking is what the process profile removes (spec #12): play is already in scope.
+                if self.tsr_process_opted():helper.fail('$.need','unsupported_field',allowed_fields=['alternatives','retain','abstain','inspect','play'])
+                return abilities_policy.check_need(value['need'])
             if set(value)=={'play'}:
                 if 'play' not in self.abilities_revealed():helper.fail('$.play','unsupported_field',allowed_fields=['alternatives','retain','abstain','inspect','need'])
                 return abilities_policy.check_play(value['play'])
@@ -549,16 +612,12 @@ class Adapter(recovery.Recovery,base.Adapter):
                 references=load('browser_proposal_references','engine-proposal-references.py')
                 room=self.narrative_limit-len((value['retain']+references.DECLINED_PREFIX).encode())
                 if not x.strip() or len(x.encode())>room:helper.fail('$.development_declined','text_bound',nonblank=True,max_utf8_bytes=max(0,room))
-            elif offered:
-                # Retention is a decision about development too, at the same cost as proposing it.
-                helper.fail('$','required_field',required_fields=['development_declined','retain'])
+            # Spec #12, rule 9: a stated development decision is recorded when given and never required.
+            # Requiring it was Focus pushed against the same gap (The Sovereign Mirror, ch. 11-12).
             return
         if isinstance(value,dict) and set(value)=={'inspect'}:return
         if isinstance(value,dict) and set(value)=={'deliberation'}:
             parts=load('deliberation_shape','engine-browser-deliberation.py').shape(value)
-            if offered and parts['development'] is None and isinstance(parts['artifact'],dict) and set(parts['artifact'])=={'retain'}:
-                # Retaining both through the envelope must not skip the development decision.
-                helper.fail('$.deliberation.development','object_required',expected_type='object',valid_locations=['$.retain','$.development_declined'])
             for name in ('artifact','development'):
                 item=parts[name]
                 if item is None:continue
