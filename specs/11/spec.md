@@ -36,6 +36,7 @@ The purpose of the loop is that the process reaches this want itself and the wan
 - AC-10: Given an edit after a play, when it is proposed, then it still goes to independent review, and a rejection leaves the source unchanged.
 - AC-14: Given an edit after a play, when it is reviewed, then the review input holds the play's result and no want or need.
 - AC-11: Given a restart after a need or play, when the run resumes, then nothing is recorded or run twice; given a crash during a play, then the run blocks.
+- AC-21: Given a malformed `play` in a live run, when it is checked, then it is a correctable format defect: the model gets one correction from the run's allowance and the run goes on. Regression: live run p1-full (#12) ended in `technical_stop` on a play with action kind `value`.
 - AC-12: Given malformed `need` or `play` values, when they are checked, then they are refused with no effect, and random values raise nothing but `ValueError`.
 
 ## Scope
@@ -61,6 +62,7 @@ Out: changes to the protected harness, edit review or acceptance; Rust changes; 
 | C-10 | Need, play, edit | Reviewer called for the edit | 10 | Integration |
 | C-11 | Restart after a finished run; process killed right after a play; runner raises mid-play | Runner called once in each; last case blocks | 11 | Integration |
 | C-14 | Need, play, edit | Review input has the play's errors, not the want or the need | 14 | Conformance |
+| C-21 | Each kind of play refusal; need, bad play, play, retain, retain | Every diagnostic passes the correction gate; run ends `proposal_retention` with one play run | 21 | Regression |
 | C-12 | Bad shapes; 20k random values | `ValueError` only | 12 | Unit, Fuzz |
 | C-13 | Real harness in the local image on a fixture game | Report parsed; clicks and readouts present | 5 | Integration |
 
