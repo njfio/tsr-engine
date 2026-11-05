@@ -53,8 +53,8 @@ def admission_fields(profile, reading_profile, cap):
         raise ValueError('abilities profile')
     if reading_profile is None:
         raise ValueError('abilities need the reading profile')
-    if type(cap) is not int or cap <= 0:
-        raise ValueError('abilities need a positive spending cap')
+    if cap is not None and (type(cap) is not int or cap <= 0):
+        raise ValueError('a spending cap must be positive, or None for no cap')
     return {'abilities_profile': PROFILE, 'spend_cap_microusd': cap}
 
 

@@ -452,7 +452,8 @@ class Adapter(recovery.Recovery,base.Adapter):
     def abilities_revealed(self):
         return list(abilities_policy.ABILITIES) if 'abilities_revealed' in self.read()[2] else []
     def spend_reached(self):
-        return self.ledger.status()['committed_microusd']>=self.admission['spend_cap_microusd']
+        cap=self.admission['spend_cap_microusd']
+        return cap is not None and self.ledger.status()['committed_microusd']>=cap
     def latest_reading(self):
         latest=self.controller.cli('project','reading-view')['bounded']['readings']
         return latest[-1]['event'] if latest else None

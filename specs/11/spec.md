@@ -11,13 +11,13 @@ The purpose of the loop is that the process reaches this want itself and the wan
 
 ## Rules
 
-1. **Opt-in, on top of the reading.** `abilities_profile: want-abilities@v1` needs `reading@v1` and a `spend_cap_microusd` above zero. A run without it behaves exactly as before.
+1. **Opt-in, on top of the reading.** `abilities_profile: want-abilities@v1` needs `reading@v1`. `spend_cap_microusd` is above zero, or null for no cap. A run without it behaves exactly as before.
 2. **A need.** A proposal may return `{need: {what, because}}`, naming an ability it lacks in its own words. Nothing reads its meaning. It is recorded beside the latest reading and grants nothing by itself.
 3. **Asking reveals what is in scope.** `play` is not offered until a need has been stated. The first need reveals it, whatever the need's words say. No judge decides whether the words match.
 4. **Play.** `{play: {actions, checks}}` runs the current source in the protected browser harness, in the same no-network, read-only container as the existing checks, with the model's own clicks, keys, waits and checks. It changes no source and needs no review, because it changes nothing. The result comes back beside the latest reading as written, in order: exit code, errors, readouts, then the action list, cut at the return's byte bound with a note. The engine adds no verdict. When a control fails, the harness itself exits 2 and reports only that error, not what came before it.
 5. **Later needs go to the operator.** Nothing reads a need's meaning, so the first need reveals everything in scope whatever it asks for, and any need after that ends the run with `need_to_operator` and its text, even one that a revealed ability could meet. Nothing is built or granted automatically.
 6. **Retention.** Retaining with new evidence since the last retention (an executed change, a play, a need, a review rejection) takes another reading. Retaining with nothing new ends the run with `proposal_retention`.
-7. **Spending cap.** Before every model dispatch, including source inspections, format corrections and recovery, the engine compares the campaign's committed spend with the cap. At or above it, the run ends with `spend_cap`. A call already under way can overshoot by that one call, which is the most a run can overshoot.
+7. **Spending cap, if set.** With a null cap there is no spending stop. Otherwise, before every model dispatch, including source inspections, format corrections and recovery, the engine compares the campaign's committed spend with the cap. At or above it, the run ends with `spend_cap`. A call already under way can overshoot by that one call, which is the most a run can overshoot.
 8. **Action stays gated.** Edits still need independent review, execution still needs its binding, and acceptance is never recorded. A play can't reach any of them. The reviewer sees the last three play results, labelled as reported by the harness on controls the author chose, so an edit citing one can be judged. It never sees a reading or a need.
 9. **No retries of uncertain effects.** A play is an accounted execution. A crash during one blocks the run, and a completed play is never run again on restart.
 
@@ -31,6 +31,7 @@ The purpose of the loop is that the process reaches this want itself and the wan
 - AC-6: Given a play that fails, including a harness refusal or a non-zero exit, when it returns, then the failure is the return and the run continues.
 - AC-7: Given every ability revealed, when another need is stated, then the run ends with `need_to_operator` and the need's text, with desires open and no acceptance.
 - AC-8: Given a retention with new evidence since the last, when it is proposed, then another reading follows; given none, then the run ends with `proposal_retention`.
+- AC-15: Given a launch admitted with a null cap, when any amount has been spent, then spending never stops the run.
 - AC-9: Given committed spend at the cap, when any model call would be dispatched, including an inspection or a format correction, then no call is made and the run ends with `spend_cap`.
 - AC-10: Given an edit after a play, when it is proposed, then it still goes to independent review, and a rejection leaves the source unchanged.
 - AC-14: Given an edit after a play, when it is reviewed, then the review input holds the play's result and no want or need.
@@ -55,6 +56,7 @@ Out: changes to the protected harness, edit review or acceptance; Rust changes; 
 | C-06 | Runner reports exit 1, exit 2, timeout | Each comes back as a return; next reading follows | 6 | Functional |
 | C-07 | Need, need | Ends `need_to_operator` with the text | 7 | Conformance |
 | C-08 | Retain after a need; retain again | Reading, then ends `proposal_retention` | 8 | Conformance |
+| C-15 | Null cap; committed spend of 10^12 microusd | Admitted; `spend_reached` stays false | 15 | Unit |
 | C-09 | Committed spend at the cap; real ledger with repeated inspections and bad shapes | No further call; ends `spend_cap` | 9 | Conformance, Integration |
 | C-10 | Need, play, edit | Reviewer called for the edit | 10 | Integration |
 | C-11 | Restart after a finished run; process killed right after a play; runner raises mid-play | Runner called once in each; last case blocks | 11 | Integration |

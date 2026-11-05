@@ -1,9 +1,9 @@
-"""One launch, no stages; no provider calls here. Usage: TSR_LIVE_LABEL=<label> TSR_SPEND_CAP_MICROUSD=<cap> TSR_LIVE_COMMIT=<sha> prepare.py <authorization.json>."""
+"""One launch, no stages; no provider calls here. Usage: TSR_LIVE_LABEL=<label> TSR_SPEND_CAP_MICROUSD=<cap|none> TSR_LIVE_COMMIT=<sha> prepare.py <authorization.json>."""
 import copy,importlib.util,json,os
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 s=importlib.util.spec_from_file_location('game_pair_adapter',ROOT/'scripts/engine-browser-adapter.py');a=importlib.util.module_from_spec(s);s.loader.exec_module(a)
-LABEL=os.environ.get('TSR_LIVE_LABEL','r1');CAP=int(os.environ['TSR_SPEND_CAP_MICROUSD']);PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
+LABEL=os.environ.get('TSR_LIVE_LABEL','r1');CAP=None if os.environ['TSR_SPEND_CAP_MICROUSD']=='none' else int(os.environ['TSR_SPEND_CAP_MICROUSD']);PROTOCOL=ROOT/'experiments/continuous-game-v4/protocol.json';PACKET=a.d.file_sha(PROTOCOL)
 FILES=['experiments/want-loop-v1/'+n for n in ('run.py','prepare.py','report.py')]+['experiments/continuous-game-v4/protocol.json','scripts/engine-abilities.py','scripts/engine-reading.py','scripts/engine-browser-harness.cjs']
 FACT_KEYS=('operational_roots','criteria','minimum_obligations','unknown_rule','shared_consequences','excluded_claims')
 def prepare(auth_path):

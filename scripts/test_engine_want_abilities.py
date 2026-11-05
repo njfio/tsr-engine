@@ -70,13 +70,17 @@ class Shape(unittest.TestCase):
 
 
 class Admission(unittest.TestCase):
+    def test_spec_c15_profile_admits_a_run_with_no_cap(self):
+        self.assertEqual(abilities.admission_fields(abilities.PROFILE, reading.PROFILE, None),
+                         {'abilities_profile': abilities.PROFILE, 'spend_cap_microusd': None})
+
     def test_spec_c02_profile_needs_a_reading_and_a_positive_cap(self):
         good = abilities.admission_fields(abilities.PROFILE, reading.PROFILE, 1000)
         self.assertEqual(good, {'abilities_profile': abilities.PROFILE, 'spend_cap_microusd': 1000})
         self.assertEqual(abilities.admission_fields(None, reading.PROFILE, None), {})
         self.assertEqual(abilities.admission_fields(None, None, None), {})
         for profile, read, cap in ((abilities.PROFILE, None, 1000), (abilities.PROFILE, reading.PROFILE, 0), (abilities.PROFILE, reading.PROFILE, -1),
-                                   (abilities.PROFILE, reading.PROFILE, None), (abilities.PROFILE, reading.PROFILE, True), (abilities.PROFILE, reading.PROFILE, 1.5),
+                                   (abilities.PROFILE, reading.PROFILE, True), (abilities.PROFILE, reading.PROFILE, 1.5),
                                    ('other', reading.PROFILE, 1000), (None, reading.PROFILE, 1000)):
             with self.subTest(profile=profile, read=read, cap=cap), self.assertRaises(ValueError):
                 abilities.admission_fields(profile, read, cap)
@@ -385,6 +389,12 @@ class Cycle(BrowserAdapter):
         self.assertFalse(a.spend_reached())
         a.ledger = type('L', (), {'status': lambda self: {'committed_microusd': 500}, 'manifest': a.ledger.manifest})()
         self.assertTrue(a.spend_reached())
+
+    def test_spec_c15_no_cap_never_reaches_a_spending_stop(self):
+        a, ca = self.configure(cap=None)
+        self.assertIsNone(a.admission['spend_cap_microusd'])
+        a.ledger = type('L', (), {'status': lambda self: {'committed_microusd': 10**12}, 'manifest': a.ledger.manifest})()
+        self.assertFalse(a.spend_reached())
 
     def test_spec_c09_cap_binds_on_inspection_with_the_real_ledger(self):
         a, ca = self.configure(cap=250, decisions=8)
