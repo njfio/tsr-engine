@@ -166,6 +166,15 @@ class HarnessEvidence(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.review.validate(self.report('observed_harness_return', ['harness:b']), without)
 
+    def test_spec12_harness_ids_are_aliased_like_other_evidence(self):
+        bound = m.load('harness_bound_output', 'engine-bound-output.py')
+        payload = {'binding': dict(self.binding), 'evidence': {k: {'x': k} for k in self.binding['evidence_ids']},
+                   'response_schema': self.output.review_schema(self.binding, self.review.CRITERIA)}
+        aliased = bound.alias_review_payload(payload)
+        aliases = aliased['reference_catalog']['aliases']
+        self.assertEqual([aliases[x] for x in aliased['binding']['harness_returns']], ['harness:b'])
+        self.assertTrue(all(len(x) < 4 for x in aliased['binding']['harness_returns']))
+
     def test_spec12_review_schema_offers_the_basis_only_with_harness_returns(self):
         enum = lambda b: self.output.review_schema(b, self.review.CRITERIA)['properties']['findings']['properties']['parent_fidelity']['properties']['basis']['enum']
         self.assertIn('observed_harness_return', enum(self.binding))
@@ -338,11 +347,14 @@ class Cycle(wa.Cycle):
         self.cycle(a, ca).run()
         self.assertEqual(ran[1]['probe']['actions'], own['actions'])
         self.assertEqual(ran[1]['probe']['checks'], own['checks'])
-        review = [json.loads(b['messages'][1]['content']) for k, b in seen if k == 'review'][0]
-        self.assertTrue(any(key.startswith('harness:') for key in review['binding']['evidence_ids']))
-        self.assertIn('harness_returns', review['binding'])
-        self.assertIn('the try controls you gave with this edit', json.dumps(review['evidence']))
-        self.assertIn('observed_harness_return', json.dumps(review['response_schema']))
+        # The dispatched body carries short aliases; the recorded binding keeps the real IDs.
+        reviewed = [v for k, v in a.read()[2].items() if k.startswith('reviewed_')][0]
+        harness = reviewed['binding']['harness_returns']
+        self.assertTrue(harness and all(key.startswith('harness:') for key in harness))
+        self.assertTrue(set(harness) <= set(reviewed['binding']['evidence_ids']))
+        wire = json.dumps([b for k, b in seen if k == 'review'][0]['messages'])
+        self.assertIn('the try controls you gave with this edit', wire)
+        self.assertIn('observed_harness_return', wire)
 
     def test_spec12_ac7_restart_after_a_try_does_not_run_it_again(self):
         a, ca = self.configure()
