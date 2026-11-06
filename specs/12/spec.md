@@ -87,3 +87,23 @@ Out:
 - **The reviewer sees more generated page text.** It is labelled as data and grants nothing, as for plays.
 - **Tuned context can drop something that mattered.** That is the experiment. The `full` arm is the control.
 - **No live evidence.** Nothing here shows that a model will want anything unprompted. It removes structural reasons it couldn't.
+
+## Amendment, 2026-11-06: what the first launches showed
+
+Three launches ran on 2026-11-05 (`docs/tsr-process-test.md`). Two stopped on gaps in this spec's design, and both gaps are fixed here. Both touch review evidence, which the original scope left out; the operator approved this amendment ("Keep going").
+
+10. **A harness return is its own evidence.**
+    - In p2-full, the reviewer cited a draft's browser try as an `observed_test_receipt`. Only controller check results count as receipts, so validation refused it and the run stopped.
+    - Now each try and play reaches the reviewer as its own `harness:` evidence ID, labelled as author-chosen controls in the protected harness, not a receipt or verdict.
+    - The reviewer cites it with a new basis, `observed_harness_return`. That basis is offered only when such evidence exists and must cite one of those IDs.
+    - Citing a harness return as a receipt is still refused.
+11. **A draft carries its own try.**
+    - In p2-tuned, the model never played, so all twelve tries only loaded the page. Every review then met claims that a page load cannot support.
+    - Now an edit candidate may carry `try:{actions,checks}` beside `edits` and `rationale`, in the same form and bounds as a play.
+    - It is checked as a correctable format defect, stripped before native binding, journaled per response, and used for that draft's try.
+    - Without one, the try uses the latest play, then the page load. The try's return says which ran.
+
+Acceptance:
+- AC-13: Given a try or play, when an edit is reviewed, then the review binding lists a `harness:` ID for it. `observed_harness_return` is accepted only when citing such an ID, and `observed_test_receipt` citing one is refused.
+- AC-14: Given an edit candidate with `try`, when it is tried, then the harness runs that candidate's controls, the native response has no `try` field, and the return names the controls used.
+- AC-15: Given malformed `try` controls, or `try` on a candidate without edits, when they are checked, then a correctable diagnostic points at that candidate, and random values raise only `ValueError`.

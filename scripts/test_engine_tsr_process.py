@@ -94,16 +94,82 @@ class Try(unittest.TestCase):
 
     def test_spec12_only_edits_are_tried_and_at_most_four(self):
         response = {'proposals': [exact('index.html', 'Start', str(i)) for i in range(6)] + [{'kind': 'existing', 'action': 'x'}]}
-        self.assertEqual(len(process.edit_proposals(response)), process.MAX_TRIES)
+        self.assertEqual([i for i, _ in process.edit_proposals(response)], list(range(process.MAX_TRIES)))
+        mixed = {'proposals': [{'kind': 'existing', 'action': 'x'}, exact('index.html', 'Start', 'Go')]}
+        self.assertEqual([i for i, _ in process.edit_proposals(mixed)], [1])
         self.assertEqual(process.edit_proposals({'retain': 'x'}), [])
 
     def test_spec12_try_return_is_labelled_and_bounded_with_no_verdict(self):
         out = process.try_return(1, {'exit': 1, 'report': wa.REPORT, 'stderr': ''}, 'd' * 64, 'r' * 64)
         self.assertTrue(out['text'].startswith('A try of proposed edit 1 ran on a copy of source ' + 'd' * 64))
+        self.assertIn('the try controls you gave with this edit', out['text'])
+        bare = process.try_return(0, {'exit': 0, 'report': wa.REPORT, 'stderr': ''}, 'd' * 64, None, 'protected')
+        self.assertIn('which load the page', bare['text'])
         self.assertIn('blocked inline style', out['text'])
         self.assertNotIn('verdict', out['text'])
         self.assertLessEqual(len(out['text'].encode()), process.TEXT_MAX)
         self.assertEqual(out['reading'], 'r' * 64)
+
+
+class DraftTry(unittest.TestCase):
+    EDIT = {'edits': [{'path': 'index.html', 'old_text': 'Start', 'new_text': 'Play'}], 'rationale': 'r'}
+
+    def test_spec12_try_controls_are_split_from_edit_candidates(self):
+        value = {'alternatives': [{**self.EDIT, 'try': wa.PLAY['play']}, dict(self.EDIT)]}
+        stripped, controls = process.split_tries(value)
+        self.assertEqual(controls, {'0': wa.PLAY['play']})
+        self.assertNotIn('try', stripped['alternatives'][0])
+        self.assertIn('try', value['alternatives'][0])  # the original is not mutated
+        self.assertEqual(process.split_tries({'retain': 'x'}), ({'retain': 'x'}, {}))
+
+    def test_spec12_bad_try_controls_are_correctable_and_point_at_the_draft(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('draft_try_correction', Path(__file__).with_name('engine-bounded-correction.py'))
+        correction = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(correction)
+        for bad, path in (({**self.EDIT, 'try': {'actions': [], 'checks': []}}, '$.alternatives[0].try.checks'),
+                          ({'rationale': 'r', 'try': wa.PLAY['play']}, '$.alternatives[0].try'),
+                          ({**self.EDIT, 'try': {'actions': [{'kind': 'eval', 'value': 'x'}], 'checks': [{'selector': 'b', 'text': ''}]}}, '$.alternatives[0].try.actions[0].kind')):
+            with self.subTest(path=path), self.assertRaises(ValueError) as caught:
+                process.split_tries({'alternatives': [bad]})
+            self.assertIn(path, caught.exception.diagnostic)
+
+    def test_spec12_random_try_values_raise_only_value_error(self):
+        rng = random.Random(13)
+        atoms = [None, 'x', 3, [], {}, wa.PLAY['play'], {'actions': [], 'checks': [{'selector': 'b', 'text': ''}]}]
+        for _ in range(5000):
+            item = {'edits': [], 'rationale': 'r'} if rng.random() < 0.7 else {'rationale': 'r'}
+            if rng.random() < 0.8:
+                item['try'] = rng.choice(atoms)
+            try:
+                process.split_tries({'alternatives': [item]})
+            except ValueError:
+                pass
+
+
+class HarnessEvidence(unittest.TestCase):
+    def setUp(self):
+        self.review = m.load('harness_review_contract', 'engine-project-runtime-review.py')
+        self.output = m.load('harness_review_output', 'engine-project-output.py')
+        self.binding = {'review_id': 'r', 'evidence_ids': ['context:a', 'harness:b', 'receipt:c'], 'observed_receipts': ['receipt:c'], 'harness_returns': ['harness:b']}
+
+    def report(self, basis, evidence):
+        finding = {'finding': 'met', 'basis': basis, 'evidence': evidence, 'explanation': 'e', 'limitations': 'l'}
+        return {'review_id': 'r', 'verdict': 'accept', 'findings': {k: dict(finding) for k in self.review.CRITERIA}}
+
+    def test_spec12_a_harness_return_is_cited_with_its_own_basis(self):
+        self.assertEqual(self.review.validate(self.report('observed_harness_return', ['harness:b']), self.binding), 'accept')
+        for basis, evidence in (('observed_harness_return', ['context:a']), ('observed_test_receipt', ['harness:b'])):
+            with self.subTest(basis=basis), self.assertRaises(ValueError):
+                self.review.validate(self.report(basis, evidence), self.binding)
+        without = {k: v for k, v in self.binding.items() if k != 'harness_returns'}
+        with self.assertRaises(ValueError):
+            self.review.validate(self.report('observed_harness_return', ['harness:b']), without)
+
+    def test_spec12_review_schema_offers_the_basis_only_with_harness_returns(self):
+        enum = lambda b: self.output.review_schema(b, self.review.CRITERIA)['properties']['findings']['properties']['parent_fidelity']['properties']['basis']['enum']
+        self.assertIn('observed_harness_return', enum(self.binding))
+        self.assertNotIn('observed_harness_return', enum({k: v for k, v in self.binding.items() if k != 'harness_returns'}))
 
 
 class Detection(unittest.TestCase):
@@ -161,8 +227,10 @@ class Tuning(unittest.TestCase):
         self.assertNotIn('need', text.lower().replace('needs no review', ''))
         self.assertNotIn('spending cap', text)
         self.assertIn('spending cap', process.proposal_system(reading.PROPOSAL_SYSTEM, capped=True))
-        self.assertEqual(sorted(process.forms()), ['play'])
+        self.assertEqual(sorted(process.forms()), ['edit_try', 'play'])
         self.assertIn('{play:', process.envelope(reading.RESPONSE_ENVELOPE)['instruction'])
+        self.assertIn('optional try:{actions,checks}', process.envelope(reading.RESPONSE_ENVELOPE)['instruction'])
+        self.assertIn('may carry try:{actions,checks}', text)
         self.assertNotIn('need', process.envelope(reading.RESPONSE_ENVELOPE)['instruction'])
 
 
@@ -261,6 +329,20 @@ class Cycle(wa.Cycle):
         self.assertGreaterEqual(len(ran), 2)
         self.assertEqual(ran[1]['probe']['actions'], wa.PLAY['play']['actions'])
         self.assertIn('Play', ran[1]['files']['index.html'])
+
+    def test_spec12_a_draft_carries_its_own_try_controls(self):
+        a, ca = self.configure()
+        own = {'actions': [{'kind': 'click', 'value': '#start'}, {'kind': 'key', 'value': 'ArrowLeft'}], 'checks': [{'selector': 'body', 'text': 'Play'}]}
+        draft = {'alternatives': [{**wa.EDIT['alternatives'][0], 'try': own}]}
+        seen, ran = self.script(a, [wa.PLAY, draft, wa.RETAIN, wa.RETAIN], reject_reviews=True)
+        self.cycle(a, ca).run()
+        self.assertEqual(ran[1]['probe']['actions'], own['actions'])
+        self.assertEqual(ran[1]['probe']['checks'], own['checks'])
+        review = [json.loads(b['messages'][1]['content']) for k, b in seen if k == 'review'][0]
+        self.assertTrue(any(key.startswith('harness:') for key in review['binding']['evidence_ids']))
+        self.assertIn('harness_returns', review['binding'])
+        self.assertIn('the try controls you gave with this edit', json.dumps(review['evidence']))
+        self.assertIn('observed_harness_return', json.dumps(review['response_schema']))
 
     def test_spec12_ac7_restart_after_a_try_does_not_run_it_again(self):
         a, ca = self.configure()

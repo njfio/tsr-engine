@@ -11,3 +11,5 @@
 - [x] T9 `docs/tsr-process-test.md`: the pre-registered push/ease protocol.
 - [x] T10 Operator review of the spec (P1): approved 2026-11-05.
 - [ ] T11 Paid launches of both arms. Approved 2026-11-05; each still needs its independent binding review, run from the operator's machine.
+- [x] T12 Amendment (rules 10–11): harness returns get their own evidence ID and basis, and drafts carry their own `try` controls, with tests.
+- [ ] T13 Relaunch both arms on the amended code, with predictions written down first and a person's return after each.

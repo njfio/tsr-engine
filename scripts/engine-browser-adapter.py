@@ -468,11 +468,15 @@ class Adapter(recovery.Recovery,base.Adapter):
         request=self.controller.request();coding=request['coding'];config=self.controller.cli('project','config')
         files={f['path']:f['source'] for f in coding['files'] if f['editable']}
         protected=json.loads(config['protected']['probe.json'])
-        controls=self.latest_play_controls()
-        probe=abilities_policy.probe(protected,controls) if controls else protected
+        played=self.latest_play_controls()
+        drafts=self.read()[2].get('try_controls_'+e.sha(response),{})
         runner=getattr(self,'play_runner',abilities_policy.run_harness)
         reading=self.latest_reading();results=[]
-        for position,proposal in enumerate(process_policy.edit_proposals(response)):
+        for position,proposal in process_policy.edit_proposals(response):
+            # A draft's own controls first, then the latest play, then only the protected page load.
+            own=drafts.get(str(position))
+            source='draft' if own else 'play' if played else 'protected'
+            probe=abilities_policy.probe(protected,own or played) if (own or played) else protected
             count=sum(k.startswith('try_evidence_') for k in self.read()[2])
             try:
                 candidate=process_policy.candidate_files(files,proposal)
@@ -480,13 +484,13 @@ class Adapter(recovery.Recovery,base.Adapter):
                 returned=process_policy.unbuildable_return(position,str(error),coding['snapshot'],reading)
             else:
                 name='ability_try_'+str(count)
-                def worker(candidate=candidate):
+                def worker(candidate=candidate,probe=probe):
                     return runner(candidate,probe,config['protected']['browser-harness.cjs'],config['image'],config['user'])
                 run=self.op(name,lambda:self.ledger.run_execution(self.trial,name,e.sha(self.admission),worker))
-                returned=process_policy.try_return(position,run,coding['snapshot'],reading)
+                returned=process_policy.try_return(position,run,coding['snapshot'],reading,source)
             self.op('try_evidence_'+str(count),lambda:{'text':returned['text'],'evidence':returned['evidence'],'source':coding['snapshot'],'returned':returned})
-            results.append({'evidence':returned['evidence']})
-        return {'snapshot':coding['snapshot'],'tries':results,'controls':'latest play' if controls else 'protected probe'}
+            results.append({'evidence':returned['evidence'],'controls':source})
+        return {'snapshot':coding['snapshot'],'tries':results}
     def record_try_returns(self):
         """A try's report goes beside the reading once the decision settles, exactly once."""
         if not self.tsr_process_opted():return
@@ -594,6 +598,7 @@ class Adapter(recovery.Recovery,base.Adapter):
     def check_proposal_shape(self,value):
         if getattr(self,'reading_turn',False):return process_policy.check_page(value) if self.tsr_process_opted() else reading_policy.check_shape(value)
         if self.reading_opted():reading_policy.check_no_development(value)
+        if self.tsr_process_opted():value=process_policy.split_tries(value)[0]
         helper=load('browser_proposal_shape','engine-project-output.py')
         if self.abilities_opted() and isinstance(value,dict):
             if set(value)=={'need'}:
@@ -769,6 +774,14 @@ class Adapter(recovery.Recovery,base.Adapter):
         try:return super().review(view,response)
         finally:self.context_budget=self.admission['payload_bytes']-65536
     def decode_proposal(self,value,request,context,view):
+        if self.tsr_process_opted() and isinstance(value,dict) and isinstance(value.get('alternatives'),list) and any(isinstance(x,dict) and 'try' in x for x in value['alternatives']):
+            # Each draft's own try controls are a host-side field: they never reach native binding.
+            # One alternative binds to one proposal, so the alternative index is the proposal index.
+            stripped,controls=process_policy.split_tries(value)
+            response,basis=self.decode_proposal(stripped,request,context,view)
+            if len(response.get('proposals',[]))!=len(stripped['alternatives']):raise ValueError('try controls need one proposal per alternative')
+            self.op('try_controls_'+e.sha(response),lambda:controls)
+            return response,basis
         if self.abilities_opted() and isinstance(value,dict) and set(value) in ({'need'},{'play'}):
             if view['branch']!='propose':raise ValueError('abilities only during ordinary proposal')
             return value,{}

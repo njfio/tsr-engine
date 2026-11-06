@@ -55,8 +55,9 @@ PROCESS_SYSTEM = (
     'actions are {kind,value}: click with a selector, key with a key name, or wait with milliseconds. '
     'checks are {selector,text}: the harness reads the selector and reports whether its text contains text. '
     'A play changes no source and needs no review. '
-    'Every edit you propose is also tried before it is reviewed: it runs on a copy of the source with the edit applied, '
-    'using your latest play controls, or the protected checks if you have not played. The reviewer sees what the try reported, '
+    'Every edit you propose is also tried before it is reviewed: it runs on a copy of the source with the edit applied. '
+    'An edit candidate may carry try:{actions,checks} beside edits and rationale: the controls its try runs with, in the same form as a play. '
+    'Without one, the try uses your latest play controls, or only loads the page if you have not played. The reviewer sees what the try reported, '
     'and what came back is shown beside your notebook. A try changes no source; review still decides what is kept. '
     'Retaining after something new has come back takes another page; retaining with nothing new ends this run. '
     'Passing checks you wrote yourself are not acceptance.')
@@ -120,18 +121,54 @@ def proposal_system(base, capped=True):
 
 
 def forms():
-    return {'play': 'Run the current source with your own controls: {play:{actions,checks}}. Changes nothing.'}
+    return {'play': 'Run the current source with your own controls: {play:{actions,checks}}. Changes nothing.',
+            'edit_try': 'An edit candidate may add try:{actions,checks}: the controls its try runs with on a copy of the source with the edit applied.'}
 
 
 def contracts():
-    return {'play': _abilities._PLAY_CONTRACT}
+    return {'play': _abilities._PLAY_CONTRACT,
+            'edit_try': {'field': 'try, beside edits and rationale in one edit candidate', 'form': _abilities._PLAY_CONTRACT['play'],
+                         'bounds': {k: v for k, v in _abilities._PLAY_CONTRACT.items() if k != 'play'}, 'optional': True}}
+
+
+def check_try(value, index):
+    """A draft's own try controls, held to the play bounds, with the diagnostic pointing at the draft."""
+    try:
+        _abilities.check_play(value)
+    except ValueError as error:
+        diagnostic = getattr(error, 'diagnostic', None)
+        if diagnostic and 'TSR_SHAPE_V1:' in diagnostic:
+            detail = json.loads(diagnostic.split('TSR_SHAPE_V1:', 1)[1])
+            path = detail.pop('path').replace('$.play', '$.alternatives[' + str(index) + '].try', 1)
+            detail.pop('version', None)
+            code = detail.pop('code')
+            _output.fail(path, code, **detail)
+        raise
+
+
+def split_tries(value):
+    """(value without try fields, {alternative index: controls}). Only edit candidates may carry one."""
+    if not isinstance(value, dict) or not isinstance(value.get('alternatives'), list):
+        return value, {}
+    stripped = copy.deepcopy(value)
+    controls = {}
+    for index, item in enumerate(stripped['alternatives']):
+        if isinstance(item, dict) and 'try' in item:
+            if 'edits' not in item:
+                _output.fail('$.alternatives[' + str(index) + '].try', 'unsupported_field', valid_locations=['$.alternatives[' + str(index) + '].edits'])
+            check_try(item['try'], index)
+            controls[str(index)] = item.pop('try')
+    return stripped, controls
 
 
 def envelope(base):
     old = '{abstain:reason}, or {inspect:{path,offset}}.'
-    if base['instruction'].count(old) != 1:
+    fields = 'edits/rationale are candidate fields, never top-level fields.'
+    if base['instruction'].count(old) != 1 or base['instruction'].count(fields) != 1:
         raise ValueError('response envelope changed')
-    return {**base, 'instruction': base['instruction'].replace(old, '{abstain:reason}, {inspect:{path,offset}}, or {play:{actions,checks}}.')}
+    instruction = base['instruction'].replace(old, '{abstain:reason}, {inspect:{path,offset}}, or {play:{actions,checks}}.')
+    instruction = instruction.replace(fields, 'edits/rationale, and an optional try:{actions,checks}, are candidate fields, never top-level fields.')
+    return {**base, 'instruction': instruction}
 
 
 def tune(context):
@@ -157,8 +194,9 @@ class Unbuildable(ValueError):
 
 
 def edit_proposals(response):
+    """(proposal index, proposal) for each edit, at most MAX_TRIES."""
     proposals = response.get('proposals') if isinstance(response, dict) else None
-    return [p for p in (proposals or []) if isinstance(p, dict) and p.get('kind') in ('exact_edit', 'edit_set')][:MAX_TRIES]
+    return [(i, p) for i, p in enumerate(proposals or []) if isinstance(p, dict) and p.get('kind') in ('exact_edit', 'edit_set')][:MAX_TRIES]
 
 
 def candidate_files(files, proposal):
@@ -175,11 +213,15 @@ def candidate_files(files, proposal):
     return result
 
 
-def try_return(index, run, snapshot, reading):
-    """What the harness reported for a candidate, as written, labelled as a try."""
+CONTROL_NAMES = {'draft': 'the try controls you gave with this edit', 'play': 'your latest play controls', 'protected': 'no controls: the protected checks only, which load the page'}
+
+
+def try_return(index, run, snapshot, reading, controls='draft'):
+    """What the harness reported for a candidate, as written, labelled as a try and with whose controls ran."""
     returned = _abilities.play_return(run, {'try': index}, snapshot, reading)
     lines = returned['text'].split('\n', 1)
-    head = 'A try of proposed edit ' + str(index) + ' ran on a copy of source ' + snapshot + ' with the edit applied: exit ' + str(run['exit']) + '.'
+    head = ('A try of proposed edit ' + str(index) + ' ran on a copy of source ' + snapshot + ' with the edit applied, using '
+            + CONTROL_NAMES[controls] + ': exit ' + str(run['exit']) + '.')
     returned['text'] = _abilities._bounded(head + ('\n' + lines[1] if len(lines) > 1 else ''))
     return returned
 
