@@ -20,6 +20,8 @@ class Adapter(b.Adapter):
   # information stays in ordinary memory; formal native transitions are absent.
   for key in ('relationship_initial','relationship_revision','meaning_development','contrast_preference','success_preference','provisional_preference','deliberation'):
    context['choice_summary']['forms'].pop(key,None)
+  context['choice_summary'].pop('unavailable_development_routes',None)
+  if 'retain' in context['choice_summary']['forms']:context['choice_summary']['forms']['retain']=b.load('ordinary_retain_form','engine-proposal-references.py').retain_form(context['choice_summary']['forms'])
   context['choice_summary']['interpretation']='Available ordinary-controller proposal forms, not approved outcomes or a ranking. Preserve the supplied goals/history and evidence. Retention and uncertainty remain valid. No formal relationship, meaning or identity admission is available in this arm; native validation and independent review remain authoritative.'
   context['response_envelope']['max_alternatives']=4
   context['response_envelope']['instruction']='Return {alternatives:[1..4 distinct edits or existing verification candidates]}, {inspect:{path,offset}}, {retain:reason}, or {abstain:reason}. Retention and justified improvement are equally valid. No native relationship action is offered in this ordinary memory controller.'

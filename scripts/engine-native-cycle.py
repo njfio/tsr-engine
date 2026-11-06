@@ -73,6 +73,11 @@ def ensure_scope_grant(ledger,module,adapter,grant,expected,*,check_only=False):
         event={'kind':'evaluation_grant','key':expected,'value':grant}
         return ledger.fold(rows+[module.Ledger.row(rows,event)])[0]
 
+def build_cycle(cycle_type,cycle_admission,adapter):
+    """The one place a launched cycle is built. An opted-in run gets its reading turn here."""
+    callback=getattr(adapter,'reading_callback',lambda:None)()
+    abilities=getattr(adapter,'abilities_callback',lambda:None)()
+    return cycle_type(cycle_admission['journal'],cycle_admission,adapter.native,adapter.proposal,adapter.review,**({'reading':callback} if callback else {}),**({'abilities':abilities} if abilities else {}))
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--scope-grant',type=Path)
@@ -131,7 +136,7 @@ def main():
             or a.d.stamp(cycle_admission['expires_at']) > a.d.stamp(admission['expires_at'])))):
         raise ValueError('cycle exceeds reviewed adapter scope or limits')
     if cycle_admission.get('feedback_cycle')!=admission.get('feedback_cycle'):raise ValueError('adapter/cycle feedback authority mismatch')
-    cycle = cycle_type(cycle_admission['journal'], cycle_admission, adapter.native, adapter.proposal, adapter.review)
+    cycle = build_cycle(cycle_type, cycle_admission, adapter)
     launch_lock=os.fdopen(os.open(adapter.root/'launch.lock',os.O_CREAT|os.O_WRONLY|os.O_NOFOLLOW,0o600),'a')
     fcntl.flock(launch_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     adapter.launch_lock_owned=True

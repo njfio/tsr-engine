@@ -1,0 +1,87 @@
+{
+  "status": "prepared_unadmitted",
+  "user_input": {
+    "text": "ok, do a new game, frogger and snake please",
+    "attribution": "verbatim historical user request reused for a proposed experiment, not a new player report",
+    "message_id": "Sentinel_61f54657df5481919087d5287e34f738"
+  },
+  "operational_roots": {
+    "attribution": "experiment-authored operational interpretations, not spontaneous model desires or additional user preferences",
+    "crossing": "Make progress through a field of hazards using controllable movement.",
+    "growth": "Acquire growth and navigate with the resulting body."
+  },
+  "feedback": {
+    "text": "These are source-bound observations from authored control sequences, not player preferences. Review the results against your prior expectations and the existing task, and decide what they warrant next: an artifact change, a development of meaning, retention, or abstention. None is preferred.",
+    "attribution": "authored harness feedback accompanying actual observations only"
+  },
+  "observation_batches": [
+    "crossing-first",
+    "growth-first",
+    "mixed-pursuit"
+  ],
+  "criteria": {
+    "crossing": "Controls produce crossing progress, hazards have consistent inspectable consequences, and an observed control sequence can reach the advertised crossing objective.",
+    "growth": "Acquisition changes body state and subsequent control-driven movement reflects the advertised body rules."
+  },
+  "unknown_rule": "An unsuccessful finite search or missing observation is unknown, not proof of impossibility or unmet desire. A witnessed defect may support not_met only against the exact frozen criterion and source.",
+  "shared_consequences": "Record interactions if observed; neither coupling nor a new relationship is a pass requirement. Independent games and zero-growth crossing are valid outcomes.",
+  "minimum_obligations": [
+    "Truthful controls and outcomes",
+    "Start and restart",
+    "Preserve root identities, history and permission boundaries"
+  ],
+  "excluded_claims": [
+    "human enjoyment",
+    "human fulfillment",
+    "final acceptance",
+    "causal TSR advantage from one pair"
+  ],
+  "model": {
+    "provider": "CheaperInference",
+    "model": "gpt-6-luna",
+    "max_completion_tokens": 32768,
+    "stream": false,
+    "response_format": {
+      "type": "json_object"
+    },
+    "temperature": "omitted",
+    "reasoning_effort": "omitted"
+  },
+  "stop": [
+    "one completion or justified retention after each observation batch",
+    "abstention",
+    "human Stop",
+    "unknown external effect or safety blocker"
+  ],
+  "admission": "none; explicit operator authorization and a fresh independently reviewed binding required before dispatch",
+  "observation_policy": {
+    "attribution": "authored prospective tester policy; not player preference",
+    "discovery": "Read visible instructions and current source only to map advertised controls and readouts to each root. Record source hashes, mapping and uncertainty before testing. No code edits, injected state, external assets or desired relationship supplied. Ambiguous or absent mapping is unknown, not not_met. The same blinded mapping reviewer and rules serve each arm; count mapping work as operator setup. Review records alone do not authenticate a reviewer. Existing trusted operator admission remains required, and mapping/registration setup is disclosed as operator assistance. This packet does not claim automatic mapper orchestration.",
+    "search": "For each of the three batches, use six predeclared words: Up repeated, Right repeated, Down repeated, Left repeated, Up Right Down Left cycled, Up Left Down Right cycled. Word length comes from the mapping's reviewed coverage declaration (min_inputs per criterion, with basis), fixed before any result is seen: max(12, min(32, need + 4)) inputs, where need is the batch criterion's min_inputs (doubled for the alternating mixed-pursuit batch). Map each position by batch (crossing, growth, or alternating), preserving direction order. Each trace starts a fresh page and advertised restart, then 100ms between inputs: at most 64 native actions. Observe final DOM readouts. Execute every trace twice; retain every result, not selected successes. No trace segmentation or cross-probe state continuity is claimed.",
+    "unsupported": "Analog, timing-sensitive or unmappable controls are marked partial/unknown; no claim of universal game coverage. Do not add a favorable hand-crafted route after seeing results. A different search policy requires a new predeclared observation phase applied symmetrically.",
+    "selection": "No outputs are scored for coupling, novelty, failure or a third desire. Outcomes remain unknown until actual control traces run.",
+    "repeatability": "Record clock/randomness conditions. Fixed controllable timing/seed is synthetic environmental input, never state injection. If source exposes no controllable seed, record nondeterminism; do not claim matched random outcomes.",
+    "binding": "Freeze each exact source-local control/readout mapping and protected checker plan before execution. Mapping identities differ by artifact but policy and coverage are identical. A changed artifact invalidates prior source binding.",
+    "capacity": "Two probes per supplemental bundle; six bundles per batch including repeats, eighteen across three batches. Existing lifetime32-admission boundary remains. Preflight actual retained admission count; do not silently truncate if insufficient. Further changed-artifact rounds require a new source-bound mapping and capacity check; absence of coverage stays unknown.",
+    "transport": "supplemental-browser@v3 preserves original checks/state. After all bundles are registered, executed and linked, observed_supplemental_set freezes the exact chronological current receipt set per criterion. Every registered mapped bundle must have an observation. criterion-evidence@v7 exports every published mapped raw case with exact source/receipt binding. Failed, partial and unavailable observations remain present. Any missing/unavailable protocol coverage requires unknown; no automatic semantic success or human fulfillment. Existing single-receipt records retain their schema. New source or further observations require a fresh valid publication rather than silently modifying a frozen assessment.",
+    "orchestration_limits": "Completeness is over registered/imported native observations, not an unlinked external execution. Operator-assisted orchestration must register before execution, retain and link each attempt before starting the next, and stop on unknown effects or incomplete linkage. Do not conceal adverse results by revocation: current-source revocation blocks cumulative assessment. Actual reviewer provenance, control mapping and new source identities require reviewed prospective setup; labels alone do not authenticate a reviewer.",
+    "coverage_gate": "Before dispatch, experiments/continuous-game-v3/mapping.py runs scripts/engine-observation-coverage.py static for each batch and refuses a batch whose words cannot reach the declared min_inputs. After each batch, run the coverage tool in observed mode on the raw reports and record any invariant readout; an invariant criterion is reported as undiscriminated, never as not_met."
+  },
+  "test_scope": {
+    "novelty_required": false,
+    "comparison": false,
+    "differences_from_v2": [
+      "Development-decision repair: retention states development_declined whenever development is offered (docs/development-decision-repair.md)",
+      "Balanced proposal and interpretation wording (qualitative-evidence@v4)",
+      "Probe action bound 64 (was 12); word length sized from reviewed coverage instead of fixed six inputs",
+      "Coverage gate before dispatch and invariant-readout check after observation",
+      "Observation feedback names change, development, retention and abstention with none preferred"
+    ],
+    "not_comparable": "Results are not directly comparable with continuous-game-v2: protocol, prompt and retention contract changed.",
+    "resources": "Set by the operator at admission; per-request capacity/timeouts, bounded correction (admit correction_allowance >= 1), Stop and safety checks remain."
+  },
+  "derived_from": {
+    "path": "experiments/continuous-game-v2/protocol.json",
+    "sha256": "3ef5504577f1ba0291d1f0797bdda729467a3b47b4ef25c50bfabd70d80effe7"
+  }
+}

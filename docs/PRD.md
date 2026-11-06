@@ -197,6 +197,8 @@ The TSR Decision Engine (`tsr`) is a Rust controller that makes an AI coding age
 
 **Claims and non-claims, stated once.** The software is a finite analogy of TSR, built with the Reflection Rule as a design method: preserve the relational role, state the proxy. It makes no claim to instantiate the Current, to demonstrate consciousness, or to establish TSR's metaphysics; a working engine is evidence that the architecture is coherent and useful, nothing more. Every number derived from a TSR term is an engineering proxy and is labeled so in code and in the CLI. Ownership of a local database says nothing about ownership of the Current. Nothing here authorizes spending, production access or external sharing; those are your decisions, listed in B12.
 
+> **Amendment, 2026-11-04 (spec #10).** The author chose "Cross freely", then "I think it should be a single reading. Simplified and improved." Under the `reading@v1` opt-in, each cycle starts with one reading, and its want crosses with no review, in its own view outside the preference ledger. This supersedes "generated statements after review" and "wait for review" below for those runs only. Other runs and old logs are unchanged, and the original text remains as design history. See `docs/architecture/adr-001-single-reading.md`.
+
 ## B2 · TSR to engineering
 
 The four directions are four derived views of one committed snapshot, not four stages. Domain state is a versioned set of typed facts — Intent, Observation, Possibility, Commitment, Return. Each view is a pure function of the snapshot; a decision is a pure function of the views. Code evaluates them in some order; the ontology does not. A new Observation re-derives eligible Possibilities, the support behind Commitments and the open Criteria in the same version, together.
@@ -327,6 +329,8 @@ Six typed actions; every one is gated by `tsr-policy` before dispatch, including
 **Review after close, unbiased (v0.3.1).** A green-but-rejected patch is visible only when a green is reviewed, so sampling alone cannot measure the false-accept rate. On the held-out evaluation set every green is reviewed. On the operational stream every failure is reviewed and greens are sampled at a declared rate with inverse-probability weights, so the stream's estimate is unbiased if noisy; where mined history provides hidden tests, they run as a secondary oracle on every green. Labels: `accepted`, `rejected(reason)`, `disputed`. The operator's reason is stored apart from tool results and, as an operator statement, enters the ledger directly (B2.1).
 
 ## B6 · State and typed contracts
+
+> **Amendment, 2026-11-04 (spec #10).** `Reading` and `Returned` are additive event kinds. The reading view is a separate fold, so the preference fold and old logs are unchanged.
 
 Three state domains stay separate, as in v0.1: domain state (facts and views), execution state (proposed, authorized, dispatched, running, completed, failed, cancelled, unresolved) and learning state (pending review, eligible, excluded, training, evaluated, shadow, active, retired). None of them is a "TSR phase" field.
 

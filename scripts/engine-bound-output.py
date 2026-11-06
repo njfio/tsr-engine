@@ -27,7 +27,7 @@ def alias_review_payload(payload):
         coverage=value['coverage']
         if not isinstance(coverage,dict) or any(not isinstance(refs,list) or len(refs)!=len(set(refs)) or any(x not in reverse for x in refs) for refs in coverage.values()):raise ValueError('coverage evidence catalog mismatch')
         value['coverage']={key:[reverse[x] for x in refs] for key,refs in coverage.items()}
-    for key in ('evidence_ids','observed_receipts','information_receipts'):
+    for key in ('evidence_ids','observed_receipts','information_receipts','harness_returns'):
         if key in value['binding']:value['binding'][key]=[reverse[x] for x in value['binding'][key]]
     def rewrite(node):
         if isinstance(node,dict):
@@ -45,7 +45,7 @@ def expand_review(content,wire):
     if set(aliases)!={'e'+str(i) for i in range(len(aliases))} or payload['binding']['evidence_ids']!=['e'+str(i) for i in range(len(aliases))] or len(set(aliases.values()))!=len(aliases) or set(payload['evidence'])!=set(aliases):raise ValueError('non-bijective reference catalog')
     if 'coverage' in payload and (not isinstance(payload['coverage'],dict) or any(not isinstance(refs,list) or len(refs)!=len(set(refs)) or any(x not in aliases for x in refs) for refs in payload['coverage'].values())):raise ValueError('invalid coverage aliases')
     original=copy.deepcopy(payload['binding'])
-    for key in ('evidence_ids','observed_receipts','information_receipts'):
+    for key in ('evidence_ids','observed_receipts','information_receipts','harness_returns'):
         if key in original:original[key]=[aliases[x] for x in original[key]]
     if digest(original)!=catalog['binding_sha256']:raise ValueError('reference binding mismatch')
     value=copy.deepcopy(content)

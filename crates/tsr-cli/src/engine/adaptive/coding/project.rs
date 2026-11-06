@@ -21,6 +21,7 @@ pub mod observations;
 pub mod partial;
 pub mod provisional;
 pub mod pursuit;
+pub mod reading;
 pub mod relational;
 pub mod success;
 mod supporting;

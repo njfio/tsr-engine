@@ -78,11 +78,13 @@ def validate(value,binding,*,text_limit=512):
     statuses=[]
     for finding in value['findings'].values():
         if set(finding)!={'finding','basis','evidence','explanation','limitations'}:raise ValueError('finding shape')
-        if finding['finding'] not in ('met','not_met','unknown') or finding['basis'] not in (('static_source','observed_test_receipt','observed_information_receipt','unknown') if 'information_receipts' in binding else ('static_source','observed_test_receipt','unknown')):raise ValueError('finding enum')
+        allowed=('static_source','observed_test_receipt','unknown')+(('observed_information_receipt',) if 'information_receipts' in binding else ())+(('observed_harness_return',) if 'harness_returns' in binding else ())
+        if finding['finding'] not in ('met','not_met','unknown') or finding['basis'] not in allowed:raise ValueError('finding enum')
         refs=finding['evidence']
         if not isinstance(refs,list) or not refs or any(not isinstance(x,str) for x in refs) or len(refs)!=len(set(refs)) or not set(refs)<=set(binding['evidence_ids']):raise ValueError('unsupported evidence')
         if finding['basis']=='observed_test_receipt' and not set(refs)&set(binding['observed_receipts']):raise ValueError('observed receipt required')
         if finding['basis']=='observed_information_receipt' and not set(refs)&set(binding['information_receipts']):raise ValueError('information receipt required')
+        if finding['basis']=='observed_harness_return' and not set(refs)&set(binding['harness_returns']):raise ValueError('harness return required')
         if finding['basis']=='unknown' and finding['finding']!='unknown':raise ValueError('unknown basis cannot establish finding')
         for key in ('explanation','limitations'):
             if not isinstance(finding[key],str) or not 0<len(finding[key].encode())<=text_limit:raise ValueError('bounded review text')

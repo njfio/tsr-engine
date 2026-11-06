@@ -27,6 +27,43 @@ class Recovery(BrowserAdapter):
   # A completed callback restart is a new request only if explicitly requested;
   # inspect durable result/recovery without dispatching or mutating its outputs.
   before=self.ledger.path.read_bytes();b=(ordinary.Adapter if plain else m.Adapter)(a.root,self.a,self.c,self.ledger,wire,worker=a.worker);self.assertEqual(b.read()[2],a.read()[2]);self.assertEqual(before,self.ledger.path.read_bytes())
+ def test_misplaced_alternative_field_names_where_it_belongs(self):
+  a=self.configure();calls=[];original=self.transport
+  edit={'edits':[{'path':'app.js','old_text':'// no longer current','new_text':'// revision'}],'rationale':'Authored fixture'}
+  def wire(body,timeout):
+   calls.append(body);result=original(body,timeout)
+   result['value']={'alternatives':[edit],'expectation':{'anticipated':'authored'}} if len(calls)==1 else {'abstain':'Authored fresh decision'}
+   return result
+  a.injected_transport=wire
+  a.proposal(a.native('request',None))
+  correction=json.loads(calls[1]['messages'][-1]['content'])['protocol_correction']['native_structure']
+  self.assertEqual((correction['path'],correction['code']),('$','unsupported_field'))
+  self.assertEqual(correction['valid_locations'],['$.alternatives[0].expectation'])
+  self.assertEqual(correction['allowed_fields'],['alternatives'])
+ def test_misplaced_fields_diagnostic_covers_known_fields_only(self):
+  a=self.configure()
+  def locations(value):
+   with self.assertRaises(ValueError) as caught:a.check_proposal_shape(value)
+   return json.loads(caught.exception.diagnostic.split('TSR_SHAPE_V1:',1)[1]).get('valid_locations')
+  self.assertEqual(locations({'edits':[],'rationale':'r','expectation':{}}),['$.alternatives[0].edits','$.alternatives[0].expectation','$.alternatives[0].rationale'])
+  self.assertEqual(locations({'alternatives':[{}],'rationale':'r','invented':1}),['$.alternatives[0].rationale'])
+  self.assertIsNone(locations({'alternatives':[{}],'invented':1}))
+  a.check_proposal_shape({'alternatives':[{'edits':[],'rationale':'r','expectation':{}}]})
+ def test_correction_replay_shows_the_failed_response_only_when_admitted(self):
+  edit={'edits':[{'path':'app.js','old_text':'// no longer current','new_text':'// revision'}],'rationale':'Authored fixture'}
+  failed={'alternatives':[edit],'expectation':{'anticipated':'authored'}}
+  for admitted in (True,False):
+   self.a=m.admission(self.root/('adapter-'+str(admitted)),self.a['origin'],self.c.cli('project','config'),self.manifest,self.a['expires_at'],max_decisions=4,max_executions=2,correction_allowance=2,feedback_cycle={'version':'authorized-feedback-cycle@v1','authorization_id':'authored-recovery','max_continuations':4},correction_replay=admitted)
+   a=m.Adapter(self.root/('adapter-'+str(admitted)),self.a,self.c,self.ledger,self.transport,worker=lambda v:None);calls=[];original=self.transport
+   def wire(body,timeout):
+    calls.append(body);result=original(body,timeout)
+    result['value']=copy.deepcopy(failed) if len(calls)==1 else {'abstain':'Authored fresh decision'}
+    return result
+   a.injected_transport=wire;a.proposal(a.native('request',None))
+   self.assertEqual(calls[1]['messages'][:-1],calls[0]['messages'])
+   correction=json.loads(calls[1]['messages'][-1]['content'])['protocol_correction']
+   if admitted:self.assertEqual(correction['failed_response'],failed)
+   else:self.assertNotIn('failed_response',correction)
  def test_interrupted_format_recovers_exact_feedback(self):
   for _ in (None,):
    a=self.configure(True);calls=[];original=self.transport

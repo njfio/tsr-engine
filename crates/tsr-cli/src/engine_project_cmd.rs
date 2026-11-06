@@ -21,6 +21,24 @@ pub enum ProjectCmd {
         #[arg(long)]
         file: PathBuf,
     },
+    /// Records one reading (spec #10). The controller calls this after the reading turn.
+    ReadingRecord {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Records what came back from you, the operator. It may name a reading or none.
+    Return {
+        #[arg(long)]
+        text: String,
+        #[arg(long)]
+        reading: Option<String>,
+    },
+    /// Records a controller-recorded check as a return.
+    CheckReturn {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    ReadingView,
     PursuitContext,
     PursuitReflectionApply {
         #[arg(long)]
@@ -435,6 +453,22 @@ fn write_operator_file(directory: &Path, path: &Path, value: &serde_json::Value)
     file.sync_all()?;
     Ok(())
 }
+/// Six text fields at the domain bound, JSON-escaped, fit well inside this.
+fn reading_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(262145)
+        .read_to_end(&mut bytes)?;
+    ensure!(bytes.len() <= 262144, "reading input exceeds bound");
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn print_project(value: serde_json::Value) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
 fn acceptance_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     use std::io::Read;
     let mut bytes = Vec::new();
@@ -658,6 +692,27 @@ pub fn run(directory: &Path, command: ProjectCmd) -> Result<()> {
             );
             Ok(())
         }
+        ProjectCmd::ReadingRecord { file } => {
+            print_project(Engine::open(directory)?.project_reading_record(reading_file(&file)?)?)
+        }
+        ProjectCmd::Return { text, reading } => {
+            let reading = reading
+                .map(|id| serde_json::from_value(serde_json::Value::String(id)))
+                .transpose()?;
+            print_project(Engine::open(directory)?.project_return_record(
+                tsr_domain::Source::Operator,
+                tsr_domain::ReadingReturn {
+                    reading,
+                    text,
+                    evidence: None,
+                },
+            )?)
+        }
+        ProjectCmd::CheckReturn { file } => print_project(
+            Engine::open(directory)?
+                .project_return_record(tsr_domain::Source::Rules, reading_file(&file)?)?,
+        ),
+        ProjectCmd::ReadingView => print_project(Engine::open(directory)?.project_reading_view()?),
         ProjectCmd::PursuitReflectionApply { file } => {
             println!(
                 "{}",

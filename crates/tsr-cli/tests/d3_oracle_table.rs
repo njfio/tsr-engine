@@ -153,6 +153,9 @@ fn fixture(name: &str) -> Fixture {
             suite.to_str().unwrap(),
         ])
         .env("PATH", &path_env)
+        // Each row owns its store: parallel rows sharing the default `.tsr/tsr.db`
+        // under one working directory collide with "database is locked".
+        .env("TSR_DB", scratch.join("events.sqlite"))
         .output()
         .expect("run tsr corpus mine");
     assert!(
@@ -249,6 +252,7 @@ fn run_row(fx: &Fixture, edit: serde_json::Value) -> String {
             workspace().join("profiles/default.toml").to_str().unwrap(),
         ])
         .env("PATH", &fx.path_env)
+        .env("TSR_DB", fx.scratch.join("events.sqlite"))
         .output()
         .expect("run tsr task run");
     let stdout = String::from_utf8_lossy(&run.stdout);

@@ -805,6 +805,99 @@ pub enum Observation {
     },
 }
 
+/// The most one reading field or one return may hold, in bytes (spec #10).
+pub const READING_TEXT_MAX: usize = 4096;
+
+/// What a reading expects to come back, and from whom. Nothing checks whether it is any good.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedReturn {
+    pub from: String,
+    pub what: String,
+}
+
+/// One reading, written before any work is proposed (spec #10). Generated free text; it grants
+/// nothing, is never a preference, and is never an acceptance aim.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reading {
+    pub want: Option<String>,
+    pub sense: Option<String>,
+    pub belief: Option<String>,
+    pub expect: Option<String>,
+    pub expected_return: Option<ExpectedReturn>,
+    pub falsifier: Option<String>,
+    /// How far apart the want, hunch, belief and expectation seem now (spec #12, the notebook of
+    /// ch. 21). Optional and omitted when absent, so readings without it keep their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<String>,
+}
+
+impl Reading {
+    /// Mechanical checks only; none reads meaning.
+    pub fn validate(&self) -> Result<(), ContractError> {
+        let expected = self.expected_return.as_ref();
+        for text in [
+            &self.want,
+            &self.sense,
+            &self.belief,
+            &self.expect,
+            &self.falsifier,
+            &self.gap,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(expected.into_iter().flat_map(|r| [&r.from, &r.what]))
+        {
+            bounded_reading_text(text)?;
+        }
+        if self.want.is_some() && (expected.is_none() || self.falsifier.is_none()) {
+            return Err(ContractError::Invalid(
+                "a want goes out with an expected return and a falsifier",
+            ));
+        }
+        if self.want.is_none() && (expected.is_some() || self.falsifier.is_some()) {
+            return Err(ContractError::Invalid(
+                "an expected return and a falsifier go out with a want",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn is_blank(&self) -> bool {
+        self.want.is_none()
+            && self.sense.is_none()
+            && self.belief.is_none()
+            && self.expect.is_none()
+    }
+}
+
+fn bounded_reading_text(text: &str) -> Result<(), ContractError> {
+    if text.trim().is_empty() || text.len() > READING_TEXT_MAX {
+        return Err(ContractError::Invalid(
+            "reading text is null, or non-blank within the byte bound",
+        ));
+    }
+    Ok(())
+}
+
+/// What actually came back, from the operator or a controller-recorded check. The event's source
+/// says which. It may name a reading or none, and it carries no verdict.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadingReturn {
+    pub reading: Option<EventId>,
+    pub text: String,
+    pub evidence: Option<Hash>,
+}
+
+impl ReadingReturn {
+    /// Mechanical checks only; none reads meaning.
+    pub fn validate(&self) -> Result<(), ContractError> {
+        bounded_reading_text(&self.text)
+    }
+}
+
 /// The kinds of event the log holds. Candidates recorded are possibilities; only `Committed` and
 /// `Executed` are occurrences in the event-structure sense (B6).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -856,6 +949,14 @@ pub enum EventKind {
     },
     ProvisionalExpanded {
         expansion: ProvisionalExpansion,
+    },
+    /// One reading (spec #10). Recorded by the controller with `Source::Rules`; the text is generated.
+    Reading {
+        reading: Reading,
+    },
+    /// A return beside a reading (spec #10). Its event source is `Operator` or `Rules`.
+    Returned {
+        returned: ReadingReturn,
     },
     ReviewedProvisionalPreferenceAdmission {
         review: Box<ProvisionalPreferenceReview>,

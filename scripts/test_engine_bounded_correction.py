@@ -61,4 +61,18 @@ class Capacity(unittest.TestCase):
     self.assertEqual(b.events(),[])
   with tempfile.TemporaryDirectory() as t:
    with self.assertRaises(ValueError):m.Budget(Path(t)/'j',{},2).feedback('proposal','same-source',r,'x')
+ def test_correction_replay_is_admitted_shape_only_proposal_only(self):
+  import json
+  value={'alternatives':[{}],'expectation':{}}
+  diag='Error: TSR_SHAPE_V1:'+json.dumps({'version':'native-shape-diagnostic@v1','code':'unsupported_field','path':'$'})
+  settled={'status':'settled','usd':1}
+  with tempfile.TemporaryDirectory() as root:
+   def budget(name,replay):return m.Budget(Path(root)/name,{'version':'browser-project-cycle-adapter@v7',**({'correction_replay':True} if replay else {})},5)
+   f=budget('a',True).feedback('proposal','s',{'receipt':settled,'value':value},'r1',native_diagnostic=diag)
+   self.assertEqual(f['failed_response'],value);self.assertIn('failed_response',f['instruction'])
+   self.assertNotIn('failed_response',budget('b',False).feedback('proposal','s',{'receipt':settled,'value':value},'r1',native_diagnostic=diag))
+   self.assertNotIn('failed_response',budget('c',True).feedback('criterion_x_review','s',{'receipt':settled,'value':value},'r1',native_diagnostic=diag))
+   malformed={'receipt':{**settled,'parse_location':'content','error_code':'malformed_json'},'value':None}
+   self.assertNotIn('failed_response',budget('d',True).feedback('proposal','s',malformed,'r1'))
+   with self.assertRaises(ValueError):m.Budget(Path(root)/'e',{'version':'browser-project-cycle-adapter@v7','correction_replay':1},5)
 if __name__=='__main__':unittest.main()

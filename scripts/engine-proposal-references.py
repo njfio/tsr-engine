@@ -61,6 +61,22 @@ def _relation(value,parents,revisions):
 LEGACY_HOST_BRIEF_SHA256='2981fccadca017caf54f89bcf2562b45940d88ebfe75735f43e4f6abbe198a7b'
 LEGACY_OPTIONS='Edits, initial or developed relationships, supported Contrast-derived preferences, retention and abstention are valid.'
 
+# Forms that develop meaning rather than keep or change the artifact.
+DEVELOPMENT_FORMS=('relationship_initial','relationship_revision','meaning_development','provisional_preference','contrast_preference','success_preference')
+RETAIN_PLAIN='Keep the current artifact and meaning unchanged for this checkpoint: {retain:reason}. Not fulfillment or acceptance.'
+RETAIN_WITH_DECISION=('Keep the current artifact and meaning unchanged for this checkpoint: {retain:reason}. '
+    'You may add development_declined:reason, naming development forms listed here that you considered; '
+    'it is recorded with the retention when given and never required. Not fulfillment or acceptance.')
+
+def retain_form(forms):
+    """Retention costs the same decision as development whenever development is offered."""
+    return RETAIN_WITH_DECISION if any(k in forms for k in DEVELOPMENT_FORMS) else RETAIN_PLAIN
+
+def development_forms(summary):
+    """Development forms a wire choice_summary offers (empty when absent or not a dict)."""
+    forms=summary.get('forms') if isinstance(summary,dict) else None
+    return sorted(k for k in (forms or {}) if k in DEVELOPMENT_FORMS)
+
 def choice_summary(value,request,references):
     """Describe proposal forms, not a second semantic admission decision."""
     contracts=value['response_contracts'];relation=value['relational_contract'];unavailable={};eligible={}
@@ -84,12 +100,24 @@ def choice_summary(value,request,references):
                 if eligible[kind]:forms[kind]='Propose a new identity from one of eligible_identity_aspirations and the named evidence. Independent semantic review remains required; structural eligibility is not admission or authority.'
                 else:unavailable[kind]='No current reviewed aspiration passes this identity route’s contributor, evidence-scope and duplicate checks. Existing evidence remains available; a relationship alone cannot supply missing success or Contrast.'
     if 'deliberation' in contracts:forms['deliberation']='Artifact retention (or an edit during ordinary choice) plus optional independently reviewed development; explicit dependency and separate review/admission.'
+    # Say why a development route is absent, so a run without one is diagnosable
+    # rather than read as the model declining it.
+    unavailable_development={}
+    if not value.get('advisory_reconsideration'):
+        parents=relation['parent_ids']
+        if 'provisional_preference' not in forms:
+            unavailable_development['provisional_preference']=('No current contributor (parents) is supplied, so generated wanting has nothing to connect to.' if not parents
+                else 'The provisional wanting contract is not supplied for this request.')
+        if 'relationship_initial' not in forms and 'relational' in contracts:
+            unavailable_development['relationship_initial']='A relationship needs at least two current contributors; '+str(len(parents))+' supplied.'
+    if 'retain' in forms:forms['retain']=retain_form(forms)
     # Native guidance is already a source-bound fold. Merely having a reference
     # is not proof of contributor coverage, novelty or identity admissibility.
     current={x['admission'] for x in request['coding']['relational'].get('guidance',[])}
     return {'version':'browser-choice-summary@v1','source_request_sha256':references['request_sha256'],
             'forms':dict(sorted(forms.items())),
             'eligible_identity_aspirations':eligible,'unavailable_identity_routes':unavailable,
+            'unavailable_development_routes':unavailable_development,
             'reviewed_aspiration_references':[a for a,i in references['revisions'].items() if i in current],
             'interpretation':'Available proposal forms, not approved outcomes or a ranking. Artifact changes, reviewed meaning/relationship development and new identity are distinct. Success permits consideration, never requires novelty. Retention and uncertainty remain valid. Native validation and independent review are authoritative.'}
 
@@ -163,12 +191,23 @@ def project(context,request):
         value['brief_presentation']={'original_sha256':LEGACY_HOST_BRIEF_SHA256,'source':'exact frozen host-authored synthetic noticeboard brief','replaced_host_capability_text':LEGACY_OPTIONS,'original_preserved':'unchanged admitted origin; no task facts, user wording, evidence or obligations removed'}
     return value
 
+DECLINED_PREFIX='\n\nDevelopment considered and declined: '
+
+def fold_retention(value):
+    """Native retention keeps one reason string; the development decision travels inside it, labeled."""
+    for key in ('retain','development_declined'):
+        if not isinstance(value.get(key),str) or not value[key].strip():raise ValueError(key+' reason required')
+    if DECLINED_PREFIX in value['retain']:raise ValueError('retention reason must not forge the development decision label')
+    return value['retain']+DECLINED_PREFIX+value['development_declined']
+
 def expand(value,references,request):
     """Translate exact typed aliases, then inject only request-determined metadata."""
     if references!=catalog(request):raise ValueError('stale or substituted proposal reference catalog')
     if isinstance(value,dict) and set(value)=={'deliberation'}:
         spec=importlib.util.spec_from_file_location('deliberation_refs',Path(__file__).with_name('engine-browser-deliberation.py'));helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
         return helper.expand(value,references,request,expand)
+    if isinstance(value,dict) and set(value)=={'retain','development_declined'}:
+        return {'retain':fold_retention(value)}
     result=copy.deepcopy(value)
     if not isinstance(result,dict):return result  # Shape diagnostics belong to native contract.
     if set(result)&{'protocol','state_root','attention_binding','binding'}:raise ValueError('model supplied host proposal metadata')

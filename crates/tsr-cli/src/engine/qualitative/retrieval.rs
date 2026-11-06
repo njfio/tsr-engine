@@ -46,8 +46,10 @@ pub struct RetrievedRecord {
 fn hash<T: Serialize>(v: &T) -> Result<Hash> {
     Ok(Hash::of(&[&serde_json::to_vec(v)?]))
 }
+/// The configured corpus, if any, and the receipts recorded against it.
+pub(super) type RetrievalState = (Option<Manifest>, Vec<(EventId, Receipt)>);
 impl Engine {
-    pub(super) fn retrieval_state(&self) -> Result<(Option<Manifest>, Vec<(EventId, Receipt)>)> {
+    pub(super) fn retrieval_state(&self) -> Result<RetrievalState> {
         let mut manifest = None;
         let mut receipts = vec![];
         for (id, e) in self.qualitative_entries()? {

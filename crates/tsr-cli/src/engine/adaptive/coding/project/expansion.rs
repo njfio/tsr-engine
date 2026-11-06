@@ -24,6 +24,9 @@ pub struct Admission {
     pub proposal: EventId,
     pub review: cycle::Review,
 }
+/// A derived preference, the preferences it depends on, and its supporting records.
+type DerivedCandidate = (Preference, Vec<PreferenceId>, Vec<Value>);
+
 impl Engine {
     /// Only the current authenticated semantic return's explicitly unmet public
     /// criteria can cross. Unknown findings and surprise cannot supply Contrast.
@@ -227,7 +230,7 @@ impl Engine {
         &self,
         ctx: &Value,
         aspiration_id: EventId,
-    ) -> Result<Option<(Preference, Vec<PreferenceId>, Vec<Value>)>> {
+    ) -> Result<Option<DerivedCandidate>> {
         let aspiration = ctx["guidance"]
             .as_array()
             .context("guidance")?

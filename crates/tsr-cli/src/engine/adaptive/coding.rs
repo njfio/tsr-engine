@@ -847,6 +847,8 @@ impl Engine {
                 1 << 20
             } else if project_spec.as_ref().is_some_and(|s| s.cargo) && index >= 2 {
                 16 * 1024
+            } else if project_spec.as_ref().is_some_and(|s| s.browser) && index >= 2 {
+                project::browser::OUTPUT_BOUND
             } else {
                 4096
             };
@@ -934,7 +936,7 @@ impl Engine {
                     stdout: String::from_utf8_lossy(
                         &run.stdout[..run.stdout.len().min(
                             if project_spec.as_ref().is_some_and(|s| s.browser) {
-                                4000
+                                project::browser::STDOUT_BYTES
                             } else {
                                 256
                             },
@@ -945,7 +947,7 @@ impl Engine {
                         .into_owned(),
                     abbreviated: run.stdout.len()
                         > if project_spec.as_ref().is_some_and(|s| s.browser) {
-                            4000
+                            project::browser::STDOUT_BYTES
                         } else {
                             256
                         }

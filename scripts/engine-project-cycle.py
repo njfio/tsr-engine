@@ -37,7 +37,9 @@ class Cycle:
     row=staticmethod(d.Driver.row)
     read=d.Driver.read
     append=d.Driver.append
-    def __init__(self,root,admission,native,proposal,review,*,hook=None):
+    def __init__(self,root,admission,native,proposal,review,*,hook=None,reading=None,abilities=None):
+        self.reading=reading
+        self.abilities=abilities
         self.root=Path(root).absolute();self.admission=admission;self.fixture=admission.get('advisory_profile')=='local-fixture-only@v1';self.continuous=admission.get('version') in ('local-project-cycle@v3','local-project-cycle@v4','local-project-cycle@v5');self.objective=admission.get('version')=='local-project-cycle@v5';self.information=admission.get('version')=='local-project-cycle@v4'
         # Local introspection is not the provider export. V4 has seven bounded decisions.
         self.local_context_limit=8388608 if admission.get('local_source_profile')=='browser-scoped-source@v1' else 131072 if self.information or self.objective else 32768
@@ -72,7 +74,7 @@ class Cycle:
             if a.get('local_source_profile')!='browser-scoped-source@v1' or a['input_tokens']!=capacity.INPUT_TOKENS:raise ValueError('unadmitted context allocation')
         if 'max_review_rejections' in a:
             fields.add('max_review_rejections')
-            if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['max_review_rejections']) is not int or not 0<=a['max_review_rejections']<=3:raise ValueError('unadmitted rejection recovery')
+            if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['max_review_rejections']) is not int or not 0<=a['max_review_rejections']<=(12 if a.get('unlimited_policy_sha256') else 3):raise ValueError('unadmitted rejection recovery')
         if 'completion_tokens' in a:
             fields.add('completion_tokens')
             if a.get('local_source_profile')!='browser-scoped-source@v1' or type(a['completion_tokens']) is not int or a['completion_tokens']!=32768:raise ValueError('unadmitted completion allocation')
@@ -130,7 +132,7 @@ class Cycle:
         # Internal callback protocol only. Model dictionaries are never exceptions.
         return (isinstance(value,dict) and set(value)=={'version','status','reason'}
                 and value['version']=='known-stage-stop@v1'
-                and value['status'] in ('capacity_stop','technical_stop')
+                and value['status'] in ('capacity_stop','technical_stop','spend_cap')
                 and isinstance(value['reason'],str) and bool(value['reason'].strip())
                 and len(value['reason'].encode())<=2048)
     def close_stage_stop(self,record):
@@ -187,7 +189,12 @@ class Cycle:
             spec=self.read()[2].get('callback_input_'+intent['name'])
             if spec is not None:
                 self.native('provider_recovery_ready',None)
-                value=self.invoke_model_stage(spec)
+                try:value=self.invoke_model_stage(spec)
+                except Exception as error:
+                    # The cap stops recovery as it stops anything else: nothing was sent, so the stage closes as a stop.
+                    stop=getattr(error,'known_stage_stop',None)
+                    if not self.valid_stage_stop(stop) or stop['status']!='spend_cap':raise
+                    value={'known_stage_stop':{**stop,'stage':intent['name']}}
                 stage_receipts.Receipts(self.root,self.admission).save(rows,intent,value)
                 receipt={'value':value}
         if receipt is None:raise d.Blocked('uncertain effect; successful stage receipt missing; no retry')
@@ -242,7 +249,7 @@ class Cycle:
         if after.get('branch')!='reconsider' or before.get('reconsideration')!=after.get('reconsideration'):raise d.Blocked('advisory evidence/lineage drift')
     @staticmethod
     def decision_count(done):
-        return sum(k.startswith(('advance_','rejected_proposal_')) or (k.startswith('reconsider_') and k.endswith('_acknowledge')) for k in done)
+        return sum(k.startswith(('advance_','rejected_proposal_','ability_')) or (k.startswith('reconsider_') and k.endswith('_acknowledge')) for k in done)
     def reconsider(self,current):
         index=str(self.decision_count(self.read()[2]));prefix=('reconsider_'+index+'_') if self.continuous else 'advisory_'
         if feedback_policy.reached(int(index),self.admission['max_decisions']):return self.terminal('decision_budget')
@@ -434,6 +441,9 @@ class Cycle:
             _,pending,done=self.read()
             if pending:raise d.Blocked('uncertain effect; reconcile without retry')
             if 'terminal' in done:return done['terminal']
+            # Read from the journal, so a crash between the need and this stop can't turn into another paid reading.
+            unmet=[v['need'] for k,v in done.items() if k.startswith('ability_need_') and v['unmet']]
+            if unmet:return self.terminal('need_to_operator',need=unmet[0],desires_remain_open=True,acceptance_recorded=False)
             refreshed=self.context_refresh(done)
             if refreshed is not None:return refreshed
             if 'stage_receipts' in self.admission:
@@ -499,6 +509,7 @@ class Cycle:
                     continue
             if branch in ('stop','idle','blocked','reconcile','review_required'):
                 return self.terminal(branch,native_reason=current.get('reason'))
+            if branch=='reconsider' and self.reading is not None:return self.terminal('reading_reconsideration_not_offered',desires_remain_open=True,acceptance_recorded=False)
             if branch=='reconsider':
                 if not self.continuous and self.admission.get('advisory_profile')!='local-fixture-only@v1':return self.terminal('review_required',native_reason='advisory_reconsideration_not_admitted')
                 result=self.reconsider(current)
@@ -559,11 +570,22 @@ class Cycle:
             if branch!='propose':raise ValueError('unsupported native branch')
             completed=self.decision_count(done);index=str(completed)
             if feedback_policy.reached(completed,self.admission['max_decisions']):return self.terminal('decision_budget')
+            if self.abilities is not None and self.abilities.spend_reached():return self.terminal('spend_cap',desires_remain_open=True,acceptance_recorded=False)
+            # The reading comes first and changes the state root, so the request is captured after it.
+            if self.reading is not None and 'reading_'+index not in done:
+                self.op('reading_'+index,lambda:self.reading(current))
+                continue
             captured=self.op('request_'+index,lambda:current)
             self.same_source(captured,current)
             if len(e.canonical(captured))>self.local_context_limit:raise d.Blocked('proposal context bound')
             proposed=self.model_stage('proposal_'+index,'proposal',captured)
             response=proposed['response']
+            if self.abilities is not None and set(response)=={'need'}:
+                self.op('ability_need_'+index,lambda:self.abilities.ability_need(response['need']))
+                continue
+            if self.abilities is not None and set(response)=={'play'}:
+                self.op('ability_play_'+index,lambda:self.abilities.ability_play(response['play']))
+                continue
             if set(response)=={'deliberation'}:
                 result=self.deliberation(index,response,captured)
                 if result is not None:return result
@@ -572,6 +594,9 @@ class Cycle:
                 reason=response['retain']
                 if self.admission.get('local_source_profile')!='browser-scoped-source@v1' or not isinstance(reason,str) or not 0<len(reason.encode())<=131072:raise ValueError('bounded browser retention required')
                 fresh=self.current();self.same_source(captured,fresh)
+                if self.abilities is not None and self.abilities.ability_new_evidence(list(self.read()[2])):
+                    self.op('ability_retain_'+index,lambda:{'reason':reason})
+                    continue
                 return self.terminal('proposal_retention',reason=reason,state_root=fresh['state_root'],source_snapshot=fresh['source_snapshot'],desires_remain_open=True,acceptance_recorded=False)
             if set(response)=={'abstain'}:
                 reason=response['abstain']
@@ -582,6 +607,11 @@ class Cycle:
             if fresh['branch']!='propose':raise d.Blocked('native branch changed')
             preview=self.native('preview',{'response':response});self.same_source(fresh,preview['cycle'])
             if len(e.canonical({'context':fresh,'response':response}))>self.local_context_limit:raise d.Blocked('review context bound')
+            if self.abilities is not None and self.abilities.spend_reached():return self.terminal('spend_cap',desires_remain_open=True,acceptance_recorded=False)
+            # Try before review (spec #12): each proposed edit runs on a candidate copy first, so the
+            # reviewer and the next reading see what came back. Changes no source or native state.
+            if self.abilities is not None and getattr(self.abilities,'tsr_process_opted',lambda:False)():
+                self.op('trial_run_'+index,lambda:self.abilities.ability_try(response))
             reviewed=self.model_stage('review_'+index,'review',{**fresh,'response_digest':preview['response_digest']},response)
             judgment=reviewed['judgment']
             if set(judgment)!={'decision','reviewer','generator','response_digest'} or judgment['decision'] not in ('approve','reject','unknown','abstain'):raise ValueError('review judgment shape')
@@ -591,6 +621,8 @@ class Cycle:
                 latest=self.current();self.same_source(captured,latest)
                 if judgment['response_digest']!=preview['response_digest']:raise d.Blocked('rejected response digest drift')
                 self.op('rejected_proposal_'+index,lambda:self.native('reject_proposal',{'source':latest,'response':response,'judgment':judgment}))
+                if self.abilities is not None and getattr(self.abilities,'tsr_process_opted',lambda:False)():
+                    self.op('try_returns_'+index,lambda:self.abilities.record_try_returns())
                 continue
             if judgment['decision']!='approve':return self.terminal('review_'+judgment['decision'])
             final_preview=self.native('preview',{'response':response});latest=final_preview['cycle'];self.same_source(captured,latest)

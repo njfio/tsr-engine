@@ -76,7 +76,7 @@ impl Engine {
                 Entry::ExplorationPolicy { policy } => Some((id, policy)),
                 _ => None,
             })
-            .last())
+            .next_back())
     }
     pub fn qualitative_set_exploration_policy(&self, policy: ExplorationPolicy) -> Result<EventId> {
         self.write(|| {
@@ -209,7 +209,7 @@ impl Engine {
             }
         }
         q["information_questions"] = json!(inquiries);
-        q["information_routes"] = json!(self.qualitative_entries()?.iter().filter_map(|(id,e)|matches!(e,Entry::InquiryProposed{..}).then(||json!({"inquiry":id,"route":self.qualitative_inquiry_route(*id).unwrap_or_else(|_|InquiryRoute::Waiting{reason:"unreviewed_or_stale_inquiry".into()})}))).collect::<Vec<_>>());
+        q["information_routes"] = json!(self.qualitative_entries()?.iter().filter(|(_,e)|matches!(e,Entry::InquiryProposed{..})).map(|(id,_)|json!({"inquiry":id,"route":self.qualitative_inquiry_route(*id).unwrap_or_else(|_|InquiryRoute::Waiting{reason:"unreviewed_or_stale_inquiry".into()})})).collect::<Vec<_>>());
         q["information_contract"] = json!({
             "meaning":"Question is an attributed unresolved intention, not a new desire or authorization. Native attention is lineage/scope ordering, not topic importance. User focus is supplied only by the local operator; ordinary model inquiries use model_proposed; policy-bound self-directed exploration uses engine_exploration, never user_supplied. Review must assess whether this origin is appropriate, not just trust the label.",
             "read":"Use retrieve-for-question with an admitted current inquiry and a pre-read relevance hypothesis. Reading proves content access only; reflection separately assesses support. Abstention remains legitimate.",

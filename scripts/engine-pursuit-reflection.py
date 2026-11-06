@@ -15,11 +15,17 @@ GENERATION_SYSTEM='Interpret this frozen expectation using every relevant suppli
 
 DEVELOPMENT_SYSTEM=GENERATION_SYSTEM.replace('Do not invent desires, player preferences, observations or authority.', 'Do not invent user preferences, observations, fulfillment or authority. Optional possibilities may suggest generated wanting with explicit uncertainty; only the separate ordinary proposal and independent admission path can make it a native desire.')
 
+# v4: the same evidence rules, without framing an empty answer as the expected one.
+# Possibilities and a revised expectation are weighed on the evidence like retaining both.
+BALANCED_SYSTEM=DEVELOPMENT_SYSTEM.replace('A null revised_expectation retains it; an empty possibilities array is valid.',
+ 'Revise the expectation when the return bears on it, and offer possibilities, including possible generated wanting, when the return or source suggests them; a null revised_expectation or an empty possibilities array is equally valid when nothing does. Unknown is not unmet.')
+assert BALANCED_SYSTEM!=DEVELOPMENT_SYSTEM
 def capture_system(capture):
  version=capture.get('contract_version','qualitative-evidence@v1')
  if version=='qualitative-evidence@v1':return LEGACY_GENERATION_SYSTEM
  if version=='qualitative-evidence@v2':return GENERATION_SYSTEM
  if version=='qualitative-evidence@v3':return DEVELOPMENT_SYSTEM
+ if version=='qualitative-evidence@v4':return BALANCED_SYSTEM
  raise ValueError('unknown reflection capture contract')
 
 def project(adapter,request,context):
@@ -127,7 +133,7 @@ def reflect(adapter):
   interpretation={'type':'object','required':['conclusion','observed','revised_expectation','uncertainty','contrast','possibilities'],'properties':{'conclusion':{'enum':['supported','contradicted','unknown']},'observed':text,'revised_expectation':{'oneOf':[text,{'type':'null'}]},'uncertainty':text,'contrast':text,'possibilities':{'type':'array','maxItems':4,'items':text}}}
   schema['properties']['interpretation']=interpretation
   payload={'binding':binding,'criteria':copy.deepcopy(CRITERIA),'evidence':evidence,'response_schema':schema}
-  capture=adapter.op(capture_name,lambda:{'contract_version':'qualitative-evidence@v3','expectation':h['frozen'],'return':h['return'],'snapshot':request['snapshot'],'payload':payload})
+  capture=adapter.op(capture_name,lambda:{'contract_version':'qualitative-evidence@v4','expectation':h['frozen'],'return':h['return'],'snapshot':request['snapshot'],'payload':payload})
  if capture['expectation']!=h['frozen'] or capture['return']!=h['return'] or capture['snapshot']!=request['snapshot']:raise ValueError('frozen reflection input source drift')
  payload=capture['payload'];evidence=payload['evidence'];binding=payload['binding'];criteria=payload['criteria'];generation_system=capture_system(capture)
  generated=_stage(adapter,'pursuit_interpretation_'+identity,generation_system,payload,interpretation_only=True)

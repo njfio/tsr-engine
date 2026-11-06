@@ -79,7 +79,7 @@ def proposal_shape(v,text_limit=512):
 def review_schema(binding,criteria,*,compact=False,text_limit=512):
  text={'type':'string','minLength':1,'maxLength':text_limit}
  finding={'type':'object','required':['finding','basis','evidence','explanation','limitations'],'properties':{
-  'finding':{'enum':['met','not_met','unknown']},'basis':{'enum':['static_source','observed_test_receipt','unknown']+(['observed_information_receipt'] if 'information_receipts' in binding else [])},
+  'finding':{'enum':['met','not_met','unknown']},'basis':{'enum':['static_source','observed_test_receipt','unknown']+(['observed_information_receipt'] if 'information_receipts' in binding else [])+(['observed_harness_return'] if 'harness_returns' in binding else [])},
   'evidence':{'type':'array','minItems':1,'maxItems':len(binding['evidence_ids']),'uniqueItems':True,'items':{'enum':binding['evidence_ids']}},'explanation':text,'limitations':text}}
  schema={'type':'object','required':['review_id','verdict','findings'],'properties':{
   'review_id':{'const':binding['review_id']},'verdict':{'enum':['accept','reject','unknown','abstain']},
